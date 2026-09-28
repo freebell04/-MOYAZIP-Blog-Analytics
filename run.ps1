@@ -27,10 +27,22 @@ if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
   Stop-WithMessage "[!] Node.js가 설치되어 있지 않아요.`n    https://nodejs.org 에서 LTS 버전을 설치한 뒤 다시 실행해주세요."
 }
 
+# 업데이트한 뒤에도 "이 폴더"에서 띄운 예전 서버가 안 꺼지고 남아 있으면, 포트가 열려 있다는
+# 이유만으로 "이미 잘 떠 있다"고 보고 그 낡은 서버를 열어주면 안 된다 (업데이트가 반영 안 된 것처럼 보임).
+# 이 폴더의 서버라면 정리하고 새 코드로 다시 띄운다.
+$mine = Get-CimInstance Win32_Process -Filter "Name='node.exe'" -ErrorAction SilentlyContinue |
+  Where-Object { $_.CommandLine -and $_.CommandLine.ToLower().Contains($PSScriptRoot.ToLower()) -and $_.CommandLine -like "*server.js*" }
+if ($mine) {
+  Write-Host "이 폴더의 이전 서버가 아직 떠 있어서 정리하고 새로 시작할게요..."
+  $mine | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+  Start-Sleep -Milliseconds 800
+}
+
 if (Test-PortOpen 3300) {
-  Write-Host "이미 실행 중이에요! 브라우저를 열게요."
+  Write-Host "포트 3300을 다른 프로그램(또는 이 프로그램을 풀어둔 다른 폴더)이 쓰고 있어요."
+  Write-Host "이 프로그램을 여러 폴더에 압축 풀어두셨다면, 하나만 남기고 나머지는 꺼주세요."
   Start-Process "http://localhost:3300"
-  Read-Host "이 창은 닫아도 돼요 (Enter)"
+  Read-Host "확인했으면 Enter를 눌러 창을 닫으세요"
   exit 0
 }
 
@@ -89,7 +101,9 @@ while ($true) {
   Write-Host " 네이버 블로그 도우미 실행 중 (이 창을 닫으면 꺼져요)"
   Write-Host " http://localhost:3300"
   Write-Host "============================================"
-  node server.js
+  # "server.js"처럼 상대경로로 실행하면 나중에 Windows가 기억하는 실행 명령어에 폴더 경로가 안 남아서,
+  # 다음에 켤 때 "이 폴더의 예전 서버"인지 구분할 방법이 없어진다. 항상 절대경로로 실행한다.
+  node "$PSScriptRoot\server.js"
   # 처음 설정을 저장하면 프로그램이 스스로 다시 시작해요 (종료 코드 3)
   if ($LASTEXITCODE -ne 3) { break }
 }
