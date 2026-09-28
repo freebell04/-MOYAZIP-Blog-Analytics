@@ -1,0 +1,671 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>이웃 소통</title>
+<link rel="stylesheet" href="style.css" />
+<style>
+  body { max-width: 1000px; }
+  .toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .toolbar select, .search { padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; font: inherit; background: #fff; }
+  .toolbar select { width: auto; }
+  .error { color: var(--danger); }
+
+  /* 오늘 체크리스트 */
+  .checklist { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin: 16px 0 0; }
+  .check { text-align: left; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px;
+           cursor: pointer; font: inherit; color: var(--ink-soft); font-size: 13px; transition: border-color .15s; }
+  .check:hover { border-color: var(--green); }
+  .check b { display: block; font-size: 24px; color: var(--ink); line-height: 1.2; }
+  .check.alert b { color: var(--danger); }
+  .check.good b { color: var(--green-dark); }
+  .check small { display: block; margin-top: 2px; }
+
+  /* 탭 */
+  .tabs { display: flex; gap: 6px; margin: 22px 0 12px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  .tab { border: 0; background: none; font: inherit; font-size: 15px; padding: 10px 14px; cursor: pointer; color: var(--ink-soft);
+         border-bottom: 3px solid transparent; margin-bottom: -1px; white-space: nowrap; }
+  .tab.on { color: var(--ink); font-weight: 700; border-bottom-color: var(--green); }
+  .tab .cnt { display: inline-block; min-width: 20px; padding: 0 6px; border-radius: 999px; background: var(--bg); font-size: 12px; margin-left: 4px; }
+  .tab.on .cnt { background: var(--green-tint); color: var(--green-dark); }
+  .panel[hidden] { display: none; }
+
+  .panel-bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
+  .chips { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+  .chip { border: 1px solid var(--line); background: #fff; border-radius: 999px; padding: 5px 12px; font: inherit; font-size: 13px; cursor: pointer; color: var(--ink-soft); }
+  .chip.on { background: var(--green-tint); border-color: var(--green); color: var(--green-dark); font-weight: 700; }
+  .spacer { flex: 1; }
+  .progress { height: 8px; background: var(--bg); border-radius: 999px; overflow: hidden; margin: 4px 0 14px; }
+  .progress > div { height: 100%; background: var(--green); transition: width .3s; }
+  .progress-label { font-size: 13px; color: var(--ink-soft); }
+
+  .list { display: flex; flex-direction: column; gap: 8px; }
+  .row { display: grid; grid-template-columns: 40px 1fr 230px; gap: 12px; align-items: start;
+         background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; }
+  .row.done { opacity: 0.5; }
+  .avatar { width: 40px; height: 40px; border-radius: 50%; background: var(--green-tint); object-fit: cover;
+            display: flex; align-items: center; justify-content: center; color: var(--green-dark); font-weight: 700; }
+  .name { font-weight: 700; color: var(--ink); text-decoration: none; }
+  .name:hover { text-decoration: underline; }
+  .badge { display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 999px; margin-left: 6px; vertical-align: 2px; white-space: nowrap; }
+  .b-mutual { background: var(--green-tint); color: var(--green-dark); }
+  .b-iAdded { background: #e8f1ff; color: #2463c9; }
+  .b-addedMe { background: #fff3e0; color: #b25e00; }
+  .b-none { background: var(--bg); color: var(--ink-soft); }
+  .meta { font-size: 13px; color: var(--ink-soft); margin: 2px 0 4px; }
+  .meta b { color: var(--ink); }
+  .snippet { font-size: 13px; color: var(--ink); background: var(--bg); border-radius: 8px; padding: 6px 10px; margin-top: 4px;
+             overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .snippet small, .muted { color: var(--ink-soft); }
+  details { font-size: 13px; color: var(--ink-soft); margin-top: 4px; }
+  details summary { cursor: pointer; }
+  details ul { margin: 6px 0 0; padding-left: 18px; }
+  details .snippet { white-space: normal; }
+  .side { display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+  .side .post-title { color: var(--ink); overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  .side .btn, .act { text-align: center; text-decoration: none; padding: 7px 12px; font-size: 13px; }
+  .side label { display: flex; gap: 6px; align-items: center; color: var(--ink-soft); cursor: pointer; }
+  .side label input { width: auto; }
+  .empty { background: var(--card); border: 1px dashed var(--line); border-radius: var(--radius); padding: 28px; text-align: center; color: var(--ink-soft); }
+
+  /* 표 */
+  .table-wrap { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { padding: 10px 12px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: middle; }
+  th { color: var(--ink-soft); font-weight: 500; background: #fafafa; white-space: nowrap; cursor: pointer; user-select: none; }
+  th.num, td.num { text-align: right; }
+  tr:last-child td { border-bottom: 0; }
+  tr.hl td { background: #fffaf0; }
+  .who { display: flex; gap: 10px; align-items: center; min-width: 170px; }
+  .who .avatar { width: 30px; height: 30px; font-size: 12px; flex-shrink: 0; }
+  .who small { display: block; color: var(--ink-soft); max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .clip { max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .zero { color: #c4c4c4; }
+  .warn { color: var(--danger); font-weight: 700; }
+
+  .cats { display: flex; gap: 6px; flex-wrap: wrap; }
+  .cat { border: 1px solid var(--line); background: #fff; border-radius: 12px; padding: 8px 12px; font: inherit; font-size: 14px; cursor: pointer; color: var(--ink-soft); }
+  .cat .cnt { display: inline-block; min-width: 20px; margin-left: 6px; padding: 0 6px; border-radius: 999px; background: var(--bg); font-size: 12px; text-align: center; }
+  .cat.on { background: var(--green); border-color: var(--green); color: #fff; font-weight: 700; }
+  .cat.on .cnt { background: rgba(255,255,255,.25); color: #fff; }
+  .b-new { background: #eafbe7; color: #2f8a1f; }
+  .sugg-wrap { margin-top: 6px; }
+  .sugg-wrap > summary { color: #9a6200; font-weight: 500; }
+  .sugg { margin-top: 8px; border: 1px solid #ffe2a8; background: #fffbf0; border-radius: 10px; padding: 8px 10px; }
+  .sugg-head { font-size: 12px; font-weight: 700; color: #9a6200; margin-bottom: 4px; display: flex; gap: 6px; align-items: baseline; flex-wrap: wrap; }
+  .sugg-head small { font-weight: 400; color: var(--ink-soft); }
+  .sugg-item { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; padding: 4px 0; border-top: 1px dashed #f3dfb5; }
+  .sugg-item:first-of-type { border-top: 0; }
+  .sugg-item span { flex: 1; }
+  .copy-btn { border: 1px solid var(--line); background: #fff; border-radius: 6px; font: inherit; font-size: 12px; padding: 2px 8px; cursor: pointer; white-space: nowrap; }
+  .link-btn { border: 0; background: none; color: var(--ink-soft); font: inherit; font-size: 12px; text-decoration: underline; cursor: pointer; margin-left: auto; }
+  .ai-tag { font-size: 10px; background: #9a6200; color: #fff; border-radius: 4px; padding: 0 5px; }
+  .like-btn { background: #fff; border: 1px solid #f2b8c6; color: #d6336c; }
+  .like-btn:hover:not(:disabled) { background: #fff0f4; }
+  .like-btn.on { background: #fff0f4; opacity: 1; }
+  .like-btn.waiting { background: #fff0f4; animation: pulse 1.4s ease-in-out infinite; }
+  @keyframes pulse { 50% { box-shadow: 0 0 0 4px rgba(214, 51, 108, .15); } }
+  .chip:disabled, .link-btn:disabled { opacity: .5; cursor: not-allowed; }
+
+  @media (max-width: 760px) {
+    .checklist { grid-template-columns: repeat(2, 1fr); }
+    .row { grid-template-columns: 40px 1fr; }
+    .side { grid-column: 1 / -1; }
+  }
+</style>
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-badge">N</span>
+    <div>
+      <h1>이웃 소통</h1>
+      <p class="subtitle">답방 · 댓글 답글 · 이웃 관리를 한 화면에서</p>
+    </div>
+  </div>
+  <div class="login-box">
+    <button id="login-btn" class="btn btn-outline" hidden>네이버 로그인</button>
+    <a href="stats.html" class="btn btn-outline">성과 통계</a>
+    <a href="index.html" class="btn btn-outline">← 글쓰기 스튜디오</a>
+  </div>
+</header>
+
+<section class="card">
+  <div class="toolbar">
+    <select id="days">
+      <option value="1">최근 24시간</option>
+      <option value="3">최근 3일</option>
+      <option value="7" selected>최근 7일</option>
+      <option value="14">최근 14일</option>
+    </select>
+    <button id="refresh-btn" class="btn btn-primary">새로 불러오기</button>
+    <div id="status" class="status-line" style="margin:0"></div>
+  </div>
+  <div id="checklist" class="checklist"></div>
+</section>
+
+<nav class="tabs" id="tabs">
+  <button class="tab on" data-tab="visit">🏃 답방 <span class="cnt" id="cnt-visit">0</span></button>
+  <button class="tab" data-tab="reply">💬 댓글 답글 <span class="cnt" id="cnt-reply">0</span></button>
+  <button class="tab" data-tab="neighbors">👥 이웃 목록 <span class="cnt" id="cnt-neighbors">0</span></button>
+  <button class="tab" data-tab="posts">📝 내 글 현황 <span class="cnt" id="cnt-posts">0</span></button>
+</nav>
+
+<!-- 답방 -->
+<section class="panel" id="panel-visit">
+  <div class="cats" id="visit-cats"></div>
+  <p class="hint" id="visit-hint" style="margin:8px 0 10px"></p>
+  <div class="progress-label" id="visit-progress-label"></div>
+  <div class="progress"><div id="visit-progress" style="width:0"></div></div>
+  <div class="panel-bar">
+    <div class="chips" data-key="visitFilter">
+      <button class="chip on" data-v="todo">할 일</button>
+      <button class="chip" data-v="done">완료</button>
+      <button class="chip" data-v="all">모두</button>
+    </div>
+    <div class="chips" data-key="visitSort">
+      <button class="chip on" data-v="score">추천 순</button>
+      <button class="chip" data-v="recent">최근 순</button>
+    </div>
+    <span class="spacer"></span>
+    <button class="chip" data-suggest-all="visit">✨ 이 목록 AI 추천 만들기</button>
+  </div>
+  <div class="list" id="visit-list"></div>
+</section>
+
+<!-- 댓글 답글 -->
+<section class="panel" id="panel-reply" hidden>
+  <p class="hint" style="margin-bottom:12px">내 글에 달린 댓글 중 <b>마지막 말이 상대방</b>인 것들이에요. 답글을 달고 [새로 불러오기]하면 목록에서 빠져요.
+    <button class="chip" data-suggest-all="reply" style="margin-left:6px">✨ 추천 답글 모두 AI로 만들기</button></p>
+  <div class="list" id="reply-list"></div>
+</section>
+
+<!-- 이웃 목록 -->
+<section class="panel" id="panel-neighbors" hidden>
+  <div class="panel-bar">
+    <div class="chips" data-key="nbFilter">
+      <button class="chip on" data-v="all">전체</button>
+      <button class="chip" data-v="mutual">서로이웃</button>
+      <button class="chip" data-v="iAdded">내가 추가한</button>
+      <button class="chip" data-v="suggest">맞이웃 추천</button>
+      <button class="chip" data-v="quiet">조용한 이웃</button>
+      <button class="chip" data-v="fresh">새 글 올라옴</button>
+    </div>
+    <span class="spacer"></span>
+    <input id="nb-search" class="search" placeholder="닉네임·블로그명 검색" style="width:180px" />
+  </div>
+  <p class="hint" id="nb-hint" style="margin-bottom:10px"></p>
+  <div class="table-wrap">
+    <table>
+      <thead><tr>
+        <th data-sort="name">이웃</th>
+        <th data-sort="rel">관계</th>
+        <th data-sort="likes" class="num">❤️ 공감</th>
+        <th data-sort="comments" class="num">💬 댓글</th>
+        <th data-sort="latest">최신 글</th>
+        <th></th>
+      </tr></thead>
+      <tbody id="nb-body"></tbody>
+    </table>
+  </div>
+</section>
+
+<!-- 내 글 현황 -->
+<section class="panel" id="panel-posts" hidden>
+  <p class="hint" id="posts-hint" style="margin-bottom:10px"></p>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>글</th><th>작성일</th><th class="num">❤️ 공감</th><th class="num">💬 댓글</th><th class="num">답글 필요</th><th></th></tr></thead>
+      <tbody id="posts-body"></tbody>
+    </table>
+  </div>
+</section>
+
+<script src="suggest-templates.js"></script>
+<script>
+const $ = (s) => document.querySelector(s);
+const BLOG = "https://blog.naver.com/";
+let S = {
+  data: null, visited: {}, blogId: "", suggestions: {}, suggestState: {}, liked: {}, likeWatch: {},
+  tab: "visit", visitCat: "realtime", visitFilter: "todo", visitSort: "score",
+  nbFilter: "all", nbSearch: "", nbSort: "activity", nbDir: -1,
+};
+try { S.tab = localStorage.getItem("nb.tab") || S.tab; } catch {}
+let pollTimer = null;
+let autoRefreshTried = false;
+let lastRenderSig = "";
+S.openSugg = {}; // 펼쳐둔 추천 댓글 (다시 그려도 유지)
+try { S.visitCat = localStorage.getItem("nb.cat") || S.visitCat; } catch {}
+document.addEventListener("toggle", (e) => {
+  const d = e.target;
+  if (d.dataset && d.dataset.suggKey) S.openSugg[d.dataset.suggKey] = d.open;
+}, true);
+
+// ---------- utils ----------
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const ts = (d) => (d ? new Date(d).getTime() || 0 : 0);
+const md = (d) => { const t = new Date(d); return isNaN(t) ? "" : `${t.getMonth() + 1}/${t.getDate()}`; };
+const ago = (d) => {
+  if (!d) return "";
+  const m = (Date.now() - ts(d)) / 60000;
+  if (m < 1) return "방금";
+  if (m < 60) return `${Math.floor(m)}분 전`;
+  const h = m / 60;
+  if (h < 24) return `${Math.floor(h)}시간 전`;
+  return `${Math.floor(h / 24)}일 전`;
+};
+const avatar = (p) => p.profileImage
+  ? `<img class="avatar" src="${esc(p.profileImage)}" alt="" referrerpolicy="no-referrer" loading="lazy">`
+  : `<div class="avatar">${esc((p.nickname || p.blogId || "?").slice(0, 1))}</div>`;
+const REL = { mutual: "서로이웃", iAdded: "이웃", addedMe: "나를 추가", none: "이웃 아님" };
+const relBadge = (r) => r ? `<span class="badge b-${r}">${REL[r]}</span>` : "";
+const relOf = (n) => n.mutual ? "mutual" : n.iAdded ? "iAdded" : n.addedMe ? "addedMe" : "none";
+const lastActivity = (p) => Math.max(0, ...[...p.likes, ...p.comments].map((x) => ts(x.date)));
+const isDone = (p) => p.latestPost ? S.visited[p.blogId] === p.latestPost.logNo : !!S.visited[p.blogId];
+const isFresh = (post) => post && Date.now() - ts(post.date) < 24 * 3600000;
+
+// ---------- data ----------
+async function load() {
+  const r = await fetch("/api/neighbors").then((r) => r.json());
+  if (r.data && !r.data.unanswered) r.data = null; // 예전 형식 캐시는 버리고 새로 불러온다
+  Object.assign(S, { data: r.data, visited: r.visited, blogId: r.blogId, suggestions: r.suggestions || {}, suggestState: r.suggestState || {}, liked: r.liked || {}, likeWatch: r.likeWatch || {} });
+  if (r.data && !r.state.running) $("#days").value = String(r.data.days);
+  renderStatus(r.state);
+  // 폴링 때마다 다시 그리면 펼쳐둔 "자세히"가 접히므로, 내용이 바뀌었을 때만 그린다
+  const sig = JSON.stringify([r.data && r.data.updatedAt, r.visited, r.suggestions, r.liked, r.likeWatch, r.suggestState && r.suggestState.running]);
+  if (sig !== lastRenderSig) { lastRenderSig = sig; render(); }
+  const watching = Object.values(r.likeWatch || {}).some((w) => w.status === "opening" || w.status === "watching");
+  const busy = r.state.running || (r.suggestState && r.suggestState.running) || watching;
+  if (busy && !pollTimer) pollTimer = setInterval(load, 1500);
+  if (!busy && pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+  // 마지막 업데이트가 6시간 넘게 지났으면 열 때 자동으로 새로 불러오기
+  if (!autoRefreshTried && !r.state.running && !r.state.error && (!r.data || Date.now() - ts(r.data.updatedAt) > 6 * 3600000)) {
+    autoRefreshTried = true;
+    startRefresh();
+  }
+}
+
+async function startRefresh() {
+  await fetch("/api/neighbors/refresh", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ days: $("#days").value }),
+  });
+  load();
+}
+
+function renderStatus(s) {
+  const el = $("#status");
+  $("#refresh-btn").disabled = s.running;
+  $("#login-btn").hidden = !s.needLogin;
+  if (s.running) el.textContent = "⏳ " + s.progress;
+  else if (s.error) el.innerHTML = `<span class="error">⚠ ${esc(s.error)}</span>`;
+  else if (S.suggestState.running) el.textContent = "💡 " + S.suggestState.progress;
+  else if (S.suggestState.error) el.innerHTML = `<span class="error">⚠ 추천 문구 만들기 실패: ${esc(S.suggestState.error)}</span>`;
+  else if (S.data) el.textContent = `업데이트 ${ago(S.data.updatedAt)} · 최근 ${S.data.days}일 동안 받은 공감·댓글 기준`;
+  else el.textContent = "아직 불러온 데이터가 없어요.";
+}
+
+// ---------- render ----------
+function render() {
+  const d = S.data;
+  document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("on", t.dataset.tab === S.tab));
+  document.querySelectorAll(".panel").forEach((p) => (p.hidden = p.id !== "panel-" + S.tab));
+  if (!d) { $("#checklist").innerHTML = ""; return; }
+
+  const neighbors = d.neighbors || [];
+  const todo = d.people.filter((p) => !isDone(p));
+  const suggest = neighbors.filter((n) => n.addedMe && !n.iAdded);
+  const suggestActive = suggest.filter((n) => n.likeCount + n.commentCount > 0);
+  const daysSincePost = d.lastPostDate ? Math.floor((Date.now() - ts(d.lastPostDate)) / 86400000) : null;
+
+  $("#cnt-visit").textContent = todo.length;
+  $("#cnt-reply").textContent = d.unanswered.length;
+  $("#cnt-neighbors").textContent = neighbors.length;
+  $("#cnt-posts").textContent = d.posts.length;
+
+  $("#checklist").innerHTML = [
+    check("visit:gave", todo.length ? "alert" : "good", todo.length ? `${todo.length}명` : "끝!", "답방 남음", `${d.people.length}명 중`),
+    check("reply", d.unanswered.length ? "alert" : "good", `${d.unanswered.length}개`, "답글 안 단 댓글", d.unanswered.length ? "먼저 챙기면 좋아요" : "모두 답했어요"),
+    check("neighbors:suggest", suggestActive.length ? "alert" : "", `${suggestActive.length}명`, "맞이웃 추천", `나를 추가하고 소통 중 (전체 ${suggest.length})`),
+    check("posts", daysSincePost >= 3 ? "alert" : "good", daysSincePost === null ? "-" : daysSincePost === 0 ? "오늘" : `${daysSincePost}일 전`, "마지막 글", `최근 30일 ${d.posts.length}개`),
+  ].join("");
+
+  renderVisit(); renderReply(); renderNeighbors(); renderPosts();
+}
+
+const visitKey = (p) => `visit:${p.blogId}:${p.latestPost.logNo}`;
+const replyKey = (u) => `reply:${u.logNo}:${u.blogId}:${u.date}`;
+
+function suggestBlock(key, label, fallback) {
+  const ai = S.suggestions[key];
+  const list = ai || fallback;
+  const busy = S.suggestState.running;
+  return `<div class="sugg">
+    <div class="sugg-head">💡 ${label} ${ai ? "<span class=\"ai-tag\">AI</span>" : ""}<small>예시예요. 내 말로 고쳐서 써주세요</small>
+      <button class="link-btn" data-suggest="${esc(key)}" ${ai ? "data-force=\"1\"" : ""} ${busy ? "disabled" : ""}>${ai ? "AI로 다시 만들기" : "✨ AI로 만들기"}</button></div>
+    ${list.map((t) => `<div class="sugg-item"><span>${esc(t)}</span><button class="copy-btn" data-copy="${esc(t)}">복사</button></div>`).join("")}
+  </div>`;
+}
+
+function likeButton(blogId, logNo) {
+  const k = `${blogId}:${logNo}`;
+  const w = S.likeWatch[k] || {};
+  if (S.liked[k]) return `<button class="btn like-btn on" disabled>❤️ 공감 완료${w.status === "already" ? " (이미 공감함)" : ""}</button>`;
+  const btn = (label, extra = "") =>
+    `<button class="btn like-btn ${extra}" data-like="${esc(blogId)}" data-logno="${esc(logNo)}">${label}</button>`;
+  if (w.status === "opening") return `<button class="btn like-btn" disabled>창 여는 중...</button>`;
+  if (w.status === "watching") return btn("👀 새 창에서 하트를 눌러주세요", "waiting") + `<small class="muted">누르면 여기서 자동으로 체크돼요 (클릭하면 창을 다시 앞으로)</small>`;
+  const note =
+    w.status === "closed" ? `<small class="muted">공감 없이 창을 닫았어요</small>`
+    : w.status === "timeout" ? `<small class="muted">15분이 지나 확인을 멈췄어요</small>`
+    : w.status === "error" ? `<small class="error">⚠ ${esc(w.error || "창을 열지 못했어요")}</small>`
+    : "";
+  return btn("🤍 공감하러 가기 (새 창)") + note;
+}
+
+async function doLike(blogId, logNo) {
+  S.likeWatch[`${blogId}:${logNo}`] = { status: "opening" };
+  renderVisit();
+  await fetch("/api/neighbors/like", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ blogId, logNo }),
+  });
+  load(); // 이후 공감 여부는 폴링으로 반영
+}
+
+const check = (target, cls, big, label, sub) =>
+  `<button class="check ${cls}" data-goto="${target}">${esc(label)}<b>${esc(big)}</b><small>${esc(sub)}</small></button>`;
+
+// 답방 대상 = 이웃 목록 전체(내가 추가 + 나를 추가 + 최근 소통한 사람)에 공감·댓글 기록을 합친 것
+function visitPool() {
+  const people = Object.fromEntries(S.data.people.map((p) => [p.blogId, p]));
+  const src = S.data.neighbors && S.data.neighbors.length ? S.data.neighbors : S.data.people;
+  return src.map((n) => {
+    const p = people[n.blogId] || {};
+    return {
+      ...n,
+      nickname: n.nickname || p.nickname || n.blogId,
+      profileImage: n.profileImage || p.profileImage || "",
+      relation: n.mutual !== undefined ? relOf(n) : p.relation,
+      likes: p.likes || [],
+      comments: p.comments || [],
+      latestPost: n.latestPost || p.latestPost || null,
+      isNew: !!n.firstSeen && Date.now() - ts(n.firstSeen) < 7 * 86400000,
+    };
+  });
+}
+
+const isNeighbor = (p) => p.relation === "mutual" || p.relation === "iAdded";
+const gave = (p) => p.likes.length + p.comments.length > 0;
+const VISIT_CATS = [
+  { v: "realtime", label: "⚡ 실시간 이웃 답방", hint: "내 이웃 중 최근 24시간 안에 새 글을 올린 사람이에요. 새 글에 빨리 가는 게 제일 반가워요.",
+    test: (p) => isNeighbor(p) && isFresh(p.latestPost) },
+  { v: "new", label: "🌱 새로운 친구 답방", hint: "최근 7일 사이에 새로 나를 이웃추가했거나 처음 소통한 사람이에요. 첫 답방이 인상에 남아요.",
+    test: (p) => p.isNew },
+  { v: "gave", label: "💌 공감·댓글 준 사람", hint: "최근 공감이나 댓글을 남겨준 사람이에요. 받은 만큼 돌려주기!",
+    test: gave },
+  { v: "other", label: "🙋 이웃 아닌 사람", hint: "아직 내가 이웃추가하지 않은 사람이에요 (나를 추가한 사람, 공감·댓글만 남긴 사람). 답방하면서 이웃추가도 고민해보세요.",
+    test: (p) => !isNeighbor(p) },
+  { v: "neighbor", label: "👥 이웃", hint: "내가 추가한 이웃과 서로이웃이에요.", test: isNeighbor },
+  { v: "all", label: "전체", hint: "이웃 목록에 있는 모든 사람이에요.", test: () => true },
+];
+const currentCat = () => VISIT_CATS.find((c) => c.v === S.visitCat) || VISIT_CATS[0];
+
+// 추천 순: 나한테 준 만큼 + 새 친구 + 방금 올라온 새 글.  최근 순: 최신 글이 최근인 순
+const visitScore = (p) => p.likes.length + p.comments.length * 2 + (p.isNew ? 3 : 0) + (isFresh(p.latestPost) ? 1 : 0);
+const postTime = (p) => ts(p.latestPost && p.latestPost.date);
+
+function renderVisit() {
+  const pool = visitPool();
+  const cat = currentCat();
+
+  $("#visit-cats").innerHTML = VISIT_CATS.map((c) => {
+    const left = pool.filter(c.test).filter((p) => !isDone(p)).length;
+    return `<button class="cat ${c.v === cat.v ? "on" : ""}" data-cat="${c.v}">${c.label}<span class="cnt">${left}</span></button>`;
+  }).join("");
+  $("#visit-hint").textContent = cat.hint;
+
+  const inCat = pool.filter(cat.test);
+  const doneN = inCat.filter(isDone).length;
+  $("#visit-progress").style.width = inCat.length ? `${(doneN / inCat.length) * 100}%` : "0";
+  $("#visit-progress-label").textContent = `${cat.label.replace(/^\S+\s/, "")} · ${doneN} / ${inCat.length}명 답방 완료`;
+
+  const list = inCat.filter((p) => S.visitFilter === "all" || (S.visitFilter === "done") === isDone(p));
+  list.sort((a, b) =>
+    S.visitSort === "recent" ? postTime(b) - postTime(a) : visitScore(b) - visitScore(a) || postTime(b) - postTime(a));
+
+  $("#visit-list").innerHTML = list.length ? list.map(visitRow).join("")
+    : `<div class="empty">${S.visitFilter === "todo" && inCat.length ? "여기는 답방 다 했어요 🎉" : "해당하는 사람이 없어요."}</div>`;
+}
+
+function visitRow(p) {
+  const done = isDone(p);
+  const comments = p.comments.slice().sort((a, b) => ts(b.date) - ts(a.date));
+  const cmt = (c) => `<div class="snippet">${c.text.trim() ? esc(c.text) : "<small>(스티커/이미지)</small>"} <small>— ${esc(c.title)} · ${md(c.date)}</small></div>`;
+  const lp = p.latestPost;
+  const key = lp ? visitKey(p) : "";
+  const meta = gave(p)
+    ? `❤️ <b>${p.likes.length}</b> · 💬 <b>${p.comments.length}</b> · ${ago(lastActivity(p))}`
+    : `<span class="muted">${esc(p.blogName || "")}</span>`;
+  return `<div class="row ${done ? "done" : ""}">
+    ${avatar(p)}
+    <div style="min-width:0">
+      <a class="name" href="${BLOG}${esc(p.blogId)}" target="_blank" rel="noopener">${esc(p.nickname)}</a>${relBadge(p.relation)}${p.isNew ? `<span class="badge b-new">🌱 새 친구</span>` : ""}
+      <div class="meta">${meta}</div>
+      ${comments[0] ? cmt(comments[0]) : ""}
+      ${comments.length > 1 || p.likes.length ? `<details><summary>자세히 (댓글 ${comments.length} · 공감한 글 ${p.likes.length})</summary>
+        ${comments.slice(1).map(cmt).join("")}
+        ${p.likes.length ? `<ul>${p.likes.map((l) => `<li>❤️ ${esc(l.title)} <small>${md(l.date)}</small></li>`).join("")}</ul>` : ""}
+      </details>` : ""}
+      ${lp ? `<details class="sugg-wrap" data-sugg-key="${esc(key)}" ${S.openSugg[key] ? "open" : ""}><summary>💡 추천 댓글 보기</summary>${suggestBlock(key, "추천 댓글", templateVisit(p))}</details>` : ""}
+    </div>
+    <div class="side">
+      ${lp ? `<div class="post-title">${isFresh(lp) ? "🆕 " : "📝 "}${esc(lp.title)}</div><small class="muted">${ago(lp.date)}</small>
+             ${likeButton(p.blogId, lp.logNo)}
+             <a class="btn btn-primary" href="https://m.blog.naver.com/CommentList.naver?blogId=${esc(p.blogId)}&logNo=${esc(lp.logNo)}" target="_blank" rel="noopener" data-go="${esc(p.blogId)}">💬 댓글 쓰러 가기</a>
+             <a class="btn btn-outline" href="${esc(lp.link)}" target="_blank" rel="noopener" data-go="${esc(p.blogId)}">글 읽으러 가기</a>`
+           : `<small class="muted">최신 글을 못 찾았어요</small>
+             <a class="btn btn-outline" href="${BLOG}${esc(p.blogId)}" target="_blank" rel="noopener" data-go="${esc(p.blogId)}">블로그 가기</a>`}
+      <label><input type="checkbox" data-done="${esc(p.blogId)}" ${done ? "checked" : ""}> 답방 완료</label>
+    </div>
+  </div>`;
+}
+
+function renderReply() {
+  const list = S.data.unanswered;
+  const people = Object.fromEntries(S.data.people.map((p) => [p.blogId, p]));
+  $("#reply-list").innerHTML = list.length ? list.map((u) => {
+    const p = people[u.blogId] || { blogId: u.blogId, nickname: u.nickname };
+    return `<div class="row">
+      ${avatar(p)}
+      <div style="min-width:0">
+        <a class="name" href="${BLOG}${esc(u.blogId)}" target="_blank" rel="noopener">${esc(u.nickname)}</a>${relBadge(p.relation)}
+        <div class="meta">${esc(u.title)} · ${ago(u.date)}</div>
+        ${u.rootText != null ? `<div class="snippet"><small>원댓글: ${esc(u.rootText) || "(스티커)"}</small></div>` : ""}
+        <div class="snippet" style="white-space:normal">${u.text.trim() ? esc(u.text) : "<small>(스티커/이미지)</small>"}</div>
+        ${suggestBlock(replyKey(u), "추천 답글", templateReply(u))}
+      </div>
+      <div class="side">
+        <a class="btn btn-primary" href="https://m.blog.naver.com/CommentList.naver?blogId=${esc(S.blogId)}&logNo=${esc(u.logNo)}" target="_blank" rel="noopener">답글 달러 가기</a>
+        <a class="btn btn-outline act" href="${BLOG}${esc(S.blogId)}/${esc(u.logNo)}" target="_blank" rel="noopener">글 보기</a>
+      </div>
+    </div>`;
+  }).join("") : `<div class="empty">답글 안 단 댓글이 없어요 👍</div>`;
+}
+
+function renderNeighbors() {
+  const all = S.data.neighbors || [];
+  const q = S.nbSearch.trim().toLowerCase();
+  const F = {
+    all: () => true,
+    mutual: (n) => n.mutual,
+    iAdded: (n) => n.iAdded,
+    suggest: (n) => n.addedMe && !n.iAdded,
+    quiet: (n) => n.iAdded && n.likeCount + n.commentCount === 0,
+    fresh: (n) => isFresh(n.latestPost),
+  };
+  const HINT = {
+    all: `내가 추가한 이웃 ${all.filter((n) => n.iAdded).length}명 · 나를 추가한 사람 ${all.filter((n) => n.addedMe).length}명 · 이웃은 아니지만 최근 소통한 사람을 모두 합친 목록이에요.`,
+    mutual: "서로이웃이에요.",
+    iAdded: "내가 이웃으로 추가한 사람이에요.",
+    suggest: "나를 이웃추가했는데 나는 아직 추가하지 않은 사람이에요. 공감이나 댓글을 준 사람이 위에 떠요.",
+    quiet: `내가 추가한 이웃 중 최근 ${S.data.days}일 동안 공감이나 댓글이 없었던 사람이에요. 먼저 찾아가 보거나 이웃을 정리할 때 참고하세요.`,
+    fresh: "최근 24시간 안에 새 글을 올린 이웃이에요 (내가 추가한 이웃 + 최근 소통한 사람 기준).",
+  };
+  $("#nb-hint").textContent = HINT[S.nbFilter];
+
+  const key = {
+    name: (n) => (n.nickname || "").toLowerCase(),
+    rel: (n) => ["mutual", "iAdded", "addedMe", "none"].indexOf(relOf(n)),
+    likes: (n) => n.likeCount,
+    comments: (n) => n.commentCount,
+    latest: (n) => ts(n.latestPost && n.latestPost.date),
+    activity: (n) => n.likeCount + n.commentCount * 2 + (n.addedMe && !n.iAdded ? 0.5 : 0),
+  }[S.nbSort];
+  const list = all
+    .filter(F[S.nbFilter])
+    .filter((n) => !q || (n.nickname || "").toLowerCase().includes(q) || (n.blogName || "").toLowerCase().includes(q) || n.blogId.includes(q))
+    .sort((a, b) => { const x = key(a), y = key(b); return (x > y ? 1 : x < y ? -1 : 0) * S.nbDir || b.likeCount - a.likeCount; });
+
+  $("#nb-body").innerHTML = list.length ? list.map((n) => {
+    const suggest = n.addedMe && !n.iAdded;
+    const lp = n.latestPost;
+    return `<tr class="${suggest && n.likeCount + n.commentCount > 0 ? "hl" : ""}">
+      <td><div class="who">${avatar(n)}<div><a class="name" href="${BLOG}${esc(n.blogId)}" target="_blank" rel="noopener">${esc(n.nickname || n.blogId)}</a><small>${esc(n.blogName || "")}</small></div></div></td>
+      <td>${relBadge(relOf(n))}</td>
+      <td class="num">${n.likeCount || `<span class="zero">0</span>`}</td>
+      <td class="num">${n.commentCount || `<span class="zero">0</span>`}</td>
+      <td>${lp ? `<a class="clip" style="display:block;color:inherit" href="${esc(lp.link)}" target="_blank" rel="noopener">${isFresh(lp) ? "🆕 " : ""}${esc(lp.title)}</a><small class="muted">${ago(lp.date)}</small>` : `<span class="zero">-</span>`}</td>
+      <td>${suggest ? `<a class="btn btn-outline act" href="${BLOG}${esc(n.blogId)}" target="_blank" rel="noopener">이웃추가 하러</a>` : ""}</td>
+    </tr>`;
+  }).join("") : `<tr><td colspan="6" class="muted" style="text-align:center;padding:24px">해당하는 이웃이 없어요.</td></tr>`;
+}
+
+function renderPosts() {
+  const posts = S.data.posts;
+  const week = posts.filter((p) => Date.now() - ts(p.date) < 7 * 86400000).length;
+  $("#posts-hint").textContent = `최근 30일 글 ${posts.length}개 · 이번 주(7일) ${week}개. 공감·댓글 수는 기간과 상관없이 글 전체 누적이에요.`;
+  $("#posts-body").innerHTML = posts.map((p) => `<tr>
+    <td><a class="clip" style="display:block;color:inherit;max-width:420px" href="${esc(p.link)}" target="_blank" rel="noopener">${esc(p.title)}</a></td>
+    <td class="muted" style="white-space:nowrap">${md(p.date)} <small>(${ago(p.date)})</small></td>
+    <td class="num">${p.likeCount}</td>
+    <td class="num">${p.commentCount}</td>
+    <td class="num">${p.unansweredCount ? `<span class="warn">${p.unansweredCount}</span>` : `<span class="zero">0</span>`}</td>
+    <td>${p.unansweredCount ? `<a class="btn btn-outline act" href="https://m.blog.naver.com/CommentList.naver?blogId=${esc(S.blogId)}&logNo=${esc(p.logNo)}" target="_blank" rel="noopener">댓글 보기</a>` : ""}</td>
+  </tr>`).join("");
+}
+
+// ---------- events ----------
+async function markVisited(blogId, done) {
+  const p = visitPool().find((x) => x.blogId === blogId);
+  const r = await fetch("/api/neighbors/visited", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ blogId, logNo: p && p.latestPost ? p.latestPost.logNo : "", done }),
+  }).then((r) => r.json());
+  S.visited = r.visited;
+  render();
+}
+
+function setTab(tab) {
+  S.tab = tab;
+  try { localStorage.setItem("nb.tab", tab); } catch {}
+  render();
+}
+
+document.addEventListener("click", (e) => {
+  const tab = e.target.closest(".tab");
+  if (tab) return setTab(tab.dataset.tab);
+
+  const go = e.target.closest("[data-goto]");
+  if (go) {
+    const [tab, filter] = go.dataset.goto.split(":");
+    if (filter && tab === "visit") S.visitCat = filter;
+    else if (filter) { S.nbFilter = filter; syncChips(); }
+    return setTab(tab);
+  }
+
+  const chip = e.target.closest(".chips .chip");
+  if (chip) {
+    S[chip.parentElement.dataset.key] = chip.dataset.v;
+    syncChips();
+    return render();
+  }
+
+  const th = e.target.closest("th[data-sort]");
+  if (th) {
+    S.nbDir = S.nbSort === th.dataset.sort ? -S.nbDir : th.dataset.sort === "name" ? 1 : -1;
+    S.nbSort = th.dataset.sort;
+    return renderNeighbors();
+  }
+
+  const cat = e.target.closest("[data-cat]");
+  if (cat) {
+    S.visitCat = cat.dataset.cat;
+    try { localStorage.setItem("nb.cat", S.visitCat); } catch {}
+    return renderVisit();
+  }
+
+  const likeEl = e.target.closest("[data-like]");
+  if (likeEl) return doLike(likeEl.dataset.like, likeEl.dataset.logno);
+
+  const one = e.target.closest("[data-suggest]");
+  if (one) return requestSuggest([one.dataset.suggest], !!one.dataset.force);
+
+  const allBtn = e.target.closest("[data-suggest-all]");
+  if (allBtn) {
+    const keys = allBtn.dataset.suggestAll === "visit"
+      ? visitPool().filter(currentCat().test).filter((p) => !isDone(p) && p.latestPost).map(visitKey)
+      : S.data.unanswered.map(replyKey);
+    return requestSuggest(keys.filter((k) => !S.suggestions[k]), false);
+  }
+
+  const copy = e.target.closest("[data-copy]");
+  if (copy) {
+    navigator.clipboard.writeText(copy.dataset.copy).then(() => {
+      copy.textContent = "복사됨 ✓";
+      setTimeout(() => (copy.textContent = "복사"), 1500);
+    });
+    return;
+  }
+
+  // 답방 링크는 새 탭으로 열리고, 목록에서는 완료로 표시 (잘못 눌렀으면 체크 해제)
+  const visit = e.target.closest("[data-go]");
+  if (visit) setTimeout(() => markVisited(visit.dataset.go, true), 300);
+});
+
+async function requestSuggest(keys, force) {
+  if (!keys.length) { $("#status").textContent = "💡 이미 모두 만들어져 있어요."; return; }
+  const r = await fetch("/api/neighbors/suggest", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ keys, force }),
+  }).then((r) => r.json());
+  if (r.error) { $("#status").innerHTML = `<span class="error">⚠ ${esc(r.error)}</span>`; return; }
+  load();
+}
+
+function syncChips() {
+  document.querySelectorAll(".chips").forEach((g) =>
+    g.querySelectorAll(".chip").forEach((c) => c.classList.toggle("on", S[g.dataset.key] === c.dataset.v)));
+}
+
+document.addEventListener("change", (e) => {
+  if (e.target.dataset.done) markVisited(e.target.dataset.done, e.target.checked);
+});
+$("#nb-search").addEventListener("input", (e) => { S.nbSearch = e.target.value; renderNeighbors(); });
+$("#refresh-btn").addEventListener("click", startRefresh);
+$("#login-btn").addEventListener("click", async () => {
+  $("#login-btn").disabled = true;
+  $("#status").textContent = "크롬 창에서 네이버에 로그인해주세요... (로그인되면 자동으로 불러와요)";
+  await fetch("/api/login", { method: "POST" });
+  const t = setInterval(async () => {
+    const s = await fetch("/api/session-status").then((r) => r.json());
+    if (s.loggedIn) { clearInterval(t); $("#login-btn").disabled = false; startRefresh(); }
+    else if (!s.watching) { clearInterval(t); $("#login-btn").disabled = false; $("#status").innerHTML = `<span class="error">⚠ ${esc(s.watchError || "로그인 감지 실패")}</span>`; }
+  }, 2500);
+});
+
+load();
+</script>
+</body>
+</html>

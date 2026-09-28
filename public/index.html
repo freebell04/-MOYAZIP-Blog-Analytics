@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>네이버 블로그 자동화</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-badge">N</span>
+    <div>
+      <h1>블로그 자동화 스튜디오</h1>
+      <p class="subtitle">관심분야만 넣으면 초안까지 완성</p>
+    </div>
+  </div>
+  <div id="login-box" class="login-box">
+    <a href="stats.html" class="btn btn-outline">성과 통계</a>
+    <a href="neighbors.html" class="btn btn-outline">이웃 소통</a>
+    <span id="login-status" class="status-pill no">확인 중...</span>
+    <button id="login-btn" class="btn btn-outline">네이버 로그인</button>
+  </div>
+</header>
+
+<nav class="steps">
+  <div class="step active" data-step="1"><span class="step-num">1</span>글감 찾기</div>
+  <div class="step" data-step="2"><span class="step-num">2</span>글 생성</div>
+  <div class="step" data-step="3"><span class="step-num">3</span>본문 저장</div>
+  <div class="step" data-step="4"><span class="step-num">4</span>목차·요약</div>
+</nav>
+
+<main>
+  <section id="step-search" class="card">
+    <div class="card-head">
+      <h2><span class="step-num">1</span>관심분야 입력</h2>
+      <p class="hint">키워드로 관련 뉴스·인기 블로그 글을 모아드려요.</p>
+    </div>
+    <div class="field-row">
+      <input id="keyword" placeholder="예: 제주도 가을 여행" />
+      <button id="search-btn" class="btn btn-primary">뉴스·블로그 찾기</button>
+    </div>
+    <div id="search-results" class="result-list empty-state">검색 결과가 여기에 표시됩니다.</div>
+  </section>
+
+  <section id="step-generate" class="card" hidden>
+    <div class="card-head">
+      <h2><span class="step-num">2</span>선택한 글감으로 글 생성</h2>
+      <p class="hint">체크한 글감을 참고해 AI가 새로 써드려요 (표절 없이).</p>
+    </div>
+    <button id="generate-btn" class="btn btn-primary">선택 항목으로 글 작성</button>
+    <div id="generate-status" class="status-line"></div>
+
+    <hr class="divider" />
+    <p class="hint">AI 글 생성 없이, 템플릿만 적용된 빈 에디터를 바로 열어서 직접 타이핑하고 싶다면:</p>
+    <button id="open-editor-btn" class="btn btn-outline">바로 블로그 에디터 열기 (템플릿 적용)</button>
+    <div id="open-editor-status" class="status-line"></div>
+  </section>
+
+  <section id="step-preview" class="card" hidden>
+    <div class="card-head">
+      <h2><span class="step-num">3</span>미리보기 &amp; 이미지 선택</h2>
+      <p class="hint">제목을 다듬고, 어울리는 이미지를 골라주세요. 본문은 아래에서 확인만 하고, 저장 후 네이버 에디터에서 직접 다듬으시면 됩니다.</p>
+    </div>
+    <label class="field-label">제목</label>
+    <input id="post-title" />
+
+    <label class="field-label">본문 미리보기</label>
+    <div id="post-preview" class="post-preview"></div>
+
+    <div class="field-label">추천 이미지</div>
+    <div id="image-candidates" class="image-candidates empty-state">이미지 후보가 여기에 표시됩니다.</div>
+
+    <label class="field-label" style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+      <input type="checkbox" id="use-template-checkbox" checked style="width:auto;" />
+      템플릿(앞으로 쓸 템플릿)에 자리 맞춰 저장 — 해제하면 빈 에디터에 제목+본문만 그대로 입력
+    </label>
+    <label class="field-label" style="display:flex; align-items:center; gap:8px; cursor:pointer; margin-top:6px;">
+      <input type="checkbox" id="continue-draft-checkbox" style="width:auto;" />
+      임시저장된 글 이어서 수정 (새 글을 만들지 않고 그 글에 덮어씀)
+    </label>
+
+    <button id="save-draft-btn" class="btn btn-primary btn-lg">네이버에 임시저장 (본문만)</button>
+    <div id="save-status" class="status-line"></div>
+  </section>
+
+  <section id="step-finalize" class="card" hidden>
+    <div class="card-head">
+      <h2><span class="step-num">4</span>목차 &amp; 전체요약 채우기</h2>
+      <p class="hint">네이버에서 본문을 직접 검토/수정하셨다면, 지금 그 내용을 그대로 읽어서 목차와 전체요약 표를 채웁니다.</p>
+    </div>
+    <button id="finalize-btn" class="btn btn-primary btn-lg">지금 임시글 기준으로 목차·요약 채우기</button>
+    <div id="finalize-status" class="status-line"></div>
+  </section>
+</main>
+
+<footer class="foot-note">임시저장까지 자동으로 진행되고, 최종 발행은 네이버 블로그에서 직접 확인 후 눌러주세요.</footer>
+
+<script src="app.js"></script>
+</body>
+</html>

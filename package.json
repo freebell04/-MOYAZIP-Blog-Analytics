@@ -1,0 +1,15 @@
+{
+  "name": "naver-blog-helper",
+  "version": "0.1.0",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js",
+    "install-browsers": "playwright install chromium"
+  },
+  "dependencies": {
+    "exceljs": "^4.4.0",
+    "express": "^4.19.2",
+    "playwright": "^1.47.0"
+  }
+}
