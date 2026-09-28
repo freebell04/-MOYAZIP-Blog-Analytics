@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>네이버 블로그 도우미</title>
+<meta name="description" content="내 블로그 이웃과 소통하고, 성과를 한눈에 보는 내 컴퓨터용 도우미 프로그램" />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700;800&display=swap" />
+<style>
+  :root {
+    --green: #03c75a; --green-dark: #02a94d; --green-tint: #e6f9ee;
+    --ink: #1a1a1a; --ink-soft: #5b5b5b; --line: #e7e7e9; --bg: #f4f5f7; --card: #ffffff;
+    --radius: 16px; --shadow: 0 2px 10px rgba(20,20,20,.05), 0 1px 2px rgba(20,20,20,.04);
+  }
+  * { box-sizing: border-box; }
+  body { font-family: 'Noto Sans KR', system-ui, -apple-system, 'Malgun Gothic', sans-serif; margin: 0; background: var(--bg); color: var(--ink); line-height: 1.6; }
+  .wrap { max-width: 880px; margin: 0 auto; padding: 0 20px; }
+
+  .hero { background: linear-gradient(180deg, #ffffff 0%, var(--bg) 100%); border-bottom: 1px solid var(--line); padding: 56px 0 48px; text-align: center; }
+  .badge { width: 56px; height: 56px; border-radius: 16px; background: var(--green); color: #fff; font-weight: 800; font-size: 26px; display: flex; align-items: center; justify-content: center; margin: 0 auto 16px; box-shadow: var(--shadow); }
+  h1 { font-size: 32px; margin: 0 0 10px; letter-spacing: -0.02em; }
+  .lead { font-size: 17px; color: var(--ink-soft); margin: 0 auto 28px; max-width: 560px; }
+  .cta-row { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+  .btn { display: inline-flex; align-items: center; gap: 8px; padding: 13px 22px; border-radius: 999px; font-weight: 700; font-size: 15px; text-decoration: none; border: 1px solid transparent; transition: transform .15s ease, box-shadow .15s ease; }
+  .btn:hover { transform: translateY(-1px); }
+  .btn-primary { background: var(--green); color: #fff; box-shadow: 0 4px 14px rgba(3,199,90,.28); }
+  .btn-primary:hover { background: var(--green-dark); }
+  .btn-outline { background: #fff; color: var(--ink); border-color: var(--line); }
+  .note { font-size: 13px; color: var(--ink-soft); margin-top: 14px; }
+
+  section { padding: 44px 0; }
+  h2 { font-size: 22px; margin: 0 0 6px; }
+  .sub { color: var(--ink-soft); margin: 0 0 24px; font-size: 14.5px; }
+
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 22px; box-shadow: var(--shadow); }
+  .card .icon { font-size: 26px; margin-bottom: 10px; display: block; }
+  .card h3 { font-size: 16px; margin: 0 0 8px; }
+  .card p { font-size: 13.5px; color: var(--ink-soft); margin: 0; }
+  .card ul { margin: 10px 0 0; padding-left: 18px; font-size: 13.5px; color: var(--ink-soft); }
+  .card li { margin: 4px 0; }
+
+  .steps { counter-reset: step; display: flex; flex-direction: column; gap: 14px; }
+  .step { display: flex; gap: 14px; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px 18px; align-items: flex-start; }
+  .step .num { counter-increment: step; flex-shrink: 0; width: 30px; height: 30px; border-radius: 50%; background: var(--green-tint); color: var(--green-dark); font-weight: 800; display: flex; align-items: center; justify-content: center; }
+  .step .num::before { content: counter(step); }
+  .step b { font-size: 14.5px; }
+  .step p { margin: 4px 0 0; font-size: 13.5px; color: var(--ink-soft); }
+  .step code { background: var(--bg); border-radius: 5px; padding: 1px 6px; font-size: 12.5px; }
+
+  .callout { background: #fff8e6; border: 1px solid #ffe2a8; border-radius: var(--radius); padding: 18px 20px; font-size: 13.5px; color: #7a5b00; }
+  .callout b { color: #5a4300; }
+
+  footer { text-align: center; padding: 30px 0 50px; font-size: 12.5px; color: var(--ink-soft); }
+  footer a { color: var(--ink-soft); }
+
+  @media (max-width: 720px) { .grid { grid-template-columns: 1fr; } h1 { font-size: 26px; } }
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <div class="wrap">
+    <div class="badge">N</div>
+    <h1>네이버 블로그 도우미</h1>
+    <p class="lead">이웃과 소통하고, 블로그 성과를 한눈에 보는 내 컴퓨터 전용 프로그램이에요.<br>설치 없이 실행 파일 하나로 바로 시작해요.</p>
+    <div class="cta-row">
+      <a class="btn btn-primary" href="https://github.com/freebell04/-MOYAZIP-Blog-Analytics/archive/refs/heads/main.zip">⬇ 다운로드 (.zip)</a>
+      <a class="btn btn-outline" href="https://github.com/freebell04/-MOYAZIP-Blog-Analytics">GitHub에서 보기</a>
+    </div>
+    <p class="note">Windows + 크롬 + Node.js 필요 · 내 컴퓨터에서만 실행돼요 (서버에 업로드되지 않아요)</p>
+  </div>
+</div>
+
+<section class="wrap">
+  <h2>할 수 있는 것</h2>
+  <p class="sub">내 블로그 관리에 필요한 걸 한 화면에서</p>
+  <div class="grid">
+    <div class="card">
+      <span class="icon">🤝</span>
+      <h3>이웃 소통</h3>
+      <p>공감·댓글 남긴 사람, 이웃 목록, 새 글 올린 이웃을 모아서 답방</p>
+      <ul>
+        <li>실시간 이웃 답방 / 새로운 친구 / 이웃 아닌 사람 등 카테고리</li>
+        <li>새 창에서 하트 누르면 자동으로 완료 체크</li>
+        <li>추천 댓글·답글 예시 + 복사</li>
+      </ul>
+    </div>
+    <div class="card">
+      <span class="icon">📊</span>
+      <h3>성과 통계</h3>
+      <p>조회수·유입·검색어·독자층을 한눈에</p>
+      <ul>
+        <li>일·주·월별 조회수, 공감·댓글 추이</li>
+        <li>글별 발행 후 3일 초반 성과</li>
+        <li>목표(KPI) 설정과 진행 상황</li>
+      </ul>
+    </div>
+    <div class="card">
+      <span class="icon">📝</span>
+      <h3>기록 & 리포트</h3>
+      <p>매주 돌아보고 남기기</p>
+      <ul>
+        <li>주간 기록 & 회고</li>
+        <li>엑셀 다운로드</li>
+        <li>노션에 주간·월간 기록 저장</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section class="wrap">
+  <h2>시작하는 법</h2>
+  <p class="sub">3분이면 준비 끝이에요</p>
+  <div class="steps">
+    <div class="step"><span class="num"></span><div><b>다운로드 후 압축 풀기</b><p>위 [다운로드] 버튼으로 zip을 받아 원하는 폴더에 풀어주세요.</p></div></div>
+    <div class="step"><span class="num"></span><div><b><code>실행하기.bat</code> 더블클릭</b><p>Node.js가 없다면 안내를 따라 설치해주세요. 처음 실행 시 필요한 파일을 자동으로 설치해요 (1~2분).</p></div></div>
+    <div class="step"><span class="num"></span><div><b>블로그 아이디 설정</b><p>열리는 화면에서 <code>blog.naver.com/</code> 뒤에 오는 내 블로그 아이디와 블로그 이름을 입력해요.</p></div></div>
+    <div class="step"><span class="num"></span><div><b>네이버 로그인</b><p>오른쪽 위 [네이버 로그인] → 뜨는 크롬 창에서 내 계정으로 로그인하면 준비 끝!</p></div></div>
+  </div>
+</section>
+
+<section class="wrap">
+  <div class="callout">
+    <b>⚠️ 참고</b> — 이 프로그램은 로그인 정보와 통계를 전부 <b>내 컴퓨터의 data 폴더</b>에만 저장해요. 다른 사람에게 폴더째 전달하지 마세요.
+    AI 글쓰기 기능(글 초안 생성, 추천 답글의 AI 버전)은 Claude Code가 설치된 컴퓨터에서만 동작하고, 나머지 기능은 모두 그대로 써요.
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    자세한 사용법은 <a href="https://github.com/freebell04/-MOYAZIP-Blog-Analytics#readme">README</a>에 있어요 ·
+    <a href="https://github.com/freebell04/-MOYAZIP-Blog-Analytics">GitHub 저장소</a>
+  </div>
+</footer>
+
+</body>
+</html>
