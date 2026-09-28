@@ -753,7 +753,16 @@ document.addEventListener("click", async (e) => {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ token: $("#n-token").value, targetUrl: $("#n-url").value }),
     }).then((r) => r.json());
-    if (r.error) { msg.innerHTML = `<span class="error">⚠ ${esc(r.error)}</span>`; return; }
+    if (r.error) {
+      let html = `<span class="error">⚠ ${esc(r.error)}</span>`;
+      if (r.accessible) {
+        html += r.accessible.length
+          ? `<div style="margin-top:8px">이 토큰으로 지금 접근 가능한 곳이에요. 원하시는 데이터베이스/페이지가 <b>안 보이면</b> 워크스페이스가 다르거나(통합을 다른 워크스페이스에 만들었거나) 그 페이지에 연결을 아직 안 추가한 거예요:<ul style="margin:6px 0 0;padding-left:20px">${r.accessible.map((a) => `<li>${a.type === "database" ? "🗂️" : "📄"} <a href="${esc(a.url)}" target="_blank" rel="noopener">${esc(a.title)}</a></li>`).join("")}</ul></div>`
+          : `<div style="margin-top:8px">이 토큰으로 접근 가능한 곳이 <b>하나도 없어요</b>. 통합을 만든 워크스페이스와 이 데이터베이스가 있는 워크스페이스가 다르거나, 아직 어디에도 연결을 추가하지 않은 상태예요.</div>`;
+      }
+      msg.innerHTML = html;
+      return;
+    }
     N.config = r.config;
     renderNotion();
     $("#n-msg").innerHTML = `✅ 연결됐어요! ${r.config.target.type === "database" ? "데이터베이스" : "페이지"} '${esc(r.config.target.title)}'에 저장돼요.`;

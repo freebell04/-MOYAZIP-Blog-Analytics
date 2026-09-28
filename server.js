@@ -314,7 +314,7 @@ app.post("/api/notion/config", async (req, res) => {
   try {
     res.json({ config: await notion.saveConfig(req.body || {}) });
   } catch (e) {
-    res.status(400).json({ error: e.message });
+    res.status(400).json({ error: e.message, accessible: e.accessible || null });
   }
 });
 
