@@ -74,7 +74,9 @@ app.use((req, res, next) => {
   res.redirect("/setup.html");
 });
 
-app.use(express.static(path.join(__dirname, "public")));
+// 업데이트해도 브라우저가 예전 html/js/css를 계속 쓰는 일이 없게, 매번 서버에 새로운지 확인하게 한다
+// (완전히 캐시를 꺼버리진 않는다 — 안 바뀐 파일은 304로 빠르게 응답되니 느려지지 않는다)
+app.use(express.static(path.join(__dirname, "public"), { setHeaders: (res) => res.setHeader("Cache-Control", "no-cache") }));
 app.use("/images", express.static(path.join(__dirname, "data", "images")));
 
 // --- 로그인 세션 ---
