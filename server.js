@@ -2,6 +2,16 @@ const express = require("express");
 const path = require("path");
 const fs = require("fs");
 
+// 백그라운드로 돌리는 작업(이웃 새로고침, 공감 감지 등)에서 미처 못 잡은 에러가 하나라도 있으면
+// Node가 기본적으로 서버 프로세스 전체를 종료시킨다. 사용자 입장에서는 "로그인 버튼을 눌렀더니
+// 서버가 통째로 죽었다"처럼 보이므로, 여기서 끝까지 잡아 로그만 남기고 서버는 계속 띄워둔다.
+process.on("unhandledRejection", (err) => {
+  console.error("[처리되지 않은 오류 — 서버는 계속 실행됩니다]", err);
+});
+process.on("uncaughtException", (err) => {
+  console.error("[처리되지 않은 예외 — 서버는 계속 실행됩니다]", err);
+});
+
 const { askClaude, extractJson } = require("./lib/claude");
 const session = require("./lib/session");
 const { searchNaver, fetchArticleText } = require("./lib/scraper");
