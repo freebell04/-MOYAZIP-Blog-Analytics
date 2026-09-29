@@ -23,6 +23,7 @@ const like = require("./lib/like");
 const stats = require("./lib/stats");
 const notion = require("./lib/notion");
 const config = require("./lib/config");
+const aiChat = require("./lib/aiChat");
 const trendsFor = () => null;
 const statsWithTrends = (d) => d;
 const { buildWeekly, buildMonthly, buildMemoOnly, memoBlocks, MEMO_HEADING, memoHeading } = require("./lib/notionReport");
@@ -214,10 +215,8 @@ function buildChatPrompt(data) {
   ].join("\n");
 }
 
-app.post("/api/handoff", async (req, res) => {
-  const { keyword, selected } = req.body; // selected: [{title, link, snippet}]
-  if (!selected || !selected.length) return res.status(400).json({ error: "글감을 하나 이상 체크해주세요." });
-  try {
+// 체크한 글감의 본문을 모아 handoff.json으로 저장하고 그 내용을 돌려준다
+async function makeHandoff(keyword, selected) {
     const items = [];
     for (const it of selected) {
       const text = await fetchArticleText(it.link).catch(() => "");
@@ -234,10 +233,38 @@ app.post("/api/handoff", async (req, res) => {
     };
     fs.mkdirSync(path.dirname(HANDOFF_PATH), { recursive: true });
     fs.writeFileSync(HANDOFF_PATH, JSON.stringify(data, null, 2));
-    res.json({ success: true, count: items.length, withText: items.filter((x) => x.text).length, prompt: buildChatPrompt(data) });
+    return data;
+}
+
+app.post("/api/handoff", async (req, res) => {
+  const { keyword, selected } = req.body; // selected: [{title, link, snippet}]
+  if (!selected || !selected.length) return res.status(400).json({ error: "글감을 하나 이상 체크해주세요." });
+  try {
+    const data = await makeHandoff(keyword, selected);
+    res.json({ success: true, count: data.items.length, withText: data.items.filter((x) => x.text).length, prompt: buildChatPrompt(data) });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
+});
+
+// --- AI 채팅(ChatGPT/Gemini/Claude) 연결: 로그인용 크롬에 채팅 탭을 열고 요청문을 보낸 뒤, 결과 JSON을 자동으로 받아온다 ---
+app.post("/api/ai-chat", async (req, res) => {
+  const { ai, keyword, selected } = req.body;
+  if (!aiChat.SITES[ai]) return res.status(400).json({ error: "지원하지 않는 AI예요." });
+  if (!selected || !selected.length) return res.status(400).json({ error: "글감을 하나 이상 체크해주세요." });
+  try {
+    const data = await makeHandoff(keyword, selected);
+    const prompt = buildChatPrompt(data);
+    const st = await aiChat.start(ai, prompt);
+    res.json({ success: true, ...st, count: data.items.length, prompt });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+app.get("/api/ai-chat/status", (req, res) => res.json(aiChat.getState()));
+app.post("/api/ai-chat/taken", (req, res) => {
+  aiChat.markTaken();
+  res.json({ success: true });
 });
 
 app.get("/api/handoff", (req, res) => {

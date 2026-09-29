@@ -167,4 +167,4 @@ async function openAndWatch(blogId, logNo) {
   }
 }
 
-module.exports = { openAndWatch, getWatches, getLiked };
+module.exports = { openAndWatch, getWatches, getLiked, connectPage };

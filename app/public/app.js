@@ -232,41 +232,63 @@ const AI_SITES = {
   gemini: { name: "Gemini", url: "https://gemini.google.com/app" },
 };
 
+// 버튼을 누르면: 로그인용 크롬에 그 AI 채팅 탭을 열고 요청문을 자동으로 보냄 → 사용자가 탭에서 대화 →
+// "완성"이라고 해서 AI가 결과 JSON을 내놓으면 앱이 알아채서 네이버 글쓰기 창을 열어 채운다.
+const AI_STATUS_TEXT = {
+  opening: (n) => `${n} 탭을 여는 중이에요...`,
+  needLogin: (n) => `열린 크롬 탭에서 ${n}에 로그인해주세요 (처음 한 번만). 로그인하면 요청문이 자동으로 들어가요.`,
+  sending: (n) => `${n}에 요청문을 보내는 중이에요...`,
+  chatting: (n) =>
+    `✅ ${n}에 요청문을 보냈어요. 크롬 탭에서 ${n}이 제안하는 방향을 고르고 초안을 다듬은 뒤, "완성"이라고 보내세요. 결과가 나오면 자동으로 블로그 글쓰기 창이 열려요.`,
+  closed: (n) => `${n} 탭이 닫혀서 연결을 끝냈어요. 다시 하려면 버튼을 눌러주세요.`,
+  timeout: (n) => `${n} 대화를 기다리다 시간이 지났어요. 결과 JSON을 아래에 직접 붙여넣어도 돼요.`,
+};
+let aiPollTimer = null;
+
+async function pollAiChat() {
+  const st = await fetch("/api/ai-chat/status").then((r) => r.json()).catch(() => null);
+  if (!st || st.status === "idle" || st.status === "taken") return;
+  if (st.status === "done") {
+    clearInterval(aiPollTimer);
+    await fetch("/api/ai-chat/taken", { method: "POST" }).catch(() => {});
+    $("#handoff-status").textContent = `✅ ${st.name}의 완성본을 받아왔어요.`;
+    loadPost(st.result);
+    return;
+  }
+  if (st.status === "error") {
+    clearInterval(aiPollTimer);
+    $("#handoff-status").textContent = "오류: " + st.error + " — 아래 요청문을 복사해서 직접 붙여넣어도 돼요.";
+    return;
+  }
+  const f = AI_STATUS_TEXT[st.status];
+  if (f) $("#handoff-status").textContent = f(st.name) + (st.note ? " " + st.note : "");
+  if (["closed", "timeout"].includes(st.status)) clearInterval(aiPollTimer);
+}
+
 document.querySelectorAll(".handoff-btn").forEach((btn) => {
   btn.addEventListener("click", async () => {
     if (!selectedItems.length) return alert("글감을 하나 이상 선택해주세요.");
     const ai = btn.dataset.ai;
-    // 팝업 차단을 피하려면 클릭 직후(기다리기 전에) 새 탭을 열어둬야 한다
-    const tab = AI_SITES[ai] ? window.open("about:blank", "_blank") : null;
     document.querySelectorAll(".handoff-btn").forEach((b) => (b.disabled = true));
     $("#handoff-status").textContent = "글감 본문을 모으는 중이에요...";
-    const r = await fetch("/api/handoff", {
+    const r = await fetch("/api/ai-chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ keyword: $("#keyword").value.trim(), selected: selectedItems }),
+      body: JSON.stringify({ ai, keyword: $("#keyword").value.trim(), selected: selectedItems }),
     })
       .then((r) => r.json())
       .catch((e) => ({ error: e.message }));
     document.querySelectorAll(".handoff-btn").forEach((b) => (b.disabled = false));
     if (r.error) {
-      if (tab) tab.close();
       $("#handoff-status").textContent = "오류: " + r.error;
       return;
     }
-
-    const site = AI_SITES[ai];
+    // 자동 입력이 막히는 경우를 대비해 요청문과 [결과 붙여넣기]도 같이 보여준다
     $("#handoff-prompt").value = r.prompt;
     $("#handoff-prompt-box").hidden = false;
-    let copied = false;
-    try {
-      await navigator.clipboard.writeText(r.prompt);
-      copied = true;
-    } catch {}
-    if (tab) tab.location.href = site.url;
-    else window.open(site.url, "_blank");
-    $("#handoff-status").textContent =
-      `✅ ${site.name}를 새 탭에 열었어요. ${copied ? "요청문이 복사돼 있으니" : "아래 요청문을 [복사]해서"} 입력창에 붙여넣고 보내세요. ` +
-      `방향을 고르고 초안을 다듬은 뒤 "완성"이라고 하면 나오는 JSON을 아래에 붙여넣으면 블로그 글쓰기 창이 열려요.`;
+    clearInterval(aiPollTimer);
+    aiPollTimer = setInterval(pollAiChat, 2000);
+    pollAiChat();
   });
 });
 
@@ -298,6 +320,11 @@ $("#paste-result-btn").addEventListener("click", () => {
     $("#paste-status").textContent = "불러오기 실패: title과 sections가 있어야 해요. AI에게 \"정해진 JSON 형식으로 다시 줘\"라고 해보세요.";
     return;
   }
+  loadPost(post);
+});
+
+// 완성된 글(JSON)을 3단계 미리보기에 넣고, 바로 네이버 글쓰기 창을 열어 채운다 (기존 임시저장 흐름 재사용)
+function loadPost(post) {
   post.introLines = post.introLines || [];
   post.sectionHeadingLines = post.sectionHeadingLines || [];
   currentPost = post;
@@ -310,4 +337,4 @@ $("#paste-result-btn").addEventListener("click", () => {
   $("#paste-status").textContent = `✅ 불러왔어요 (섹션 ${post.sections.length}개). 네이버 블로그 글쓰기 창을 여는 중이에요... (크롬 창을 확인하세요)`;
   $("#step-preview").scrollIntoView({ behavior: "smooth" });
   $("#save-draft-btn").click();
-});
+}
