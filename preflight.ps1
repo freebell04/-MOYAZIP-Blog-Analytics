@@ -1,13 +1,10 @@
 ﻿$ErrorActionPreference = "Stop"
-try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch {}
-$Host.UI.RawUI.WindowTitle = "네이버 블로그 도우미 - 준비 중"
 Set-Location -Path $PSScriptRoot
 
-function Stop-WithMessage($msg) {
-  Write-Host ""
-  Write-Host $msg -ForegroundColor Red
-  Read-Host "계속하려면 Enter를 누르세요"
-  exit 1
+# 창이 완전히 숨겨진 채로 돌기 때문에, 진짜 문제가 생겼을 때는 콘솔 대신 알림창으로 보여준다.
+Add-Type -AssemblyName System.Windows.Forms
+function Show-ErrorBox($msg) {
+  [System.Windows.Forms.MessageBox]::Show($msg, "네이버 블로그 도우미", "OK", "Error") | Out-Null
 }
 
 function Test-PortOpen($portNum) {
@@ -26,49 +23,13 @@ function Stop-MyOldServer {
   $mine = Get-CimInstance Win32_Process -Filter "Name='node.exe'" -ErrorAction SilentlyContinue |
     Where-Object { $_.CommandLine -and $_.CommandLine.ToLower().Contains($PSScriptRoot.ToLower()) -and $_.CommandLine -like "*server.js*" }
   if ($mine) {
-    Write-Host "이 폴더의 이전 서버가 아직 떠 있어서 정리하고 새로 시작할게요..."
     $mine | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
     Start-Sleep -Milliseconds 800
   }
 }
 
-if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
-  Stop-WithMessage "[!] Node.js가 설치되어 있지 않아요.`n    https://nodejs.org 에서 LTS 버전을 설치한 뒤 다시 실행해주세요."
-}
-
-Stop-MyOldServer
-
-if (Test-PortOpen 3300) {
-  Write-Host "포트 3300을 다른 프로그램(또는 이 프로그램을 풀어둔 다른 폴더)이 쓰고 있어요."
-  Write-Host "이 프로그램을 여러 폴더에 압축 풀어두셨다면, 하나만 남기고 나머지는 꺼주세요."
-  Start-Process "http://localhost:3300"
-  Read-Host "확인했으면 Enter를 눌러 창을 닫으세요"
-  exit 0
-}
-
-if (-not (Test-Path (Join-Path $PSScriptRoot "node_modules"))) {
-  Write-Host "처음 실행이라 필요한 파일을 설치하는 중이에요... (1~2분)"
-  npm install --omit=dev
-  if ($LASTEXITCODE -ne 0) {
-    Stop-WithMessage "[!] 설치 중 오류가 났어요. 인터넷 연결을 확인하고 다시 실행해주세요."
-  }
-}
-
-# 이웃 글 검색 등에서 쓰는 내부 브라우저(평소 쓰는 크롬과는 별개). 처음 한 번은 따로 받아야 한다.
-function Test-PlaywrightChromium {
-  $base = Join-Path $env:LOCALAPPDATA "ms-playwright"
-  if (-not (Test-Path $base)) { return $false }
-  return $null -ne (Get-ChildItem $base -Directory -Filter "chromium_headless_shell-*" -ErrorAction SilentlyContinue | Select-Object -First 1)
-}
-if (-not (Test-PlaywrightChromium)) {
-  Write-Host "글 검색 기능에 필요한 내부 브라우저를 받는 중이에요... (몇 분 걸릴 수 있어요)"
-  npx playwright install chromium
-  if ($LASTEXITCODE -ne 0) {
-    Stop-WithMessage "[!] 브라우저 설치에 실패했어요. 인터넷 연결을 확인하고 다시 실행해주세요."
-  }
-}
-
-# 서버가 실제로 응답할 때까지 기다렸다가 자동으로 넘어가는 로딩 화면을 먼저 띄운다
+# 아무 창도 안 뜨니까, 지금 뭐라도 되고 있다는 걸 보여줄 게 이 로딩 화면뿐이다.
+# 그래서 다른 어떤 검사보다도 먼저, 맨 처음에 띄운다 (첫 설치로 몇 분 걸려도 계속 이 화면이 보인다).
 $loadingPath = Join-Path $env:TEMP "nbh-loading.html"
 @'
 <!doctype html>
@@ -89,7 +50,7 @@ $loadingPath = Join-Path $env:TEMP "nbh-loading.html"
   <div class="badge">N</div>
   <div class="spin"></div>
   <p>서버를 준비하고 있어요...</p>
-  <p class="sub" id="sub">잠시만 기다려주세요 (보통 몇 초 안에 끝나요)</p>
+  <p class="sub" id="sub">잠시만 기다려주세요 (처음 켤 땐 몇 분 걸릴 수 있어요)</p>
 </div>
 <script>
   var target = "http://localhost:3300/";
@@ -99,7 +60,7 @@ $loadingPath = Join-Path $env:TEMP "nbh-loading.html"
     fetch(target, { mode: "no-cors", cache: "no-store" })
       .then(function () { location.href = target; })
       .catch(function () {
-        if (tries === 40) document.getElementById("sub").textContent = "시간이 좀 걸리네요... 잠시 후 자동으로 다시 시도할게요.";
+        if (tries === 60) document.getElementById("sub").textContent = "생각보다 오래 걸리네요... 문제가 있다면 알림창이 뜰 거예요.";
         setTimeout(check, 500);
       });
   }
@@ -108,6 +69,42 @@ $loadingPath = Join-Path $env:TEMP "nbh-loading.html"
 </body></html>
 '@ | Set-Content -Path $loadingPath -Encoding UTF8
 Start-Process $loadingPath
+
+if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
+  Show-ErrorBox "Node.js가 설치되어 있지 않아요.`n`nhttps://nodejs.org 에서 LTS 버전을 설치한 뒤 다시 실행해주세요."
+  exit 1
+}
+
+Stop-MyOldServer
+
+if (Test-PortOpen 3300) {
+  # 이미 (이 폴더든 다른 폴더든) 뭔가 3300번에 떠 있으면, 로딩 화면이 알아서 그걸 감지해 넘어간다.
+  # 다만 그게 이 프로그램의 다른 복사본일 수 있어서 한 번은 알려준다.
+  Show-ErrorBox "포트 3300을 다른 프로그램(또는 이 프로그램을 풀어둔 다른 폴더)이 쓰고 있어요.`n`n이 프로그램을 여러 폴더에 압축 풀어두셨다면, 하나만 남기고 나머지는 꺼주세요."
+  exit 0
+}
+
+if (-not (Test-Path (Join-Path $PSScriptRoot "node_modules"))) {
+  npm install --omit=dev *> $null
+  if ($LASTEXITCODE -ne 0) {
+    Show-ErrorBox "필요한 파일을 설치하는 중 오류가 났어요. 인터넷 연결을 확인하고 다시 실행해주세요."
+    exit 1
+  }
+}
+
+# 이웃 글 검색 등에서 쓰는 내부 브라우저(평소 쓰는 크롬과는 별개). 처음 한 번은 따로 받아야 한다.
+function Test-PlaywrightChromium {
+  $base = Join-Path $env:LOCALAPPDATA "ms-playwright"
+  if (-not (Test-Path $base)) { return $false }
+  return $null -ne (Get-ChildItem $base -Directory -Filter "chromium_headless_shell-*" -ErrorAction SilentlyContinue | Select-Object -First 1)
+}
+if (-not (Test-PlaywrightChromium)) {
+  npx playwright install chromium *> $null
+  if ($LASTEXITCODE -ne 0) {
+    Show-ErrorBox "글 검색 기능에 필요한 내부 브라우저 설치에 실패했어요. 인터넷 연결을 확인하고 다시 실행해주세요."
+    exit 1
+  }
+}
 
 # 실제 서버는 화면에 안 보이는 상태로 뒤에서 돌린다. 끌 때는 같은 폴더의 종료하기.bat을 쓰면 된다.
 Start-Process -FilePath "powershell.exe" `
