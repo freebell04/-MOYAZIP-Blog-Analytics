@@ -96,19 +96,23 @@ async function ensureDebugChrome() {
 
 /**
  * 쿠키가 남아 있어도 서버에선 로그아웃된 경우가 있어서, 네이버에 실제 로그인 상태를 물어본다.
- * (새 탭을 잠깐 열었다 닫음)
+ * 크롬에 탭을 열지 않고, 크롬의 쿠키만 꺼내서 서버(Node)에서 직접 요청한다.
+ * (예전엔 3초마다 새 탭을 열었다 닫아서, 로그인 창에서 입력하는 중에 화면이 자꾸 그 탭으로 넘어갔다)
  */
 async function isReallyLoggedIn(context) {
-  const page = await context.newPage();
   try {
-    // API를 주소창으로 직접 열면 403이라, m.blog 페이지 안에서 fetch 한다
-    await page.goto("https://m.blog.naver.com/", { waitUntil: "domcontentloaded" });
-    const json = await page.evaluate(async () => (await fetch("/api/current-user", { credentials: "include" })).json());
+    const cookies = await context.cookies(["https://m.blog.naver.com", "https://nid.naver.com", "https://www.naver.com"]);
+    if (!cookies.some((c) => c.name === "NID_AUT")) return false; // 로그인 쿠키가 아직 없으면 물어볼 필요도 없다
+    const cookie = cookies.map((c) => `${c.name}=${c.value}`).join("; ");
+    // referer가 없으면 403이 난다
+    const res = await fetch("https://m.blog.naver.com/api/current-user", {
+      headers: { cookie, referer: "https://m.blog.naver.com/", "user-agent": "Mozilla/5.0" },
+      signal: AbortSignal.timeout(5000),
+    });
+    const json = await res.json();
     return !!(json && json.result && json.result.loggedIn);
   } catch {
     return false;
-  } finally {
-    await page.close().catch(() => {});
   }
 }
 
