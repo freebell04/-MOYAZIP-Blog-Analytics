@@ -13,6 +13,17 @@ const FORMAT_PATH = path.join(__dirname, "..", "data", "blog-format.json");
 // 개인판(모야ZIP)은 네이버 '앞으로 쓸 템플릿'에 맞춘 고정 5섹션, 배포판은 누구에게나 맞는 자유 형식.
 const DEFAULT_KIND = "free";
 
+// 이 컴퓨터에만 있는 개인 설정 (data 폴더는 GitHub에도 안 올라가고 업데이트로도 안 바뀐다).
+//   {"moyazipTemplate": true} → 형식을 따로 저장하지 않았을 때 모야ZIP 템플릿을 기본으로 쓴다 (블로그 주인 컴퓨터에만 둔다)
+const OWNER_PATH = path.join(__dirname, "..", "data", "owner.json");
+function ownerSettings() {
+  try {
+    return JSON.parse(fs.readFileSync(OWNER_PATH, "utf-8"));
+  } catch {
+    return {};
+  }
+}
+
 function getSaved() {
   try {
     return JSON.parse(fs.readFileSync(FORMAT_PATH, "utf-8"));
@@ -41,7 +52,7 @@ function clear() {
 function describe() {
   const saved = getSaved();
   if (saved) return { kind: "saved", name: saved.formatName || "내 블로그 형식", format: saved, useTemplate: false };
-  if (DEFAULT_KIND === "moyazip") return { kind: "moyazip", name: "모야ZIP 템플릿 (기본)", format: null, useTemplate: true };
+  if (DEFAULT_KIND === "moyazip" || ownerSettings().moyazipTemplate) return { kind: "moyazip", name: "모야ZIP 템플릿 (기본)", format: null, useTemplate: true };
   return { kind: "free", name: "자유 형식 (기본)", format: null, useTemplate: false };
 }
 
