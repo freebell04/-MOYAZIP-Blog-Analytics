@@ -24,6 +24,7 @@ const stats = require("./lib/stats");
 const notion = require("./lib/notion");
 const config = require("./lib/config");
 const aiChat = require("./lib/aiChat");
+const blogFormat = require("./lib/blogFormat");
 const trendsFor = () => null;
 const statsWithTrends = (d) => d;
 const { buildWeekly, buildMonthly, buildMemoOnly, memoBlocks, MEMO_HEADING, memoHeading } = require("./lib/notionReport");
@@ -185,36 +186,6 @@ const HANDOFF_GUIDE = [
   "   {title, introLines, sectionHeadingLines, sections} JSON을 보내 네이버 에디터를 열고 임시저장한다 (같은 글을 고쳐 다시 저장할 땐 continueDraft:true).",
 ].join("\n");
 
-// ChatGPT·Gemini처럼 내 컴퓨터(localhost)를 못 읽는 AI용: 글감·말투·형식을 다 담은 요청문을 만든다.
-// 사용자가 이걸 붙여넣고 대화로 방향을 정한 뒤, 마지막에 받은 JSON을 앱의 [결과 붙여넣기]에 넣으면 임시저장까지 이어진다.
-function buildChatPrompt(data) {
-  const schema =
-    '{"title": "블로그 제목", "introLines": ["줄1","줄2","줄3"], ' +
-    '"sectionHeadingLines": [["1-1","1-2","1-3"], ["2-1","2-2","2-3","2-4"], ["3-1"], ["4-1","4-2","4-3"], ["5-1"]], ' +
-    '"sections": ["1번 섹션 본문","2번 섹션 본문","3번 섹션 본문","4번 섹션 본문","5번 섹션 본문"]}';
-  return [
-    `너는 네이버 블로그 글쓰기 도우미야. 아래 글감으로 "${data.blogName}" 블로그 초안을 나와 같이 쓸 거야.`,
-    "",
-    "진행 순서 (꼭 지켜줘):",
-    "1) 바로 쓰지 말고, 글감의 핵심을 2줄로 요약한 뒤 주제·방향·제목 후보 3개를 번호로 제안하고 내가 고를 때까지 기다려.",
-    "2) 내가 고르면 초안을 읽기 좋게 보여주고, 수정 요청을 반영해줘.",
-    '3) 내가 "완성"이라고 하면, 최종본을 아래 JSON 형식 그대로 코드블록 하나로만 출력해. (프로그램에 붙여넣을 거라 형식이 중요해)',
-    schema,
-    "",
-    "글 형식 규칙:",
-    "- 원문 문장을 베끼지 말고 새로 쓸 것",
-    "- introLines: 글 맨 위 3줄 요약, 각 5~15자",
-    "- sectionHeadingLines: 섹션별 소제목 줄 수가 정해져 있음 → 1번 3줄, 2번 4줄, 3번 1줄, 4번 3줄, 5번 1줄 (각 5~15자)",
-    "- sections 5개: 1 개요/스펙 소개, 2 어떤 사람·상황에 유용한지, 3 Before→After, 4 사용법·활용법, 5 총평·앞으로 계획 (각 2~5문장)",
-    data.styleGuide ? `\n[이 블로그 말투·스타일 가이드]\n${data.styleGuide}` : "- 친근한 구어체 톤",
-    "",
-    `[검색 키워드] ${data.keyword}`,
-    ...data.items.map(
-      (it, i) => `\n[글감 ${i + 1}] ${it.title}\n링크: ${it.link}\n${(it.text || it.snippet || "(본문을 못 가져왔어요 — 링크 참고)").slice(0, 2500)}`
-    ),
-  ].join("\n");
-}
-
 // 체크한 글감의 본문을 모아 handoff.json으로 저장하고 그 내용을 돌려준다
 async function makeHandoff(keyword, selected) {
     const items = [];
@@ -241,7 +212,7 @@ app.post("/api/handoff", async (req, res) => {
   if (!selected || !selected.length) return res.status(400).json({ error: "글감을 하나 이상 체크해주세요." });
   try {
     const data = await makeHandoff(keyword, selected);
-    res.json({ success: true, count: data.items.length, withText: data.items.filter((x) => x.text).length, prompt: buildChatPrompt(data) });
+    res.json({ success: true, count: data.items.length, withText: data.items.filter((x) => x.text).length, prompt: blogFormat.buildPostPrompt(data) });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -254,7 +225,7 @@ app.post("/api/ai-chat", async (req, res) => {
   if (!selected || !selected.length) return res.status(400).json({ error: "글감을 하나 이상 체크해주세요." });
   try {
     const data = await makeHandoff(keyword, selected);
-    const prompt = buildChatPrompt(data);
+    const prompt = blogFormat.buildPostPrompt(data);
     const st = await aiChat.start(ai, prompt);
     res.json({ success: true, ...st, count: data.items.length, prompt });
   } catch (e) {
@@ -262,6 +233,33 @@ app.post("/api/ai-chat", async (req, res) => {
   }
 });
 app.get("/api/ai-chat/status", (req, res) => res.json(aiChat.getState()));
+
+// --- 내 블로그 글 형식: 최근 글로 AI에게 분석받아 저장하고, 초안 요청문에 반영 ---
+app.get("/api/format", (req, res) => res.json(blogFormat.describe()));
+app.post("/api/format", (req, res) => {
+  try {
+    const saved = blogFormat.save(req.body);
+    res.json({ success: true, ...blogFormat.describe(), savedAt: saved.savedAt });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+app.delete("/api/format", (req, res) => {
+  blogFormat.clear();
+  res.json({ success: true, ...blogFormat.describe() });
+});
+app.post("/api/format/analyze", async (req, res) => {
+  const { ai } = req.body;
+  if (!aiChat.SITES[ai]) return res.status(400).json({ error: "지원하지 않는 AI예요." });
+  try {
+    const samples = await blogFormat.fetchOwnSamples(3);
+    const prompt = blogFormat.buildAnalyzePrompt(samples);
+    const st = await aiChat.start(ai, prompt, "format");
+    res.json({ success: true, ...st, sampleTitles: samples.map((x) => x.title), prompt });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
 app.post("/api/ai-chat/taken", (req, res) => {
   aiChat.markTaken();
   res.json({ success: true });

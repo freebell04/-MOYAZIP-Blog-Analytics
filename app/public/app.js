@@ -243,25 +243,90 @@ const AI_STATUS_TEXT = {
   closed: (n) => `${n} 탭이 닫혀서 연결을 끝냈어요. 다시 하려면 버튼을 눌러주세요.`,
   timeout: (n) => `${n} 대화를 기다리다 시간이 지났어요. 결과 JSON을 아래에 직접 붙여넣어도 돼요.`,
 };
+const FORMAT_CHATTING = (n) =>
+  `✅ ${n}에 내 최근 글을 보내 분석을 맡겼어요. 크롬 탭에서 분석이 끝나고 JSON이 나오면 자동으로 저장돼요. (결과가 마음에 안 들면 탭에서 고쳐달라고 하세요)`;
 let aiPollTimer = null;
+
+// --- 내 블로그 글 형식 ---
+let formatInfo = null;
+async function loadFormat() {
+  formatInfo = await fetch("/api/format").then((r) => r.json()).catch(() => null);
+  if (!formatInfo) return;
+  $("#format-name").textContent = formatInfo.name;
+  $("#format-json").value = formatInfo.format ? JSON.stringify(formatInfo.format, null, 2) : "";
+}
+loadFormat();
+
+document.querySelectorAll(".format-analyze-btn").forEach((btn) => {
+  btn.addEventListener("click", async () => {
+    document.querySelectorAll(".format-analyze-btn").forEach((b) => (b.disabled = true));
+    $("#format-status").textContent = "내 블로그 최근 글을 읽는 중이에요...";
+    const r = await fetch("/api/format/analyze", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ai: btn.dataset.ai }),
+    })
+      .then((r) => r.json())
+      .catch((e) => ({ error: e.message }));
+    document.querySelectorAll(".format-analyze-btn").forEach((b) => (b.disabled = false));
+    if (r.error) {
+      $("#format-status").textContent = "오류: " + r.error;
+      return;
+    }
+    $("#format-status").textContent = `최근 글 ${r.sampleTitles.length}개를 읽었어요 (${r.sampleTitles.join(", ")}). AI 탭을 여는 중...`;
+    clearInterval(aiPollTimer);
+    aiPollTimer = setInterval(pollAiChat, 2000);
+  });
+});
+
+$("#format-save-btn").addEventListener("click", async () => {
+  let f;
+  try {
+    const m = $("#format-json").value.match(/\{[\s\S]*\}/);
+    f = JSON.parse(m ? m[0] : "");
+  } catch {
+    $("#format-status").textContent = "저장 실패: JSON 형식이 올바르지 않아요.";
+    return;
+  }
+  const r = await fetch("/api/format", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(f) }).then((r) => r.json());
+  $("#format-status").textContent = r.error ? "저장 실패: " + r.error : `✅ 저장했어요: "${r.name}"`;
+  loadFormat();
+});
+
+$("#format-reset-btn").addEventListener("click", async () => {
+  if (!confirm("저장된 내 블로그 형식을 지우고 기본 형식으로 돌아갈까요?")) return;
+  await fetch("/api/format", { method: "DELETE" });
+  $("#format-status").textContent = "기본 형식으로 돌아갔어요.";
+  loadFormat();
+});
 
 async function pollAiChat() {
   const st = await fetch("/api/ai-chat/status").then((r) => r.json()).catch(() => null);
   if (!st || st.status === "idle" || st.status === "taken") return;
+  const isFormat = st.kind === "format";
+  const line = isFormat ? $("#format-status") : $("#handoff-status");
   if (st.status === "done") {
     clearInterval(aiPollTimer);
     await fetch("/api/ai-chat/taken", { method: "POST" }).catch(() => {});
-    $("#handoff-status").textContent = `✅ ${st.name}의 완성본을 받아왔어요.`;
-    loadPost(st.result);
+    if (isFormat) {
+      const r = await fetch("/api/format", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(st.result) })
+        .then((r) => r.json())
+        .catch((e) => ({ error: e.message }));
+      line.textContent = r.error ? "저장 실패: " + r.error : `✅ ${st.name}가 분석한 형식을 저장했어요: "${r.name}". 이제 초안을 쓸 때 이 형식을 따라요.`;
+      loadFormat();
+    } else {
+      line.textContent = `✅ ${st.name}의 완성본을 받아왔어요.`;
+      loadPost(st.result);
+    }
     return;
   }
   if (st.status === "error") {
     clearInterval(aiPollTimer);
-    $("#handoff-status").textContent = "오류: " + st.error + " — 아래 요청문을 복사해서 직접 붙여넣어도 돼요.";
+    line.textContent = "오류: " + st.error + (isFormat ? "" : " — 아래 요청문을 복사해서 직접 붙여넣어도 돼요.");
     return;
   }
-  const f = AI_STATUS_TEXT[st.status];
-  if (f) $("#handoff-status").textContent = f(st.name) + (st.note ? " " + st.note : "");
+  const f = isFormat && st.status === "chatting" ? FORMAT_CHATTING : AI_STATUS_TEXT[st.status];
+  if (f) line.textContent = f(st.name) + (st.note ? " " + st.note : "");
   if (["closed", "timeout"].includes(st.status)) clearInterval(aiPollTimer);
 }
 
@@ -325,6 +390,8 @@ $("#paste-result-btn").addEventListener("click", () => {
 
 // 완성된 글(JSON)을 3단계 미리보기에 넣고, 바로 네이버 글쓰기 창을 열어 채운다 (기존 임시저장 흐름 재사용)
 function loadPost(post) {
+  // 내 형식을 저장해 쓰는 경우엔 모야ZIP 전용 네이버 템플릿을 적용하지 않는다
+  if (formatInfo) $("#use-template-checkbox").checked = !!formatInfo.useTemplate;
   post.introLines = post.introLines || [];
   post.sectionHeadingLines = post.sectionHeadingLines || [];
   currentPost = post;

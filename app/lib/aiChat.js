@@ -50,18 +50,21 @@ const firstMatch = (sels) => `(() => {
   return null;
 })()`;
 
-// 화면의 코드블록 중, 우리가 정한 형식(title + sections)을 만족하는 마지막 JSON을 찾는다.
-// 요청문 속 예시(“블로그 제목”, “1번 섹션 본문”)는 제외한다.
-const FIND_RESULT_JS = `(() => {
+// 화면의 코드블록 중, 기다리는 결과 형식을 만족하는 마지막 JSON을 찾는다. 요청문 속 예시값은 제외한다.
+//   post:   초안 {title, sections[]}            — 예시 "블로그 제목" / "1번 섹션 본문" 제외
+//   format: 블로그 형식 {formatName, sections[]} — 예시 "형식 이름(예: …)" 제외
+const CHECKS = {
+  post: `j.title && Array.isArray(j.sections) && j.sections.length && j.title !== "블로그 제목" && j.sections[0] !== "1번 섹션 본문"`,
+  format: `j.formatName && Array.isArray(j.sections) && j.sections.length && !String(j.formatName).startsWith("형식 이름")`,
+};
+const findResultJs = (kind) => `(() => {
   const blocks = [...document.querySelectorAll("pre, code")].map((el) => el.innerText || el.textContent || "");
   for (let i = blocks.length - 1; i >= 0; i--) {
     const m = blocks[i].match(/\\{[\\s\\S]*\\}/);
     if (!m) continue;
     try {
       const j = JSON.parse(m[0]);
-      if (!j || !j.title || !Array.isArray(j.sections) || !j.sections.length) continue;
-      if (j.title === "블로그 제목" || j.sections[0] === "1번 섹션 본문") continue;
-      return JSON.stringify(j);
+      if (j && ${CHECKS[kind]}) return JSON.stringify(j);
     } catch {}
   }
   return null;
@@ -107,11 +110,11 @@ async function pressSend(client, site, sel) {
 }
 
 /** AI 채팅 탭을 열고 요청문을 보낸 뒤, 결과 JSON이 나올 때까지 지켜본다 (바로 반환 — 진행은 getState()). */
-async function start(ai, prompt) {
+async function start(ai, prompt, kind = "post") {
   const site = SITES[ai];
   if (!site) throw new Error("알 수 없는 AI예요: " + ai);
   if (state.client) state.client.close(); // 이전 대화 지켜보기는 그만둔다 (탭은 그대로 둠)
-  const s = (state = { status: "opening", ai, name: site.name, startedAt: Date.now() });
+  const s = (state = { status: "opening", ai, kind, name: site.name, startedAt: Date.now() });
 
   (async () => {
     try {
@@ -157,7 +160,7 @@ async function start(ai, prompt) {
       while (s === state) {
         if (client.closed || !(await targetAlive(targetId).catch(() => true))) return void (s.status = "closed");
         if (Date.now() > chatDeadline) return void (s.status = "timeout");
-        const found = await client.eval(FIND_RESULT_JS).catch(() => null);
+        const found = await client.eval(findResultJs(kind)).catch(() => null);
         if (found && found === last) {
           s.result = JSON.parse(found);
           s.status = "done";

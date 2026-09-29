@@ -26,3 +26,28 @@
   };
   document.readyState === "loading" ? document.addEventListener("DOMContentLoaded", show) : show();
 })();
+
+// 입력했던 검색어·글자를 브라우저가 기억했다가 목록으로 보여주지 않게 한다.
+// (같은 컴퓨터를 쓰는 다른 사람에게 내가 검색한 내용이 보이는 걸 막기 위함 — 앱은 검색어를 따로 저장하지 않는다)
+(function () {
+  function off(root) {
+    (root.querySelectorAll ? root.querySelectorAll("input, textarea, form") : []).forEach(function (el) {
+      if (el.type === "password") return; // 비밀번호 칸은 원래대로
+      el.setAttribute("autocomplete", "off");
+    });
+  }
+  function start() {
+    off(document);
+    new MutationObserver(function (list) {
+      list.forEach(function (m) {
+        m.addedNodes.forEach(function (n) {
+          if (n.nodeType !== 1) return;
+          if (/^(INPUT|TEXTAREA|FORM)$/.test(n.tagName) && n.type !== "password") n.setAttribute("autocomplete", "off");
+          off(n);
+        });
+      });
+    }).observe(document.documentElement, { childList: true, subtree: true });
+  }
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", start);
+  else start();
+})();
