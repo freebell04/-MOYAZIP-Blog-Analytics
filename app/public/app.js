@@ -227,6 +227,7 @@ $("#login-status").className = "status-pill no";
 
 // --- 체크한 글감을 AI(Claude / ChatGPT / Gemini)에게 넘겨서 대화하며 쓰기 ---
 const AI_SITES = {
+  claude: { name: "Claude", url: "https://claude.ai/new" },
   chatgpt: { name: "ChatGPT", url: "https://chatgpt.com/" },
   gemini: { name: "Gemini", url: "https://gemini.google.com/app" },
 };
@@ -253,15 +254,6 @@ document.querySelectorAll(".handoff-btn").forEach((btn) => {
       return;
     }
 
-    if (ai === "claude") {
-      const phrase = "글감으로 초안 써줘";
-      navigator.clipboard?.writeText(phrase).catch(() => {});
-      $("#handoff-prompt-box").hidden = true;
-      $("#handoff-status").textContent =
-        `✅ 글감 ${r.count}개를 넘겼어요. Claude는 메시지를 받아야 시작해요 → Claude Code 대화창에 "${phrase}"라고 보내주세요 (복사해뒀어요).`;
-      return;
-    }
-
     const site = AI_SITES[ai];
     $("#handoff-prompt").value = r.prompt;
     $("#handoff-prompt-box").hidden = false;
@@ -274,7 +266,7 @@ document.querySelectorAll(".handoff-btn").forEach((btn) => {
     else window.open(site.url, "_blank");
     $("#handoff-status").textContent =
       `✅ ${site.name}를 새 탭에 열었어요. ${copied ? "요청문이 복사돼 있으니" : "아래 요청문을 [복사]해서"} 입력창에 붙여넣고 보내세요. ` +
-      `방향을 고르고 초안을 다듬은 뒤 "완성"이라고 하면 나오는 JSON을 아래에 붙여넣으면 돼요.`;
+      `방향을 고르고 초안을 다듬은 뒤 "완성"이라고 하면 나오는 JSON을 아래에 붙여넣으면 블로그 글쓰기 창이 열려요.`;
   });
 });
 
@@ -315,6 +307,7 @@ $("#paste-result-btn").addEventListener("click", () => {
   $("#image-candidates").textContent = "AI 대화로 만든 글은 이미지를 네이버 에디터에서 직접 넣어주세요.";
   $("#step-preview").hidden = false;
   setActiveStep(3);
-  $("#paste-status").textContent = `✅ 불러왔어요 (섹션 ${post.sections.length}개). 아래 3단계에서 확인하고 임시저장하세요.`;
+  $("#paste-status").textContent = `✅ 불러왔어요 (섹션 ${post.sections.length}개). 네이버 블로그 글쓰기 창을 여는 중이에요... (크롬 창을 확인하세요)`;
   $("#step-preview").scrollIntoView({ behavior: "smooth" });
+  $("#save-draft-btn").click();
 });
