@@ -159,6 +159,18 @@ function formatRules(f) {
   return lines;
 }
 
+// 스타일 가이드 파일이 처음 받은 빈 틀 그대로면(제목·안내문·빈 칸만 있으면) 요청문에 넣지 않는다 — AI만 헷갈린다
+function meaningfulStyleGuide(text) {
+  const body = (text || "")
+    .split("\n")
+    .filter((l) => !/^\s*#/.test(l)) // 제목 줄
+    .filter((l) => !/이 파일 내용은|프롬프트에 그대로|톤\/문체 설명을 적거나|통째로 붙여넣어|더 정확하게 따라합니다/.test(l)) // 안내문
+    .map((l) => l.replace(/^\s*[-*]\s*$/, "").trim())
+    .filter(Boolean)
+    .join("\n");
+  return body.length >= 20 ? text.trim() : "";
+}
+
 function buildPostPrompt(data) {
   const d = describe();
   let rules, schema;
@@ -196,7 +208,7 @@ function buildPostPrompt(data) {
     "",
     `글 형식 규칙 (${d.name}):`,
     ...rules,
-    data.styleGuide && d.kind !== "saved" ? `\n[이 블로그 말투·스타일 가이드]\n${data.styleGuide}` : "",
+    meaningfulStyleGuide(data.styleGuide) && d.kind !== "saved" ? `\n[이 블로그 말투·스타일 가이드]\n${data.styleGuide.trim()}` : "",
     "",
     `[검색 키워드] ${data.keyword}`,
     ...data.items.map(
