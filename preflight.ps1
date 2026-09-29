@@ -1,6 +1,6 @@
 ﻿$ErrorActionPreference = "Stop"
 try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch {}
-$Host.UI.RawUI.WindowTitle = "네이버 블로그 도우미"
+$Host.UI.RawUI.WindowTitle = "네이버 블로그 도우미 - 준비 중"
 Set-Location -Path $PSScriptRoot
 
 function Stop-WithMessage($msg) {
@@ -10,8 +10,6 @@ function Stop-WithMessage($msg) {
   exit 1
 }
 
-# 이미 다른 폴더(또는 이전 실행)에서 서버가 떠 있는지 확인. 폴더를 두 번 풀었거나
-# 실행하기.bat을 두 번 눌렀을 때 "포트가 이미 사용 중" 에러 화면 대신 그냥 그 화면을 열어준다.
 function Test-PortOpen($portNum) {
   try {
     $client = New-Object System.Net.Sockets.TcpClient
@@ -23,20 +21,22 @@ function Test-PortOpen($portNum) {
   } catch { return $false }
 }
 
+# 이 폴더에서 이미 떠 있는 서버가 있으면 정리한다 (업데이트했는데 옛날 서버가 계속 떠 있는 걸 막기 위함)
+function Stop-MyOldServer {
+  $mine = Get-CimInstance Win32_Process -Filter "Name='node.exe'" -ErrorAction SilentlyContinue |
+    Where-Object { $_.CommandLine -and $_.CommandLine.ToLower().Contains($PSScriptRoot.ToLower()) -and $_.CommandLine -like "*server.js*" }
+  if ($mine) {
+    Write-Host "이 폴더의 이전 서버가 아직 떠 있어서 정리하고 새로 시작할게요..."
+    $mine | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+    Start-Sleep -Milliseconds 800
+  }
+}
+
 if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
   Stop-WithMessage "[!] Node.js가 설치되어 있지 않아요.`n    https://nodejs.org 에서 LTS 버전을 설치한 뒤 다시 실행해주세요."
 }
 
-# 업데이트한 뒤에도 "이 폴더"에서 띄운 예전 서버가 안 꺼지고 남아 있으면, 포트가 열려 있다는
-# 이유만으로 "이미 잘 떠 있다"고 보고 그 낡은 서버를 열어주면 안 된다 (업데이트가 반영 안 된 것처럼 보임).
-# 이 폴더의 서버라면 정리하고 새 코드로 다시 띄운다.
-$mine = Get-CimInstance Win32_Process -Filter "Name='node.exe'" -ErrorAction SilentlyContinue |
-  Where-Object { $_.CommandLine -and $_.CommandLine.ToLower().Contains($PSScriptRoot.ToLower()) -and $_.CommandLine -like "*server.js*" }
-if ($mine) {
-  Write-Host "이 폴더의 이전 서버가 아직 떠 있어서 정리하고 새로 시작할게요..."
-  $mine | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
-  Start-Sleep -Milliseconds 800
-}
+Stop-MyOldServer
 
 if (Test-PortOpen 3300) {
   Write-Host "포트 3300을 다른 프로그램(또는 이 프로그램을 풀어둔 다른 폴더)이 쓰고 있어요."
@@ -54,8 +54,21 @@ if (-not (Test-Path (Join-Path $PSScriptRoot "node_modules"))) {
   }
 }
 
+# 이웃 글 검색 등에서 쓰는 내부 브라우저(평소 쓰는 크롬과는 별개). 처음 한 번은 따로 받아야 한다.
+function Test-PlaywrightChromium {
+  $base = Join-Path $env:LOCALAPPDATA "ms-playwright"
+  if (-not (Test-Path $base)) { return $false }
+  return $null -ne (Get-ChildItem $base -Directory -Filter "chromium_headless_shell-*" -ErrorAction SilentlyContinue | Select-Object -First 1)
+}
+if (-not (Test-PlaywrightChromium)) {
+  Write-Host "글 검색 기능에 필요한 내부 브라우저를 받는 중이에요... (몇 분 걸릴 수 있어요)"
+  npx playwright install chromium
+  if ($LASTEXITCODE -ne 0) {
+    Stop-WithMessage "[!] 브라우저 설치에 실패했어요. 인터넷 연결을 확인하고 다시 실행해주세요."
+  }
+}
+
 # 서버가 실제로 응답할 때까지 기다렸다가 자동으로 넘어가는 로딩 화면을 먼저 띄운다
-# (서버가 뜨기 전에 그냥 열면 "사이트에 연결할 수 없음"이 잠깐 보여서 그걸 막는 용도)
 $loadingPath = Join-Path $env:TEMP "nbh-loading.html"
 @'
 <!doctype html>
@@ -86,7 +99,7 @@ $loadingPath = Join-Path $env:TEMP "nbh-loading.html"
     fetch(target, { mode: "no-cors", cache: "no-store" })
       .then(function () { location.href = target; })
       .catch(function () {
-        if (tries === 40) document.getElementById("sub").textContent = "시간이 좀 걸리네요... 콘솔 창(검은 창)에 안내가 떠 있는지 확인해보세요.";
+        if (tries === 40) document.getElementById("sub").textContent = "시간이 좀 걸리네요... 잠시 후 자동으로 다시 시도할게요.";
         setTimeout(check, 500);
       });
   }
@@ -96,18 +109,7 @@ $loadingPath = Join-Path $env:TEMP "nbh-loading.html"
 '@ | Set-Content -Path $loadingPath -Encoding UTF8
 Start-Process $loadingPath
 
-while ($true) {
-  Write-Host "============================================"
-  Write-Host " 네이버 블로그 도우미 실행 중 (이 창을 닫으면 꺼져요)"
-  Write-Host " http://localhost:3300"
-  Write-Host "============================================"
-  # "server.js"처럼 상대경로로 실행하면 나중에 Windows가 기억하는 실행 명령어에 폴더 경로가 안 남아서,
-  # 다음에 켤 때 "이 폴더의 예전 서버"인지 구분할 방법이 없어진다. 항상 절대경로로 실행한다.
-  node "$PSScriptRoot\server.js"
-  # 처음 설정을 저장하면 프로그램이 스스로 다시 시작해요 (종료 코드 3)
-  if ($LASTEXITCODE -ne 3) { break }
-}
-
-Write-Host ""
-Write-Host "프로그램이 종료되었습니다. 오류가 있다면 위 내용을 확인해주세요."
-Read-Host "계속하려면 Enter를 누르세요"
+# 실제 서버는 화면에 안 보이는 상태로 뒤에서 돌린다. 끌 때는 같은 폴더의 종료하기.bat을 쓰면 된다.
+Start-Process -FilePath "powershell.exe" `
+  -ArgumentList "-NoProfile", "-WindowStyle", "Hidden", "-ExecutionPolicy", "Bypass", "-File", "`"$PSScriptRoot\serverloop.ps1`"" `
+  -WindowStyle Hidden
