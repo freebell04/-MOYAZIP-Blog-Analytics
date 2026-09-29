@@ -123,48 +123,6 @@ $("#search-btn").addEventListener("click", async () => {
   setActiveStep(2);
 });
 
-$("#generate-btn").addEventListener("click", async () => {
-  if (!selectedItems.length) return alert("글감을 하나 이상 선택해주세요.");
-  $("#generate-btn").disabled = true;
-  $("#generate-status").textContent = "AI가 글을 작성 중입니다... (최대 몇 분 소요)";
-
-  const keyword = $("#keyword").value.trim();
-  const r = await fetch("/api/generate", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ keyword, selected: selectedItems }),
-  }).then((r) => r.json());
-
-  $("#generate-btn").disabled = false;
-
-  if (r.error) {
-    $("#generate-status").textContent = "오류: " + r.error;
-    // 글쓰기용 Claude에 로그인이 안 된 경우: 로그인 창을 여는 버튼을 보여준다
-    $("#claude-login-btn").hidden = r.code !== "CLAUDE_NOT_LOGGED_IN";
-    return;
-  }
-
-  $("#claude-login-btn").hidden = true;
-  $("#generate-status").textContent = "완료";
-  currentPost = r;
-  $("#post-title").value = r.title;
-  renderPostPreview(r);
-  $("#step-preview").hidden = false;
-  $("#image-candidates").classList.remove("empty-state");
-  setActiveStep(3);
-
-  if (r.imageQueries && r.imageQueries.length) {
-    $("#image-candidates").textContent = "이미지 검색 및 적합성 판단 중...";
-    const imgRes = await fetch("/api/images", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ imageQueries: r.imageQueries, topic: r.title }),
-    }).then((r) => r.json());
-
-    renderImageCandidates(imgRes);
-  }
-});
-
 $("#open-editor-btn").addEventListener("click", async () => {
   $("#open-editor-btn").disabled = true;
   $("#open-editor-status").textContent = "블로그 → 글쓰기 → 템플릿 적용 중입니다... (크롬 창을 확인하세요)";
@@ -267,14 +225,6 @@ $("#finalize-btn").addEventListener("click", async () => {
 $("#login-status").textContent = "로그인 필요";
 $("#login-status").className = "status-pill no";
 
-// --- 글쓰기용 Claude 로그인 창 열기 ---
-$("#claude-login-btn").addEventListener("click", async () => {
-  const r = await fetch("/api/claude-login", { method: "POST" }).then((r) => r.json());
-  $("#generate-status").textContent = r.error
-    ? "오류: " + r.error
-    : "검은 창이 열렸어요. 로그인 방법을 고르고 브라우저에서 로그인한 뒤, [선택 항목으로 글 작성]을 다시 눌러주세요.";
-});
-
 // --- 체크한 글감을 AI(Claude / ChatGPT / Gemini)에게 넘겨서 대화하며 쓰기 ---
 const AI_SITES = {
   chatgpt: { name: "ChatGPT", url: "https://chatgpt.com/" },
@@ -308,7 +258,7 @@ document.querySelectorAll(".handoff-btn").forEach((btn) => {
       navigator.clipboard?.writeText(phrase).catch(() => {});
       $("#handoff-prompt-box").hidden = true;
       $("#handoff-status").textContent =
-        `✅ 글감 ${r.count}개를 넘겼어요. 이제 Claude Code 대화창에 "${phrase}"라고 보내세요 (복사해뒀어요).`;
+        `✅ 글감 ${r.count}개를 넘겼어요. Claude는 메시지를 받아야 시작해요 → Claude Code 대화창에 "${phrase}"라고 보내주세요 (복사해뒀어요).`;
       return;
     }
 
