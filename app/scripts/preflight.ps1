@@ -54,7 +54,9 @@ function Move-LegacyLayout {
     "server.js", "package.json", "package-lock.json", "style-guide.md", "lib", "public", "node_modules",
     "preflight.ps1", "serverloop.ps1", "stop.ps1", "update.ps1", "run.ps1",
     "실행하기.bat", "업데이트하기.bat", "종료하기.bat",
-    "server.log", "server.log.out", "server.log.err"
+    "server.log", "server.log.out", "server.log.err",
+    # GitHub 소개 페이지용 파일 (프로그램엔 필요 없음)
+    "index.html", ".nojekyll", ".gitignore"
   )
   foreach ($name in $legacy) {
     $p = Join-Path $root $name
@@ -86,7 +88,7 @@ function Update-IfNeeded {
     Invoke-WebRequest -Uri "https://github.com/$REPO/archive/refs/heads/main.zip" -OutFile $zip -UseBasicParsing -TimeoutSec 120
     Expand-Archive -Path $zip -DestinationPath $tmp -Force
     $src = Get-ChildItem $tmp -Directory | Select-Object -First 1
-    robocopy $src.FullName $root /E /XD data node_modules .git /XF .gitignore .version server.log /NFL /NDL /NJH /NJS /NP | Out-Null
+    robocopy $src.FullName $root /E /XD data node_modules .git /XF .gitignore .version server.log (Join-Path $src.FullName "index.html") (Join-Path $src.FullName ".nojekyll") /NFL /NDL /NJH /NJS /NP | Out-Null
     if ($LASTEXITCODE -ge 8) { throw "파일 복사 실패 (robocopy $LASTEXITCODE)" }
     Set-Content -Path $verFile -Value $latest -Encoding ASCII
     return $true
