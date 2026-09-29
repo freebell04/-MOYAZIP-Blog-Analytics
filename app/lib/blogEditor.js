@@ -329,6 +329,111 @@ function parseBody(bodyText) {
  * 넣어가며 글 전체를 쓰고, 마지막에 자리표시 줄을 하나씩 실제 표로 바꾼다
  * (자리표시 줄에서 표 추가를 누르면 그 위치에 표가 들어가는 것을 확인함).
  */
+/**
+ * 템플릿 없이 쓸 때 "깔끔한 기본 틀"로 쓰기 위한 블록 목록.
+ *   도입(introLines) → 따옴표 인용구 / 섹션 소제목 → 세로선 인용구(굵게) / 섹션 사이 → 구분선
+ *   본문 줄의 **굵게** 표시는 굵게, "- " 로 시작하는 줄은 "• " 목록 줄로 쓴다.
+ */
+function composeStyledBlocks(post) {
+  const blocks = [];
+  const intro = (post.introLines || []).map((l) => l.trim()).filter(Boolean);
+  if (intro.length) blocks.push({ type: "quote", style: "default", lines: intro, bold: false });
+  const sections = post.sections || [];
+  const headings = post.sectionHeadingLines || [];
+  sections.forEach((body, i) => {
+    if (i > 0 || intro.length) blocks.push({ type: "hr" });
+    const heading = (headings[i] || []).map((l) => l.trim()).filter(Boolean).join(" ");
+    if (heading) blocks.push({ type: "quote", style: "quotation_line", lines: [heading], bold: true });
+    for (const raw of String(body || "").split("\n")) {
+      const line = raw.trim();
+      if (!line) continue;
+      blocks.push({ type: "para", text: /^[-*•]\s+/.test(line) ? "• " + line.replace(/^[-*•]\s+/, "") : line });
+    }
+  });
+  return blocks;
+}
+
+/** "**굵게**" 표시를 풀어서 [{text, bold}] 조각으로 */
+function boldSegments(text) {
+  return text
+    .split(/(\*\*[^*]+\*\*)/)
+    .filter(Boolean)
+    .map((s) => (/^\*\*[^*]+\*\*$/.test(s) ? { text: s.slice(2, -2), bold: true } : { text: s, bold: false }));
+}
+
+async function typeWithBold(page, text) {
+  for (const seg of boldSegments(text)) {
+    if (seg.bold) await page.keyboard.press("Control+b");
+    await typeText(page, seg.text);
+    if (seg.bold) await page.keyboard.press("Control+b");
+  }
+}
+
+/**
+ * 스마트에디터의 인용구·구분선을 써서 블록을 차례로 입력한다.
+ * 인용구는 아래에 빈 줄이 없으면 빠져나올 수 없어서(↓가 '출처' 칸에서 멈춤),
+ * 넣기 전에 아래 빈 줄을 먼저 만들어두고 ↓↓ 로 그 줄로 내려온다.
+ */
+async function writeStyledBody(frame, page, blocks) {
+  const f = page.frames().find((x) => x.url().includes("PostWriteForm")) || frame;
+  for (const b of blocks) {
+    if (b.type === "para") {
+      await typeWithBold(page, b.text);
+      await page.keyboard.press("Enter");
+    } else if (b.type === "hr") {
+      await f.click("button.se-insert-horizontal-line-default-toolbar-button");
+      await page.waitForTimeout(500); // 구분선 뒤에 빈 줄이 자동으로 생기고 커서가 그리로 간다
+    } else if (b.type === "quote") {
+      await page.keyboard.press("Enter");
+      await page.keyboard.press("ArrowUp");
+      if (b.style === "default") {
+        await f.click("button.se-insert-quotation-default-toolbar-button");
+      } else {
+        await f.click("button.se-document-toolbar-select-option-button[data-name='quotation']");
+        await page.waitForTimeout(400);
+        await f.click(`button[data-value='${b.style}']`);
+      }
+      await page.waitForTimeout(600);
+      for (let i = 0; i < b.lines.length; i++) {
+        if (i > 0) await page.keyboard.press("Enter");
+        if (b.bold) await page.keyboard.press("Control+b");
+        await typeWithBold(page, b.lines[i]);
+        if (b.bold) await page.keyboard.press("Control+b");
+      }
+      await page.keyboard.press("ArrowDown"); // 출처 칸
+      await page.keyboard.press("ArrowDown"); // 미리 만들어둔 아래 빈 줄
+      await page.waitForTimeout(300);
+    }
+  }
+}
+
+/** 입력 결과가 블록과 맞는지 확인 (인용구 개수·소제목·본문 줄) */
+async function verifyStyledBody(frame, page, blocks) {
+  const f = page.frames().find((x) => x.url().includes("PostWriteForm")) || frame;
+  const actual = await f.evaluate(() => {
+    const clean = (s) => s.replace(/​/g, "").replace(/\s+/g, " ").trim();
+    const comps = [...document.querySelectorAll(".se-component")].filter((c) => !c.classList.contains("se-documentTitle"));
+    return {
+      quotes: comps.filter((c) => c.classList.contains("se-quotation")).map((c) => clean((c.querySelector(".se-quote") || c).innerText)),
+      hrs: comps.filter((c) => c.classList.contains("se-horizontalLine")).length,
+      text: clean(comps.filter((c) => c.classList.contains("se-text")).map((c) => c.innerText).join(" ")),
+    };
+  });
+  const quotes = blocks.filter((b) => b.type === "quote");
+  const hrs = blocks.filter((b) => b.type === "hr").length;
+  if (actual.quotes.length !== quotes.length) return { ok: false, reason: `인용구 개수가 다름: 원문 ${quotes.length} / 에디터 ${actual.quotes.length}` };
+  if (actual.hrs !== hrs) return { ok: false, reason: `구분선 개수가 다름: 원문 ${hrs} / 에디터 ${actual.hrs}` };
+  const plain = (s) => s.replace(/\*\*/g, "").replace(/\s+/g, " ").trim();
+  for (let i = 0; i < quotes.length; i++) {
+    const want = plain(quotes[i].lines.join(" "));
+    if (!actual.quotes[i].includes(want)) return { ok: false, reason: `${i + 1}번째 인용구가 다름: 원문 "${want}" / 에디터 "${actual.quotes[i]}"` };
+  }
+  for (const p of blocks.filter((b) => b.type === "para")) {
+    if (!actual.text.includes(plain(p.text))) return { ok: false, reason: `본문 줄이 빠짐: "${plain(p.text).slice(0, 30)}"` };
+  }
+  return { ok: true };
+}
+
 async function writePlainBody(frame, page, bodyText) {
   const { lines, tables } = parseBody(bodyText);
   let tableNo = 0;
@@ -531,6 +636,25 @@ async function saveDraftToNaver(post) {
 
     const useTemplate = post.useTemplate !== false;
 
+    // 안전장치: 새 글로 시작했는데 본문에 이미 내용이 있으면(이어쓰기 팝업을 놓쳐 기존 임시저장 글이 열린 경우 등)
+    // 아래에서 본문을 전부 지우고 새로 쓰게 되므로, 기존 글을 덮어쓰지 않도록 여기서 멈춘다.
+    if (!continueDraft && !useTemplate) {
+      const existing = await page
+        .frames()
+        .find((x) => x.url().includes("PostWriteForm"))
+        ?.evaluate(() =>
+          [...document.querySelectorAll(".se-component:not(.se-documentTitle)")]
+            .map((c) => (c.querySelector(".se-placeholder") ? "" : c.innerText))
+            .join("")
+            .replace(/\s|​/g, "")
+            .replace("글감과함께나의일상을기록해보세요!", "")
+        )
+        .catch(() => "");
+      if (existing && existing.length > 0) {
+        throw new Error("새 글 화면에 이미 다른 글 내용이 열려 있어서, 덮어쓰지 않도록 멈췄어요. 크롬의 글쓰기 탭을 닫고 다시 시도해주세요.");
+      }
+    }
+
     if (useTemplate) {
       // 템플릿 → 내 템플릿 → '앞으로 쓸 템플릿' 클릭 (내용은 그대로 두고, 덮어쓰기 확인만 처리)
       const tmplBtn = frame.locator(".se-template-toolbar-button").first();
@@ -567,6 +691,8 @@ async function saveDraftToNaver(post) {
       // (제목도 se-component-content로 감싸져 있음), 제목 영역을 반드시 제외하고 찾아야 한다
       // — 안 그러면 본문 첫 줄이 제목 쪽 커서에 들어가 제목이 깨지는 버그가 생긴다.
       const bodyText = post.bodyHtml || composePlainBody(post);
+      // 섹션 형태로 온 글은 인용구·구분선을 쓴 깔끔한 기본 틀로 쓴다 (styled:false면 예전처럼 글자만)
+      const styledBlocks = !post.bodyHtml && post.sections && post.sections.length && post.styled !== false ? composeStyledBlocks(post) : null;
       const clearBody = async () => {
         const bodyAreaHandle = await frame.locator(":root").evaluateHandle(() => {
           const paras = Array.from(document.querySelectorAll(".se-component-content .se-text-paragraph"));
@@ -587,8 +713,13 @@ async function saveDraftToNaver(post) {
       let check = { ok: false };
       for (let attempt = 0; attempt < 2 && !check.ok; attempt++) {
         await clearBody();
-        await writePlainBody(frame, page, bodyText);
-        check = await verifyPlainBody(frame, bodyText);
+        if (styledBlocks) {
+          await writeStyledBody(frame, page, styledBlocks);
+          check = await verifyStyledBody(frame, page, styledBlocks);
+        } else {
+          await writePlainBody(frame, page, bodyText);
+          check = await verifyPlainBody(frame, bodyText);
+        }
       }
       if (!check.ok) {
         throw new Error(`본문이 원문과 다르게 입력돼서 저장하지 않았습니다 (${check.reason})`);
@@ -779,4 +910,4 @@ async function openTemplateEditor() {
   return { success: true };
 }
 
-module.exports = { saveDraftToNaver, finalizeTocAndSummary, openTemplateEditor };
+module.exports = { saveDraftToNaver, finalizeTocAndSummary, openTemplateEditor, _test: { composeStyledBlocks, writeStyledBody, verifyStyledBody } };

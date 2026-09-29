@@ -140,9 +140,17 @@ function renderPostPreview(r) {
   (r.sections || []).forEach((body, i) => {
     const headingLines = (r.sectionHeadingLines && r.sectionHeadingLines[i]) || [];
     const heading = headingLines.length ? headingLines.join(" / ") : `${i + 1}번`;
-    parts.push(`<h4>${i + 1}. ${escapeHtml(heading)}</h4><p>${escapeHtml(body)}</p>`);
+    parts.push(`<h4>${i + 1}. ${escapeHtml(heading)}</h4><p>${previewText(body)}</p>`);
   });
   el.innerHTML = parts.join("");
+}
+
+// 미리보기에서도 에디터에 들어갈 모양대로: **굵게** → 굵게, 줄바꿈 유지, "- " 줄 → • 목록
+function previewText(s) {
+  return escapeHtml(s || "")
+    .replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>")
+    .replace(/^[-*]\s+/gm, "• ")
+    .replace(/\n/g, "<br>");
 }
 
 function escapeHtml(s) {

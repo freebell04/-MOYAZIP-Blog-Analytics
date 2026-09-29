@@ -137,6 +137,14 @@ function buildAnalyzePrompt(samples) {
 // ---------------------------------------------------------------------------
 // 글쓰기 요청문 (ChatGPT/Gemini/Claude 채팅용)
 // ---------------------------------------------------------------------------
+// 에디터에 옮길 때 소제목은 인용구(굵게), 섹션 사이는 구분선으로 꾸며지고,
+// 본문의 **굵게** 는 굵은 글씨, "- " 줄은 • 목록 줄로 바뀐다 → AI가 그 표시를 쓰도록 안내
+const READABILITY_RULES = [
+  "- 본문(sections)은 모바일에서 읽기 좋게 1~2문장마다 줄바꿈(JSON 문자열 안에서는 \\n)해서 짧은 줄로 써줘",
+  "- 섹션마다 가장 중요한 문장이나 단어 1~2곳은 **굵게** 표시(별표 두 개로 감싸기)",
+  "- 나열할 게 있으면 줄 앞에 '- '를 붙여 목록으로 (예: \"- 롯데시네마: 아트카드\")",
+];
+
 const MOYAZIP_RULES = [
   "- introLines: 글 맨 위 3줄 요약, 각 5~15자",
   "- sectionHeadingLines: 섹션별 소제목 줄 수가 정해져 있음 → 1번 3줄, 2번 4줄, 3번 1줄, 4번 3줄, 5번 1줄 (각 5~15자)",
@@ -176,7 +184,7 @@ function buildPostPrompt(data) {
   let rules, schema;
   if (d.kind === "saved") {
     const n = d.format.sections.length;
-    rules = ["- 원문 문장을 베끼지 말고 새로 쓸 것", ...formatRules(d.format)];
+    rules = ["- 원문 문장을 베끼지 말고 새로 쓸 것", ...READABILITY_RULES, ...formatRules(d.format)];
     schema = JSON.stringify({
       title: "블로그 제목",
       introLines: ["도입 문장1", "도입 문장2"],
@@ -184,11 +192,11 @@ function buildPostPrompt(data) {
       sections: Array.from({ length: n }, (_, i) => `${i + 1}번 섹션 본문`),
     });
   } else if (d.kind === "moyazip") {
-    rules = ["- 원문 문장을 베끼지 말고 새로 쓸 것", ...MOYAZIP_RULES];
+    rules = ["- 원문 문장을 베끼지 말고 새로 쓸 것", ...READABILITY_RULES, ...MOYAZIP_RULES];
     schema = MOYAZIP_SCHEMA;
   } else {
     rules = [
-      "- 원문 문장을 베끼지 말고 새로 쓸 것",
+      "- 원문 문장을 베끼지 말고 새로 쓸 것", ...READABILITY_RULES,
       "- introLines: 글 시작 도입 1~3문장",
       "- 본문은 내용에 맞게 3~6개 부분으로 나누고, 부분마다 소제목(sectionHeadingLines)과 본문(sections)을 써줘",
       "- 마지막 부분은 정리·마무리로",
