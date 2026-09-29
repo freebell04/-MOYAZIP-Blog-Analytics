@@ -1,4 +1,6 @@
 ﻿$ErrorActionPreference = "Stop"
+# 예상 못 한 오류로 멈추면 로딩 화면이 영원히 기다리지 않도록, 무엇이든 화면에 보여주고 끝낸다
+trap { try { Set-Status -1 "" "켜는 중 예상치 못한 문제가 생겼어요: $($_.Exception.Message)" } catch {}; exit 1 }
 try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 } catch {}
 
 # 폴더 구조:  설치폴더\실행하기.vbs,  설치폴더\app\(server.js, data, ...),  설치폴더\app\scripts\(이 파일)
@@ -7,41 +9,53 @@ $root = Split-Path $app
 Set-Location -Path $app
 
 $REPO = "freebell04/-MOYAZIP-Blog-Analytics"
+$port = if ($env:NBH_PORT) { [int]$env:NBH_PORT } else { 3300 }  # NBH_PORT: 테스트용
+$env:PORT = "$port"                                                # serverloop → node 로 그대로 전달된다
+$url = "http://localhost:$port/"
+$verFile = Join-Path $app ".version"
+$staged = Join-Path $app ".staged"   # 뒤에서 미리 받아둔 새 버전 (다음 실행 때 바로 적용)
 
-# 창이 완전히 숨겨진 채로 돌기 때문에, 진짜 문제가 생겼을 때는 콘솔 대신 알림창으로 보여준다.
-Add-Type -AssemblyName System.Windows.Forms
-function Show-ErrorBox($msg) {
-  [System.Windows.Forms.MessageBox]::Show($msg, "네이버 블로그 도우미", "OK", "Error") | Out-Null
+# ---------------------------------------------------------------------------
+# 진행 상황 표시: 로딩 화면(file://)이 0.3초마다 이 js 파일을 다시 읽어서 단계·메시지를 보여준다.
+#   step 0 준비 · 1 업데이트 적용 · 2 필요한 파일 확인 · 3 서버 켜기
+# ---------------------------------------------------------------------------
+$statusPath = Join-Path $env:TEMP "nbh-status.js"
+function Set-Status($step, $msg, $err = "") {
+  $j = @{ step = $step; msg = $msg; err = $err; url = $url } | ConvertTo-Json -Compress
+  [System.IO.File]::WriteAllText($statusPath, "window.NBH=$j;", (New-Object System.Text.UTF8Encoding($false)))
 }
+function Fail($msg) { Set-Status -1 "" $msg; exit 1 }
 
 function Test-PortOpen($portNum) {
   try {
     $client = New-Object System.Net.Sockets.TcpClient
     $result = $client.BeginConnect("127.0.0.1", $portNum, $null, $null)
-    $ok = $result.AsyncWaitHandle.WaitOne(300)
+    $ok = $result.AsyncWaitHandle.WaitOne(200)
     if ($ok -and $client.Connected) { $client.Close(); return $true }
     $client.Close()
     return $false
   } catch { return $false }
 }
 
-# 이 설치 폴더에서 떠 있는 서버(예전 구조의 서버 포함)를 정리한다.
-# 업데이트하면서 파일을 덮어쓰려면, 그 파일을 쓰고 있는 옛날 서버부터 꺼야 한다.
-function Stop-MyOldServer {
+function Get-MyServerProcs {
   $r = $root.ToLower()
-  $mine = Get-CimInstance Win32_Process -Filter "Name='node.exe' OR Name='powershell.exe'" -ErrorAction SilentlyContinue |
+  Get-CimInstance Win32_Process -Filter "Name='node.exe' OR Name='powershell.exe'" -ErrorAction SilentlyContinue |
     Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -and $_.CommandLine.ToLower().Contains($r) -and ($_.CommandLine -like "*server.js*" -or $_.CommandLine -like "*serverloop.ps1*") }
-  if ($mine) {
-    $mine | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
-    Start-Sleep -Milliseconds 800
+}
+function Stop-MyServer {
+  $procs = Get-MyServerProcs
+  if ($procs) {
+    $procs | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+    Start-Sleep -Milliseconds 600
   }
 }
 
-# 예전 버전은 모든 파일이 설치 폴더 바로 아래에 흩어져 있었다. app\ 폴더로 옮긴 뒤 남은 옛 파일을 정리한다.
+# 예전 버전(모든 파일이 설치 폴더 바로 아래)에서 넘어온 경우: data를 app\data로 옮기고 남은 옛 파일을 정리한다.
 function Move-LegacyLayout {
   $oldData = Join-Path $root "data"
   $newData = Join-Path $app "data"
   if ((Test-Path $oldData) -and -not (Test-Path $newData)) {
+    Stop-MyServer
     # 옛날 서버가 띄운 네이버 로그인용 크롬이 data\chrome-profile을 잡고 있으면 옮기지 못한다
     $chromeProfile = (Join-Path $oldData "chrome-profile").ToLower()
     Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" -ErrorAction SilentlyContinue |
@@ -64,125 +78,115 @@ function Move-LegacyLayout {
   }
 }
 
-# GitHub의 최신 버전과 비교해서, 새 버전이 있으면 받아서 덮어쓴다 (data, node_modules는 건드리지 않는다).
-# 인터넷이 안 되거나 GitHub이 응답하지 않으면 조용히 건너뛰고 지금 버전으로 실행한다.
-function Update-IfNeeded {
-  $verFile = Join-Path $app ".version"
-  try {
-    $latest = (Invoke-RestMethod -Uri "https://api.github.com/repos/$REPO/commits/main" -TimeoutSec 5 `
-      -Headers @{ "User-Agent" = "naver-blog-helper" }).sha
-  } catch { return $false }
-  if (-not $latest) { return $false }
-  $current = if (Test-Path $verFile) { (Get-Content $verFile -Raw).Trim() } else { "" }
-  if ($current -eq $latest) { return $false }
-  if (-not $current) {
-    # 방금 새로 받은 압축본(또는 업데이트 직후)이라 이미 최신이다. 기준만 기록해둔다.
-    Set-Content -Path $verFile -Value $latest -Encoding ASCII
-    return $false
-  }
-
-  $tmp = Join-Path $env:TEMP ("nbh-update-" + [guid]::NewGuid().ToString("N"))
-  New-Item -ItemType Directory -Path $tmp | Out-Null
-  try {
-    $zip = Join-Path $tmp "main.zip"
-    Invoke-WebRequest -Uri "https://github.com/$REPO/archive/refs/heads/main.zip" -OutFile $zip -UseBasicParsing -TimeoutSec 120
-    Expand-Archive -Path $zip -DestinationPath $tmp -Force
-    $src = Get-ChildItem $tmp -Directory | Select-Object -First 1
-    robocopy $src.FullName $root /E /XD data node_modules .git /XF .gitignore .version server.log (Join-Path $src.FullName "index.html") (Join-Path $src.FullName ".nojekyll") /NFL /NDL /NJH /NJS /NP | Out-Null
-    if ($LASTEXITCODE -ge 8) { throw "파일 복사 실패 (robocopy $LASTEXITCODE)" }
-    Set-Content -Path $verFile -Value $latest -Encoding ASCII
-    return $true
-  } catch {
-    Show-ErrorBox "새 버전을 받는 중 문제가 생겼어요. 지금 버전으로 실행할게요.`n`n$($_.Exception.Message)"
-    return $false
-  } finally {
-    Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
-  }
+# 지난번 실행 때 뒤에서 미리 받아둔 새 버전이 있으면 적용한다 (인터넷 없이 로컬 복사라 몇 초면 끝난다).
+function Apply-StagedUpdate {
+  $ready = Join-Path $staged "READY"
+  if (-not (Test-Path $ready)) { return $false }
+  $sha = (Get-Content $ready -Raw).Trim()
+  $src = Get-ChildItem $staged -Directory | Select-Object -First 1
+  robocopy $src.FullName $root /E /XD data node_modules .git .staged /XF .gitignore .version server.log `
+    (Join-Path $src.FullName "index.html") (Join-Path $src.FullName ".nojekyll") /NFL /NDL /NJH /NJS /NP | Out-Null
+  if ($LASTEXITCODE -ge 8) { throw "새 버전 파일 복사 실패 (robocopy $LASTEXITCODE)" }
+  Set-Content -Path $verFile -Value $sha -Encoding ASCII
+  Remove-Item $staged -Recurse -Force -ErrorAction SilentlyContinue
+  return $true
 }
 
-# 아무 창도 안 뜨니까, 지금 뭐라도 되고 있다는 걸 보여줄 게 이 로딩 화면뿐이다.
-# 그래서 다른 어떤 작업보다도 먼저 띄운다 (업데이트·첫 설치로 몇 분 걸려도 계속 이 화면이 보인다).
-$loadingPath = Join-Path $env:TEMP "nbh-loading.html"
-@'
-<!doctype html>
-<html lang="ko"><head><meta charset="utf-8"><title>네이버 블로그 도우미</title>
-<style>
-  body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;
-    background:#f4f5f7;font-family:'Malgun Gothic',system-ui,sans-serif}
-  .box{text-align:center}
-  .badge{width:56px;height:56px;border-radius:16px;background:#03c75a;color:#fff;font-weight:800;
-    font-size:26px;display:flex;align-items:center;justify-content:center;margin:0 auto 18px}
-  .spin{width:28px;height:28px;border:3px solid #e6f9ee;border-top-color:#03c75a;border-radius:50%;
-    margin:0 auto 16px;animation:s .8s linear infinite}
-  @keyframes s{to{transform:rotate(360deg)}}
-  p{color:#1a1a1a;font-size:15px;margin:4px 0}
-  .sub{color:#5b5b5b;font-size:13px}
-</style></head>
-<body><div class="box">
-  <div class="badge">N</div>
-  <div class="spin"></div>
-  <p>최신 버전을 확인하고 준비하는 중이에요...</p>
-  <p class="sub" id="sub">잠시만 기다려주세요 (업데이트가 있거나 처음 켤 땐 몇 분 걸릴 수 있어요)</p>
-</div>
-<script>
-  var target = "http://localhost:3300/";
-  var tries = 0;
-  function check() {
-    tries++;
-    fetch(target, { mode: "no-cors", cache: "no-store" })
-      .then(function () { location.href = target; })
-      .catch(function () {
-        if (tries === 120) document.getElementById("sub").textContent = "생각보다 오래 걸리네요... 문제가 있다면 알림창이 뜰 거예요.";
-        setTimeout(check, 500);
-      });
-  }
-  check();
-</script>
-</body></html>
-'@ | Set-Content -Path $loadingPath -Encoding UTF8
-Start-Process $loadingPath
-
-if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
-  Show-ErrorBox "Node.js가 설치되어 있지 않아요.`n`nhttps://nodejs.org 에서 LTS 버전을 설치한 뒤 다시 실행해주세요."
-  exit 1
+# package.json이 바뀌었을 때만 npm install (매번 하면 느리다)
+function Test-NeedInstall {
+  $nm = Join-Path $app "node_modules"
+  if (-not (Test-Path $nm)) { return $true }
+  $hashFile = Join-Path $nm ".nbh-pkg-hash"
+  $h = (Get-FileHash (Join-Path $app "package.json") -Algorithm SHA1).Hash
+  return -not ((Test-Path $hashFile) -and ((Get-Content $hashFile -Raw).Trim() -eq $h))
+}
+function Save-InstallHash {
+  $h = (Get-FileHash (Join-Path $app "package.json") -Algorithm SHA1).Hash
+  Set-Content -Path (Join-Path $app "node_modules\.nbh-pkg-hash") -Value $h -Encoding ASCII
 }
 
-Stop-MyOldServer
-try { Move-LegacyLayout } catch {
-  Show-ErrorBox "예전 버전의 설정 폴더(data)를 새 위치로 옮기지 못했어요.`n네이버 로그인용 크롬 창을 모두 닫고 다시 실행해주세요.`n`n$($_.Exception.Message)"
-  exit 1
-}
-
-if (Test-PortOpen 3300) {
-  Show-ErrorBox "포트 3300을 다른 프로그램(또는 이 프로그램을 풀어둔 다른 폴더)이 쓰고 있어요.`n`n이 프로그램을 여러 폴더에 압축 풀어두셨다면, 하나만 남기고 나머지는 꺼주세요."
-  exit 0
-}
-
-$updated = Update-IfNeeded
-
-if ($updated -or -not (Test-Path (Join-Path $app "node_modules"))) {
-  npm install --omit=dev *> $null
-  if ($LASTEXITCODE -ne 0) {
-    Show-ErrorBox "필요한 파일을 설치하는 중 오류가 났어요. 인터넷 연결을 확인하고 다시 실행해주세요."
-    exit 1
-  }
-}
-
-# 이웃 글 검색 등에서 쓰는 내부 브라우저(평소 쓰는 크롬과는 별개). 처음 한 번은 따로 받아야 한다.
 function Test-PlaywrightChromium {
   $base = Join-Path $env:LOCALAPPDATA "ms-playwright"
   if (-not (Test-Path $base)) { return $false }
   return $null -ne (Get-ChildItem $base -Directory -Filter "chromium_headless_shell-*" -ErrorAction SilentlyContinue | Select-Object -First 1)
 }
-if (-not (Test-PlaywrightChromium)) {
-  npx playwright install chromium *> $null
-  if ($LASTEXITCODE -ne 0) {
-    Show-ErrorBox "글 검색 기능에 필요한 내부 브라우저 설치에 실패했어요. 인터넷 연결을 확인하고 다시 실행해주세요."
-    exit 1
+
+# 서버가 켜진 뒤 뒤에서 새 버전을 확인하고, 있으면 받아서 .staged에 준비만 해둔다.
+# (사용자는 기다리지 않는다. 다음에 실행할 때 Apply-StagedUpdate가 몇 초 만에 적용)
+function Stage-UpdateInBackground {
+  try {
+    $latest = (Invoke-RestMethod -Uri "https://api.github.com/repos/$REPO/commits/main" -TimeoutSec 8 `
+      -Headers @{ "User-Agent" = "naver-blog-helper" }).sha
+  } catch { return }
+  if (-not $latest) { return }
+  $current = if (Test-Path $verFile) { (Get-Content $verFile -Raw).Trim() } else { "" }
+  if (-not $current) { Set-Content -Path $verFile -Value $latest -Encoding ASCII; return }  # 방금 받은 압축본 = 최신
+  if ($current -eq $latest) { return }
+  if ((Test-Path (Join-Path $staged "READY")) -and ((Get-Content (Join-Path $staged "READY") -Raw).Trim() -eq $latest)) { return }
+
+  Remove-Item $staged -Recurse -Force -ErrorAction SilentlyContinue
+  New-Item -ItemType Directory -Path $staged | Out-Null
+  try {
+    $zip = Join-Path $staged "main.zip"
+    Invoke-WebRequest -Uri "https://github.com/$REPO/archive/refs/heads/main.zip" -OutFile $zip -UseBasicParsing -TimeoutSec 180
+    Expand-Archive -Path $zip -DestinationPath $staged -Force
+    Remove-Item $zip -Force
+    Set-Content -Path (Join-Path $staged "READY") -Value $latest -Encoding ASCII   # 다 받은 뒤에만 표시
+  } catch {
+    Remove-Item $staged -Recurse -Force -ErrorAction SilentlyContinue
   }
 }
 
-# 실제 서버는 화면에 안 보이는 상태로 뒤에서 돌린다. 끌 때는 설치 폴더의 종료하기.vbs를 쓰면 된다.
+# ===========================================================================
+# 1) 이미 켜져 있으면: 기다릴 것 없이 바로 화면을 연다
+# ===========================================================================
+if (Test-PortOpen $port) {
+  if (-not $env:NBH_NO_BROWSER) { Start-Process $url }
+  Stage-UpdateInBackground
+  exit 0
+}
+
+# ===========================================================================
+# 2) 로딩 화면부터 띄운다 (이후 모든 진행 상황이 여기 표시된다)
+# ===========================================================================
+Set-Status 0 "준비하는 중이에요"
+$loadingPath = Join-Path $env:TEMP "nbh-loading.html"
+Copy-Item (Join-Path $PSScriptRoot "loading.html") $loadingPath -Force
+if (-not $env:NBH_NO_BROWSER) { Start-Process $loadingPath }   # NBH_NO_BROWSER: 테스트용
+
+if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
+  Fail "Node.js가 설치되어 있지 않아요. https://nodejs.org 에서 LTS 버전을 설치한 뒤 다시 실행해주세요."
+}
+
+try { Move-LegacyLayout } catch {
+  Fail "예전 버전의 설정 폴더(data)를 새 위치로 옮기지 못했어요. 네이버 로그인용 크롬 창을 모두 닫고 다시 실행해주세요. ($($_.Exception.Message))"
+}
+
+# 포트는 닫혀 있는데 이 폴더의 serverloop가 남아 있을 수 있다(서버가 막 죽은 경우 등) → 정리
+Stop-MyServer
+
+if (Test-Path (Join-Path $staged "READY")) {
+  Set-Status 1 "새 버전을 적용하는 중이에요"
+  try { [void](Apply-StagedUpdate) } catch { Remove-Item $staged -Recurse -Force -ErrorAction SilentlyContinue }
+}
+
+if (Test-NeedInstall) {
+  Set-Status 2 "필요한 파일을 설치하는 중이에요 (처음이나 큰 업데이트 때만, 1~2분)"
+  # PowerShell 5.1은 npm 경고(stderr)를 치명적 오류로 취급해서 스크립트가 죽는다 → cmd로 돌린다
+  cmd /c "npm install --omit=dev --no-audit --no-fund >nul 2>&1"
+  if ($LASTEXITCODE -ne 0) { Fail "필요한 파일을 설치하는 중 오류가 났어요. 인터넷 연결을 확인하고 다시 실행해주세요." }
+  Save-InstallHash
+}
+if (-not (Test-PlaywrightChromium)) {
+  Set-Status 2 "글 검색용 내부 브라우저를 받는 중이에요 (처음 한 번만, 2~5분)"
+  cmd /c "npx playwright install chromium >nul 2>&1"
+  if ($LASTEXITCODE -ne 0) { Fail "글 검색 기능에 필요한 내부 브라우저 설치에 실패했어요. 인터넷 연결을 확인하고 다시 실행해주세요." }
+}
+
+Set-Status 3 "서버를 켜는 중이에요"
 Start-Process -FilePath "powershell.exe" `
   -ArgumentList "-NoProfile", "-WindowStyle", "Hidden", "-ExecutionPolicy", "Bypass", "-File", "`"$PSScriptRoot\serverloop.ps1`"" `
   -WindowStyle Hidden
+
+# 서버가 켜진 뒤에 뒤에서 새 버전 확인 (사용자는 기다리지 않는다)
+Stage-UpdateInBackground

@@ -19,6 +19,17 @@ while ($true) {
   Remove-Item "$logPath.out", "$logPath.err" -ErrorAction SilentlyContinue
   $code = $proc.ExitCode
   # 처음 설정을 저장하면 프로그램이 스스로 다시 시작해요 (종료 코드 3)
-  if ($code -ne 3) { break }
+  if ($code -ne 3) {
+    # 켜지자마자 꺼졌다면 로딩 화면이 계속 기다리지 않도록, 에러 내용을 로딩 화면에 보여준다
+    if (((Get-Date) - $proc.StartTime).TotalSeconds -lt 30 -and $code -ne 0) {
+      # 스택 추적 말고 실제 오류 문장(…Error: …)을 골라서 보여준다
+      $recent = Get-Content $logPath -Encoding UTF8 -Tail 40 -ErrorAction SilentlyContinue
+      $tail = ($recent | Where-Object { $_ -cmatch "Error\b" -and $_ -notmatch "^\s+at " } | Select-Object -First 1)
+      if (-not $tail) { $tail = ($recent | Select-Object -Last 2) -join " / " }
+      $j = @{ step = -1; msg = ""; err = "서버가 켜지다가 멈췄어요. ($tail) — 폴더 app\server.log에 자세한 내용이 있어요."; url = "" } | ConvertTo-Json -Compress
+      [System.IO.File]::WriteAllText((Join-Path $env:TEMP "nbh-status.js"), "window.NBH=$j;", (New-Object System.Text.UTF8Encoding($false)))
+    }
+    break
+  }
 }
 "===== $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') 서버 종료 (코드 $code) =====" | Out-File -FilePath $logPath -Append -Encoding UTF8

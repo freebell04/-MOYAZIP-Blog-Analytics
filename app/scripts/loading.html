@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><title>네이버 블로그 도우미 - 준비 중</title>
+<style>
+  :root{--g:#03c75a;--g-soft:#e6f9ee;--ink:#1a1a1a;--soft:#5b5b5b;--line:#e5e7eb;--bg:#f4f5f7;--card:#fff;--red:#d93025}
+  @media (prefers-color-scheme: dark){:root{--ink:#eee;--soft:#aaa;--line:#333;--bg:#141414;--card:#1e1e1e;--g-soft:#12351f}}
+  *{box-sizing:border-box}
+  body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:16px;
+    background:var(--bg);color:var(--ink);font-family:'Malgun Gothic',system-ui,sans-serif}
+  .card{width:100%;max-width:420px;background:var(--card);border:1px solid var(--line);border-radius:18px;padding:28px 26px}
+  .head{display:flex;align-items:center;gap:12px;margin-bottom:22px}
+  .badge{width:42px;height:42px;border-radius:12px;background:var(--g);color:#fff;font-weight:800;font-size:20px;
+    display:flex;align-items:center;justify-content:center;flex:none}
+  h1{font-size:17px;margin:0}
+  .time{font-size:12px;color:var(--soft);margin-top:2px}
+  .bar{height:6px;border-radius:3px;background:var(--line);overflow:hidden;margin-bottom:20px}
+  .bar i{display:block;height:100%;width:5%;background:var(--g);border-radius:3px;transition:width .4s ease}
+  ol{list-style:none;margin:0;padding:0}
+  li{display:flex;align-items:flex-start;gap:12px;padding:9px 0;font-size:14px;color:var(--soft)}
+  .dot{width:22px;height:22px;border-radius:50%;border:2px solid var(--line);flex:none;display:flex;align-items:center;justify-content:center;font-size:12px}
+  li.done{color:var(--ink)} li.done .dot{background:var(--g);border-color:var(--g);color:#fff}
+  li.done .dot::after{content:"✓";font-weight:700}
+  li.now{color:var(--ink);font-weight:700} li.now .dot{border-color:var(--g);border-top-color:transparent;animation:s .8s linear infinite}
+  li.skip{opacity:.45}
+  @keyframes s{to{transform:rotate(360deg)}}
+  .msg{font-size:13px;color:var(--soft);margin-top:16px;min-height:18px;line-height:1.5}
+  .err{display:none;margin-top:16px;padding:12px 14px;border-radius:10px;background:rgba(217,48,37,.08);color:var(--red);font-size:13px;line-height:1.6}
+</style></head>
+<body><div class="card">
+  <div class="head">
+    <div class="badge">N</div>
+    <div><h1 id="title">네이버 블로그 도우미를 켜는 중</h1><div class="time" id="time">0초</div></div>
+  </div>
+  <div class="bar"><i id="bar"></i></div>
+  <ol id="steps">
+    <li data-s="0"><span class="dot"></span>준비</li>
+    <li data-s="1"><span class="dot"></span>새 버전 적용</li>
+    <li data-s="2"><span class="dot"></span>필요한 파일 확인</li>
+    <li data-s="3"><span class="dot"></span>서버 켜기</li>
+    <li data-s="4"><span class="dot"></span>화면 열기</li>
+  </ol>
+  <div class="msg" id="msg"></div>
+  <div class="err" id="err"></div>
+</div>
+<script>
+  var t0 = Date.now(), maxStep = 0, st = { step: 0, msg: "", err: "", url: "http://localhost:3300/" }, done = false;
+  var PCT = [8, 25, 45, 75, 100];
+
+  // 실행 스크립트가 적어주는 진행 상황 파일(nbh-status.js)을 계속 다시 읽는다
+  function readStatus() {
+    var s = document.createElement("script");
+    s.src = "nbh-status.js?" + Date.now();
+    s.onload = s.onerror = function () {
+      s.remove();
+      if (window.NBH) st = window.NBH;
+      render();
+      // 어느 주소로 켜지는지(st.url) 알고 난 뒤에 확인을 시작한다
+      if (window.NBH && !probing) { probing = true; probe(); }
+    };
+    document.body.appendChild(s);
+  }
+
+  function render() {
+    var sec = Math.floor((Date.now() - t0) / 1000);
+    document.getElementById("time").textContent = sec + "초 경과";
+    if (st.err) {
+      document.getElementById("title").textContent = "켜는 중에 문제가 생겼어요";
+      var e = document.getElementById("err"); e.style.display = "block"; e.textContent = st.err;
+      document.getElementById("msg").textContent = "";
+      return;
+    }
+    var step = done ? 4 : Math.max(0, st.step);
+    if (step > maxStep) maxStep = step;
+    if (st.step === 1) sawUpdate = true;
+    document.querySelectorAll("#steps li").forEach(function (li) {
+      var n = +li.dataset.s;
+      if (n < maxStep || (done && n === maxStep)) li.className = n === 1 && !sawUpdate ? "done skip" : "done";
+      else li.className = n === maxStep ? "now" : "";
+    });
+    document.getElementById("bar").style.width = PCT[maxStep] + "%";
+    var m = done ? "화면을 여는 중이에요" : st.msg || "";
+    if (!done && maxStep === 3 && sec > 20) m += " — 컴퓨터가 막 켜졌거나 백신 검사 중이면 조금 더 걸릴 수 있어요";
+    document.getElementById("msg").textContent = m;
+  }
+  var sawUpdate = false, probing = false;
+
+  // 서버가 응답하면 바로 넘어간다. (Windows에선 아직 안 켜진 포트에 연결하면 실패하는 데만 2초가 걸려서,
+  // 0.6초 만에 끊고 다시 시도해야 켜지자마자 알아챈다)
+  function probe() {
+    if (done || st.err) return;
+    var ctl = new AbortController(), timer = setTimeout(function () { ctl.abort(); }, 600);
+    fetch(st.url, { mode: "no-cors", cache: "no-store", signal: ctl.signal })
+      .then(function () { clearTimeout(timer); done = true; render(); location.href = st.url; })
+      .catch(function () { clearTimeout(timer); setTimeout(probe, 150); });
+  }
+
+  readStatus(); setInterval(readStatus, 300);
+  setInterval(render, 1000);
+</script>
+</body></html>
