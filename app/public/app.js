@@ -275,25 +275,96 @@ $("#claude-login-btn").addEventListener("click", async () => {
     : "검은 창이 열렸어요. 로그인 방법을 고르고 브라우저에서 로그인한 뒤, [선택 항목으로 글 작성]을 다시 눌러주세요.";
 });
 
-// --- 체크한 글감을 Claude(대화창)에게 넘기기 ---
-$("#handoff-btn").addEventListener("click", async () => {
-  if (!selectedItems.length) return alert("글감을 하나 이상 선택해주세요.");
-  $("#handoff-btn").disabled = true;
-  $("#handoff-status").textContent = "글감 본문을 모으는 중이에요...";
-  const r = await fetch("/api/handoff", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ keyword: $("#keyword").value.trim(), selected: selectedItems }),
-  })
-    .then((r) => r.json())
-    .catch((e) => ({ error: e.message }));
-  $("#handoff-btn").disabled = false;
-  if (r.error) {
-    $("#handoff-status").textContent = "오류: " + r.error;
+// --- 체크한 글감을 AI(Claude / ChatGPT / Gemini)에게 넘겨서 대화하며 쓰기 ---
+const AI_SITES = {
+  chatgpt: { name: "ChatGPT", url: "https://chatgpt.com/" },
+  gemini: { name: "Gemini", url: "https://gemini.google.com/app" },
+};
+
+document.querySelectorAll(".handoff-btn").forEach((btn) => {
+  btn.addEventListener("click", async () => {
+    if (!selectedItems.length) return alert("글감을 하나 이상 선택해주세요.");
+    const ai = btn.dataset.ai;
+    // 팝업 차단을 피하려면 클릭 직후(기다리기 전에) 새 탭을 열어둬야 한다
+    const tab = AI_SITES[ai] ? window.open("about:blank", "_blank") : null;
+    document.querySelectorAll(".handoff-btn").forEach((b) => (b.disabled = true));
+    $("#handoff-status").textContent = "글감 본문을 모으는 중이에요...";
+    const r = await fetch("/api/handoff", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ keyword: $("#keyword").value.trim(), selected: selectedItems }),
+    })
+      .then((r) => r.json())
+      .catch((e) => ({ error: e.message }));
+    document.querySelectorAll(".handoff-btn").forEach((b) => (b.disabled = false));
+    if (r.error) {
+      if (tab) tab.close();
+      $("#handoff-status").textContent = "오류: " + r.error;
+      return;
+    }
+
+    if (ai === "claude") {
+      const phrase = "글감으로 초안 써줘";
+      navigator.clipboard?.writeText(phrase).catch(() => {});
+      $("#handoff-prompt-box").hidden = true;
+      $("#handoff-status").textContent =
+        `✅ 글감 ${r.count}개를 넘겼어요. 이제 Claude Code 대화창에 "${phrase}"라고 보내세요 (복사해뒀어요).`;
+      return;
+    }
+
+    const site = AI_SITES[ai];
+    $("#handoff-prompt").value = r.prompt;
+    $("#handoff-prompt-box").hidden = false;
+    let copied = false;
+    try {
+      await navigator.clipboard.writeText(r.prompt);
+      copied = true;
+    } catch {}
+    if (tab) tab.location.href = site.url;
+    else window.open(site.url, "_blank");
+    $("#handoff-status").textContent =
+      `✅ ${site.name}를 새 탭에 열었어요. ${copied ? "요청문이 복사돼 있으니" : "아래 요청문을 [복사]해서"} 입력창에 붙여넣고 보내세요. ` +
+      `방향을 고르고 초안을 다듬은 뒤 "완성"이라고 하면 나오는 JSON을 아래에 붙여넣으면 돼요.`;
+  });
+});
+
+$("#handoff-copy-btn").addEventListener("click", async () => {
+  const ta = $("#handoff-prompt");
+  try {
+    await navigator.clipboard.writeText(ta.value);
+  } catch {
+    ta.select();
+    document.execCommand("copy");
+  }
+  $("#handoff-copy-btn").textContent = "복사됨 ✓";
+  setTimeout(() => ($("#handoff-copy-btn").textContent = "복사"), 1500);
+});
+
+// AI가 준 최종 JSON을 붙여넣으면 3단계 미리보기로 넘어간다 (이후 임시저장은 기존 버튼 그대로)
+$("#paste-result-btn").addEventListener("click", () => {
+  const raw = $("#paste-result").value;
+  let post;
+  try {
+    const m = raw.match(/\{[\s\S]*\}/);
+    if (!m) throw new Error("JSON을 찾지 못했어요");
+    post = JSON.parse(m[0]);
+  } catch (e) {
+    $("#paste-status").textContent = "불러오기 실패: AI가 준 JSON 코드블록을 통째로 붙여넣어 주세요. (" + e.message + ")";
     return;
   }
-  const phrase = "글감으로 초안 써줘";
-  navigator.clipboard?.writeText(phrase).catch(() => {});
-  $("#handoff-status").textContent =
-    `✅ 글감 ${r.count}개를 넘겼어요. 이제 Claude Code 대화창에 "${phrase}"라고 보내세요 (복사해뒀어요).`;
+  if (!post.title || !Array.isArray(post.sections) || !post.sections.length) {
+    $("#paste-status").textContent = "불러오기 실패: title과 sections가 있어야 해요. AI에게 \"정해진 JSON 형식으로 다시 줘\"라고 해보세요.";
+    return;
+  }
+  post.introLines = post.introLines || [];
+  post.sectionHeadingLines = post.sectionHeadingLines || [];
+  currentPost = post;
+  selectedImagePaths = {};
+  $("#post-title").value = post.title;
+  renderPostPreview(post);
+  $("#image-candidates").textContent = "AI 대화로 만든 글은 이미지를 네이버 에디터에서 직접 넣어주세요.";
+  $("#step-preview").hidden = false;
+  setActiveStep(3);
+  $("#paste-status").textContent = `✅ 불러왔어요 (섹션 ${post.sections.length}개). 아래 3단계에서 확인하고 임시저장하세요.`;
+  $("#step-preview").scrollIntoView({ behavior: "smooth" });
 });
