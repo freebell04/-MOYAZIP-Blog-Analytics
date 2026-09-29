@@ -52,7 +52,7 @@ function clear() {
 function describe() {
   const saved = getSaved();
   if (saved) return { kind: "saved", name: saved.formatName || "내 블로그 형식", format: saved, useTemplate: false };
-  if (DEFAULT_KIND === "moyazip" || ownerSettings().moyazipTemplate) return { kind: "moyazip", name: "모야ZIP 템플릿 (기본)", format: null, useTemplate: true };
+  if (DEFAULT_KIND === "moyazip" || ownerSettings().moyazipTemplate) return { kind: "moyazip", name: "모야ZIP 형식 (기본)", format: null, useTemplate: false }; // 네이버 템플릿은 안 불러오고 빈 글쓰기 화면에 바로 쓴다
   return { kind: "free", name: "자유 형식 (기본)", format: null, useTemplate: false };
 }
 

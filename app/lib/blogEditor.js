@@ -268,12 +268,12 @@ function escapeQuotes(text) {
 function composePlainBody(post) {
   const parts = [];
   if (post.introLines && post.introLines.length) {
-    parts.push(post.introLines.join(" "));
+    parts.push(post.introLines.join("\n")); // 도입 줄은 줄마다 따로
   }
   const sections = post.sections || [];
   const headings = post.sectionHeadingLines || [];
   for (let i = 0; i < sections.length; i++) {
-    const heading = (headings[i] || []).join(" ");
+    const heading = (headings[i] || []).join("\n"); // 소제목 여러 줄도 줄마다 따로
     if (heading) parts.push(heading);
     parts.push(sections[i]);
   }
