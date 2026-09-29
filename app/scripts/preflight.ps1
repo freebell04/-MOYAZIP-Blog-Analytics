@@ -149,7 +149,8 @@ function Stage-UpdateInBackground {
 # ===========================================================================
 # 1) 이미 켜져 있으면: 기다릴 것 없이 바로 화면을 연다
 # ===========================================================================
-if (Test-PortOpen $port) {
+# (단, 받아둔 새 버전이 있으면 아래로 내려가서 서버를 껐다 켜며 적용한다 — 사용자가 "다시 켜야 적용"을 몰라도 되게)
+if ((Test-PortOpen $port) -and -not (Test-Path (Join-Path $staged "READY"))) {
   if (-not $env:NBH_NO_BROWSER) { Start-Process $url }
   Stage-UpdateInBackground
   exit 0
@@ -171,6 +172,9 @@ if (-not $gotLock) {
   if ((Test-Path $loadingPath) -and -not $env:NBH_NO_BROWSER) { Start-Process $loadingPath }
   exit 0
 }
+
+# 새 버전 적용 때문에 켜진 서버를 다시 켜는 경우: 로딩 화면이 옛 서버로 넘어가 버리지 않게 먼저 끈다
+if (Test-PortOpen $port) { Stop-MyServer }
 
 Set-Status 0 "준비하는 중이에요"
 Copy-Item (Join-Path $PSScriptRoot "loading.html") $loadingPath -Force
