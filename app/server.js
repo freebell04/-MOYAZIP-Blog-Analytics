@@ -12,7 +12,7 @@ process.on("uncaughtException", (err) => {
   console.error("[처리되지 않은 예외 — 서버는 계속 실행됩니다]", err);
 });
 
-const { askClaude, extractJson } = require("./lib/claude");
+const { askClaude, extractJson, openLoginWindow } = require("./lib/claude");
 const session = require("./lib/session");
 const { searchNaver, fetchArticleText } = require("./lib/scraper");
 const { findAndJudgeImages } = require("./lib/images");
@@ -156,8 +156,63 @@ app.post("/api/generate", async (req, res) => {
     const parsed = extractJson(raw);
     res.json(parsed);
   } catch (e) {
+    res.status(500).json({ error: e.message, code: e.code });
+  }
+});
+
+// --- AI 글쓰기용 Claude(CLI) 로그인 창 열기 (로그인은 사용자가 직접) ---
+app.post("/api/claude-login", (req, res) => {
+  try {
+    openLoginWindow();
+    res.json({ success: true });
+  } catch (e) {
     res.status(500).json({ error: e.message });
   }
+});
+
+// --- 체크한 글감을 Claude(대화창)에게 넘기기 ---
+// 앱 안에서 바로 쓰는 대신, Claude Code 대화창에서 "글감으로 초안 써줘"라고 하면
+// Claude가 GET /api/handoff 로 이걸 읽고 → 방향을 물어본 뒤 → 초안을 보여주고 → /api/save-draft 로 임시저장한다.
+const HANDOFF_PATH = path.join(__dirname, "data", "handoff.json");
+const HANDOFF_GUIDE = [
+  "이 파일은 네이버 블로그 도우미에서 사용자가 체크한 글감이다. 이걸로 블로그 초안을 쓰는 순서:",
+  "1) 글감(items)의 제목·본문을 읽고, 어떤 주제·방향·제목으로 쓸지 2~3개 안을 짧게 제안해서 사용자에게 먼저 물어본다.",
+  "2) 고른 방향으로 초안을 쓴다. styleGuide(이 블로그 말투)를 따르고, 원문 문장을 베끼지 말고 새로 쓴다.",
+  "   형식: title, introLines(3줄, 각 5~15자), sectionHeadingLines(섹션별 줄 수 3/4/1/3/1, 각 5~15자),",
+  "   sections(5개: 1 개요/스펙, 2 어떤 사람·상황에 유용한지, 3 Before→After, 4 사용법·활용법, 5 총평·앞으로 계획, 각 2~5문장).",
+  "3) 초안을 대화창에 먼저 보여주고, 사용자가 OK하면 POST http://localhost:<port>/api/save-draft 에",
+  "   {title, introLines, sectionHeadingLines, sections} JSON을 보내 네이버 에디터를 열고 임시저장한다 (같은 글을 고쳐 다시 저장할 땐 continueDraft:true).",
+].join("\n");
+
+app.post("/api/handoff", async (req, res) => {
+  const { keyword, selected } = req.body; // selected: [{title, link, snippet}]
+  if (!selected || !selected.length) return res.status(400).json({ error: "글감을 하나 이상 체크해주세요." });
+  try {
+    const items = [];
+    for (const it of selected) {
+      const text = await fetchArticleText(it.link).catch(() => "");
+      items.push({ title: it.title, link: it.link, snippet: it.snippet || "", text: (text || "").slice(0, 4000) });
+    }
+    const styleGuidePath = path.join(__dirname, "style-guide.md");
+    const data = {
+      guide: HANDOFF_GUIDE,
+      keyword: keyword || "",
+      savedAt: new Date().toISOString(),
+      blogName: config.blogName(),
+      styleGuide: fs.existsSync(styleGuidePath) ? fs.readFileSync(styleGuidePath, "utf-8").trim() : "",
+      items,
+    };
+    fs.mkdirSync(path.dirname(HANDOFF_PATH), { recursive: true });
+    fs.writeFileSync(HANDOFF_PATH, JSON.stringify(data, null, 2));
+    res.json({ success: true, count: items.length, withText: items.filter((x) => x.text).length });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get("/api/handoff", (req, res) => {
+  if (!fs.existsSync(HANDOFF_PATH)) return res.status(404).json({ error: "넘겨받은 글감이 없어요. 앱에서 글감을 체크하고 [Claude에게 넘기기]를 눌러주세요." });
+  res.type("application/json").send(fs.readFileSync(HANDOFF_PATH, "utf-8"));
 });
 
 // --- 이미지 검색 + 적합성 판단 ---

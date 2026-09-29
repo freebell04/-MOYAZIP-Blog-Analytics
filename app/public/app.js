@@ -139,9 +139,12 @@ $("#generate-btn").addEventListener("click", async () => {
 
   if (r.error) {
     $("#generate-status").textContent = "오류: " + r.error;
+    // 글쓰기용 Claude에 로그인이 안 된 경우: 로그인 창을 여는 버튼을 보여준다
+    $("#claude-login-btn").hidden = r.code !== "CLAUDE_NOT_LOGGED_IN";
     return;
   }
 
+  $("#claude-login-btn").hidden = true;
   $("#generate-status").textContent = "완료";
   currentPost = r;
   $("#post-title").value = r.title;
@@ -263,3 +266,34 @@ $("#finalize-btn").addEventListener("click", async () => {
 // (버튼을 눌러야만 실제로 브라우저에서 로그인 상태를 눈으로 확인하고 갱신함)
 $("#login-status").textContent = "로그인 필요";
 $("#login-status").className = "status-pill no";
+
+// --- 글쓰기용 Claude 로그인 창 열기 ---
+$("#claude-login-btn").addEventListener("click", async () => {
+  const r = await fetch("/api/claude-login", { method: "POST" }).then((r) => r.json());
+  $("#generate-status").textContent = r.error
+    ? "오류: " + r.error
+    : "검은 창이 열렸어요. 로그인 방법을 고르고 브라우저에서 로그인한 뒤, [선택 항목으로 글 작성]을 다시 눌러주세요.";
+});
+
+// --- 체크한 글감을 Claude(대화창)에게 넘기기 ---
+$("#handoff-btn").addEventListener("click", async () => {
+  if (!selectedItems.length) return alert("글감을 하나 이상 선택해주세요.");
+  $("#handoff-btn").disabled = true;
+  $("#handoff-status").textContent = "글감 본문을 모으는 중이에요...";
+  const r = await fetch("/api/handoff", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ keyword: $("#keyword").value.trim(), selected: selectedItems }),
+  })
+    .then((r) => r.json())
+    .catch((e) => ({ error: e.message }));
+  $("#handoff-btn").disabled = false;
+  if (r.error) {
+    $("#handoff-status").textContent = "오류: " + r.error;
+    return;
+  }
+  const phrase = "글감으로 초안 써줘";
+  navigator.clipboard?.writeText(phrase).catch(() => {});
+  $("#handoff-status").textContent =
+    `✅ 글감 ${r.count}개를 넘겼어요. 이제 Claude Code 대화창에 "${phrase}"라고 보내세요 (복사해뒀어요).`;
+});
