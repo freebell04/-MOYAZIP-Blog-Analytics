@@ -13,6 +13,7 @@ while ($true) {
   # 절대경로로 실행해야 나중에 이 서버를 "이 폴더 것"으로 구분해서 끌 수 있다.
   $proc = Start-Process -FilePath "node" -ArgumentList "`"$app\server.js`"" -NoNewWindow -PassThru `
     -RedirectStandardOutput "$logPath.out" -RedirectStandardError "$logPath.err"
+  $null = $proc.Handle   # 이걸 먼저 잡아둬야 끝난 뒤 ExitCode를 읽을 수 있다 (안 하면 빈 값)
   Wait-Process -Id $proc.Id -ErrorAction SilentlyContinue
   Get-Content "$logPath.out" -Encoding UTF8 -ErrorAction SilentlyContinue | Out-File -FilePath $logPath -Append -Encoding UTF8
   Get-Content "$logPath.err" -Encoding UTF8 -ErrorAction SilentlyContinue | Out-File -FilePath $logPath -Append -Encoding UTF8
@@ -26,7 +27,14 @@ while ($true) {
       $recent = Get-Content $logPath -Encoding UTF8 -Tail 40 -ErrorAction SilentlyContinue
       $tail = ($recent | Where-Object { $_ -cmatch "Error\b" -and $_ -notmatch "^\s+at " } | Select-Object -First 1)
       if (-not $tail) { $tail = ($recent | Select-Object -Last 2) -join " / " }
-      $j = @{ step = -1; msg = ""; err = "서버가 켜지다가 멈췄어요. ($tail) — 폴더 app\server.log에 자세한 내용이 있어요."; url = "" } | ConvertTo-Json -Compress
+      if ($tail -match "Cannot find module" -and $tail -match "node_modules") {
+        # 설치 파일이 망가진 경우: 완료 표시를 지워두면 다음 실행 때 preflight가 통째로 새로 설치한다
+        Remove-Item (Join-Path $app "node_modules\.nbh-pkg-hash") -Force -ErrorAction SilentlyContinue
+        $errMsg = "설치 파일 일부가 빠져 있어서 서버가 켜지지 않았어요. 실행하기.vbs를 한 번 더 누르면 자동으로 새로 설치해서 고쳐요."
+      } else {
+        $errMsg = "서버가 켜지다가 멈췄어요. ($tail) — 폴더 app\server.log에 자세한 내용이 있어요."
+      }
+      $j = @{ step = -1; msg = ""; err = $errMsg; url = "" } | ConvertTo-Json -Compress
       [System.IO.File]::WriteAllText((Join-Path $env:TEMP "nbh-status.js"), "window.NBH=$j;", (New-Object System.Text.UTF8Encoding($false)))
     }
     break

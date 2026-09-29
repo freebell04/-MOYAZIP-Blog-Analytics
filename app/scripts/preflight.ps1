@@ -100,6 +100,15 @@ function Test-NeedInstall {
   $h = (Get-FileHash (Join-Path $app "package.json") -Algorithm SHA1).Hash
   return -not ((Test-Path $hashFile) -and ((Get-Content $hashFile -Raw).Trim() -eq $h))
 }
+# 설치가 중간에 끊기면 npm이 ".이름-랜덤" 임시 폴더를 남기고, 일부 패키지는 파일이 빠진 채로 남는다.
+# 그 위에 npm install을 다시 해도 "이미 설치됨"으로 보고 안 고치므로, 이런 흔적이 있으면 통째로 지우고 새로 설치한다.
+function Test-BrokenInstall {
+  $nm = Join-Path $app "node_modules"
+  if (-not (Test-Path $nm)) { return $false }
+  $junk = Get-ChildItem $nm -Directory -Force -ErrorAction SilentlyContinue |
+    Where-Object { $_.Name -like ".*" -and $_.Name -ne ".bin" -and $_.Name -ne ".cache" } | Select-Object -First 1
+  return ($null -ne $junk) -or -not (Test-Path (Join-Path $nm ".nbh-pkg-hash"))
+}
 function Save-InstallHash {
   $h = (Get-FileHash (Join-Path $app "package.json") -Algorithm SHA1).Hash
   Set-Content -Path (Join-Path $app "node_modules\.nbh-pkg-hash") -Value $h -Encoding ASCII
@@ -149,8 +158,21 @@ if (Test-PortOpen $port) {
 # ===========================================================================
 # 2) 로딩 화면부터 띄운다 (이후 모든 진행 상황이 여기 표시된다)
 # ===========================================================================
-Set-Status 0 "준비하는 중이에요"
 $loadingPath = Join-Path $env:TEMP "nbh-loading.html"
+
+# 한 번에 하나만 실행: 두 번 눌러서 설치가 동시에 두 개 돌면 서로 파일을 덮어써서 설치가 망가진다.
+# 이미 다른 실행이 진행 중이면, 그 진행 상황을 보여주는 로딩 화면만 하나 더 열고 끝낸다.
+$sha1 = [System.Security.Cryptography.SHA1]::Create()
+$lockName = "Local\nbh-preflight-" + ([BitConverter]::ToString($sha1.ComputeHash([Text.Encoding]::UTF8.GetBytes($root.ToLower())))).Replace("-", "")
+$lock = New-Object System.Threading.Mutex($false, $lockName)
+$gotLock = $false
+try { $gotLock = $lock.WaitOne(0) } catch [System.Threading.AbandonedMutexException] { $gotLock = $true }
+if (-not $gotLock) {
+  if ((Test-Path $loadingPath) -and -not $env:NBH_NO_BROWSER) { Start-Process $loadingPath }
+  exit 0
+}
+
+Set-Status 0 "준비하는 중이에요"
 Copy-Item (Join-Path $PSScriptRoot "loading.html") $loadingPath -Force
 if (-not $env:NBH_NO_BROWSER) { Start-Process $loadingPath }   # NBH_NO_BROWSER: 테스트용
 
@@ -170,8 +192,17 @@ if (Test-Path (Join-Path $staged "READY")) {
   try { [void](Apply-StagedUpdate) } catch { Remove-Item $staged -Recurse -Force -ErrorAction SilentlyContinue }
 }
 
-if (Test-NeedInstall) {
-  Set-Status 2 "필요한 파일을 설치하는 중이에요 (처음이나 큰 업데이트 때만, 1~2분)"
+$broken = Test-BrokenInstall
+if ($broken -or (Test-NeedInstall)) {
+  $nm = Join-Path $app "node_modules"
+  if ($broken) {
+    Set-Status 2 "설치 파일 일부가 망가져 있어서 새로 설치하는 중이에요 (1~2분)"
+    Remove-Item $nm -Recurse -Force -ErrorAction SilentlyContinue
+  } else {
+    Set-Status 2 "필요한 파일을 설치하는 중이에요 (처음이나 큰 업데이트 때만, 1~2분)"
+  }
+  # 설치가 다 끝나야만 "설치 완료" 표시(해시)를 남긴다 → 중간에 끊기면 다음 실행 때 자동으로 다시 설치된다
+  Remove-Item (Join-Path $nm ".nbh-pkg-hash") -Force -ErrorAction SilentlyContinue
   # PowerShell 5.1은 npm 경고(stderr)를 치명적 오류로 취급해서 스크립트가 죽는다 → cmd로 돌린다
   cmd /c "npm install --omit=dev --no-audit --no-fund >nul 2>&1"
   if ($LASTEXITCODE -ne 0) { Fail "필요한 파일을 설치하는 중 오류가 났어요. 인터넷 연결을 확인하고 다시 실행해주세요." }
