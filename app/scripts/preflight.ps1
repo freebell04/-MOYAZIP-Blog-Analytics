@@ -146,6 +146,28 @@ function Stage-UpdateInBackground {
   }
 }
 
+# 설치 폴더의 "블로그 도우미 스튜디오" 바로가기 아이콘을 지금 위치로 맞춘다.
+# (바로가기는 폴더를 옮겨도 윈도우가 대상을 찾아주지만, 아이콘 경로는 옮기면 끊어져서 켤 때마다 다시 맞춘다)
+# 바로가기가 생긴 뒤에는 예전 "실행하기.vbs"는 필요 없으니 지운다.
+function Update-Shortcut {
+  try {
+    $lnkPath = Join-Path $root "블로그 도우미 스튜디오.lnk"
+    if (-not (Test-Path -LiteralPath $lnkPath)) { return }
+    $vbs = Join-Path $PSScriptRoot "launch.vbs"
+    $want = (Join-Path $app "assets\icon.ico") + ",0"
+    $l = (New-Object -ComObject WScript.Shell).CreateShortcut($lnkPath)
+    if ($l.IconLocation -ne $want -or $l.TargetPath -ne $vbs) {
+      $l.TargetPath = $vbs
+      $l.IconLocation = $want
+      $l.WorkingDirectory = $PSScriptRoot
+      $l.Save()
+    }
+    $old = Join-Path $root "실행하기.vbs"
+    if (Test-Path -LiteralPath $old) { Remove-Item -LiteralPath $old -Force -ErrorAction SilentlyContinue }
+  } catch {}
+}
+Update-Shortcut
+
 # ===========================================================================
 # 1) 이미 켜져 있으면: 기다릴 것 없이 바로 화면을 연다
 # ===========================================================================
