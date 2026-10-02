@@ -25,6 +25,9 @@
 </section>
 <script>
 const $ = (s) => document.querySelector(s);
+// 선정 안내문의 링크(?key=...)로 들어오면 키가 미리 입력돼 있다 (확인 버튼은 직접 누른다)
+const preKey = new URLSearchParams(location.search).get("key");
+if (preKey) { $("#key").value = preKey; history.replaceState(null, "", location.pathname); }
 fetch("/api/license").then((r) => r.json()).then((st) => {
   if (st.ok) location.href = "/";
   else if (st.expired) $("#why").textContent = `사용 기간이 끝났어요 (${st.start} ~ ${st.end}). 계속 쓰시려면 새 키를 입력해주세요.`;
