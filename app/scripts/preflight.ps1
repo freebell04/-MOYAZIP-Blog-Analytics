@@ -84,8 +84,11 @@ function Apply-StagedUpdate {
   if (-not (Test-Path $ready)) { return $false }
   $sha = (Get-Content $ready -Raw).Trim()
   $src = Get-ChildItem $staged -Directory | Select-Object -First 1
-  robocopy $src.FullName $root /E /XD data node_modules .git .staged /XF .gitignore .version server.log `
-    (Join-Path $src.FullName "index.html") (Join-Path $src.FullName ".nojekyll") /NFL /NDL /NJH /NJS /NP | Out-Null
+  # 바로가기는 이미 있으면(아이콘을 이 폴더 위치로 맞춰둔 상태) 새 버전으로 덮어쓰지 않는다
+  $skip = @((Join-Path $src.FullName "index.html"), (Join-Path $src.FullName ".nojekyll"))
+  $lnkName = "블로그 도우미 스튜디오.lnk"
+  if (Test-Path -LiteralPath (Join-Path $root $lnkName)) { $skip += (Join-Path $src.FullName $lnkName) }
+  robocopy $src.FullName $root /E /XD data node_modules .git .staged /XF .gitignore .version server.log @skip /NFL /NDL /NJH /NJS /NP | Out-Null
   if ($LASTEXITCODE -ge 8) { throw "새 버전 파일 복사 실패 (robocopy $LASTEXITCODE)" }
   Set-Content -Path $verFile -Value $sha -Encoding ASCII
   Remove-Item $staged -Recurse -Force -ErrorAction SilentlyContinue
@@ -161,6 +164,12 @@ function Update-Shortcut {
       $l.IconLocation = $want
       $l.WorkingDirectory = $PSScriptRoot
       $l.Save()
+      # 탐색기가 예전 아이콘을 기억하고 있지 않게 바로 알린다
+      try {
+        Add-Type -Namespace NBH -Name Shell -ErrorAction Stop -MemberDefinition '[System.Runtime.InteropServices.DllImport("shell32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)] public static extern void SHChangeNotify(int e, uint f, string a, System.IntPtr b);'
+        [NBH.Shell]::SHChangeNotify(0x00002000, 0x0005, $lnkPath, [IntPtr]::Zero)
+        [NBH.Shell]::SHChangeNotify(0x08000000, 0x0000, $null, [IntPtr]::Zero)
+      } catch {}
     }
     $old = Join-Path $root "실행하기.vbs"
     if (Test-Path -LiteralPath $old) { Remove-Item -LiteralPath $old -Force -ErrorAction SilentlyContinue }
