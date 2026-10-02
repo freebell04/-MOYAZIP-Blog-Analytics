@@ -211,8 +211,40 @@ Set-Status 0 "준비하는 중이에요"
 Copy-Item (Join-Path $PSScriptRoot "loading.html") $loadingPath -Force
 if (-not $env:NBH_NO_BROWSER) { Start-Process $loadingPath }   # NBH_NO_BROWSER: 테스트용
 
-if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
-  Fail "Node.js가 설치되어 있지 않아요. https://nodejs.org 에서 LTS 버전을 설치한 뒤 다시 실행해주세요."
+# Node.js가 없으면 설치를 시키지 않고, 공식 압축본을 받아 app\runtime에 풀어서 쓴다 (이 폴더 안에서만 쓰이고 PC엔 설치되지 않는다)
+function Get-LocalNodeDir {
+  $rt = Join-Path $app "runtime"
+  if (-not (Test-Path $rt)) { return $null }
+  $d = Get-ChildItem $rt -Directory -Filter "node-v*-win-x64" -ErrorAction SilentlyContinue | Sort-Object Name -Descending | Select-Object -First 1
+  if ($d -and (Test-Path (Join-Path $d.FullName "node.exe"))) { return $d.FullName }
+  return $null
+}
+function Install-LocalNode {
+  $rt = Join-Path $app "runtime"
+  New-Item -ItemType Directory -Path $rt -Force | Out-Null
+  $base = "https://nodejs.org/dist/latest-v22.x"
+  $sums = (Invoke-WebRequest -Uri "$base/SHASUMS256.txt" -UseBasicParsing -TimeoutSec 30).Content
+  $line = ($sums -split "`n" | Where-Object { $_ -match "node-v[\d\.]+-win-x64\.zip" } | Select-Object -First 1)
+  if (-not $line) { throw "Node.js 다운로드 정보를 찾지 못했어요" }
+  $hash, $file = ($line.Trim() -split "\s+")
+  $zip = Join-Path $rt $file
+  Invoke-WebRequest -Uri "$base/$file" -OutFile $zip -UseBasicParsing -TimeoutSec 600
+  if ((Get-FileHash $zip -Algorithm SHA256).Hash.ToLower() -ne $hash.ToLower()) { Remove-Item $zip -Force; throw "받은 Node.js 파일이 올바르지 않아요" }
+  Expand-Archive -Path $zip -DestinationPath $rt -Force
+  Remove-Item $zip -Force
+}
+$sysNodeOk = $false
+$nodeCmd = Get-Command node -ErrorAction SilentlyContinue
+if ($nodeCmd) { try { $sysNodeOk = ([int]((& node -p "process.versions.node.split('.')[0]") 2>$null)) -ge 18 } catch {} }
+if (-not $sysNodeOk) {
+  $nd = Get-LocalNodeDir
+  if (-not $nd) {
+    Set-Status 2 "실행에 필요한 Node.js를 받는 중이에요 (처음 한 번만, 1~2분)"
+    try { Install-LocalNode } catch { Fail "Node.js를 자동으로 받지 못했어요. 인터넷 연결을 확인하고 다시 실행해주세요. ($($_.Exception.Message))" }
+    $nd = Get-LocalNodeDir
+  }
+  if (-not $nd) { Fail "Node.js를 준비하지 못했어요. 다시 실행해주세요." }
+  $env:PATH = "$nd;$env:PATH"   # serverloop·npm 모두 이 Node를 쓰게 된다
 }
 
 try { Move-LegacyLayout } catch {
