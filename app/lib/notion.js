@@ -218,4 +218,4 @@ function isReady() {
   return !!(c.token && c.target);
 }
 
-module.exports = { getPublicConfig, saveConfig, saveReport, getLog, parseNotionId, replaceSection, isReady };
+module.exports = { getPublicConfig, saveConfig, saveReport, getLog, parseNotionId, replaceSection, isReady, call, getConfig };

@@ -58,6 +58,22 @@ const { buildWorkbook } = require("./lib/statsExcel");
 const app = express();
 app.use(express.json({ limit: "10mb" }));
 
+// --- 사용 키 (체험단·구매자용). 키를 만드는 개인키가 있는 관리자 컴퓨터는 키 없이 쓴다 ---
+const license = require("./lib/license");
+app.get("/api/license", (req, res) => res.json(license.status()));
+app.post("/api/license", (req, res) => {
+  const r = license.activate((req.body || {}).key);
+  res.status(r.ok ? 200 : 400).json(r);
+});
+// 키가 없거나 기간이 끝났으면 모든 화면을 키 입력 화면으로 보낸다
+app.use((req, res, next) => {
+  if (req.path === "/license.html" || req.path.startsWith("/api/license") || /\.(css|js|png|ico|svg)$/.test(req.path)) return next();
+  const st = license.status();
+  if (st.ok) return next();
+  if (req.path.startsWith("/api/")) return res.status(402).json({ error: st.reason, license: st });
+  res.redirect("/license.html");
+});
+
 // --- 처음 실행: 블로그 아이디 설정 ---
 app.get("/api/setup", (req, res) => {
   res.json({ configured: config.isConfigured(), blogId: config.blogId(), blogName: config.blogName() });
@@ -335,6 +351,37 @@ app.post("/api/finalize-toc", async (req, res) => {
 });
 
 // --- 이웃 소통: 내 글에 공감/댓글 남긴 사람 모아보기 (답방은 사용자가 직접) ---
+// --- 체험단 선정 (관리자 컴퓨터 전용) ---
+const trialAdmin = require("./lib/trialAdmin");
+const adminOnly = (req, res, next) => (license.isAdmin() ? next() : res.status(403).json({ error: "관리자 컴퓨터에서만 쓸 수 있어요." }));
+app.get("/api/admin/is-admin", (req, res) => res.json({ admin: license.isAdmin() }));
+app.get("/api/admin/trial", adminOnly, async (req, res) => {
+  try {
+    res.json({ applicants: await trialAdmin.screen(), trialDays: trialAdmin.TRIAL_DAYS });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+app.post("/api/admin/trial/select", adminOnly, async (req, res) => {
+  try {
+    const ids = (req.body || {}).ids || [];
+    if (!ids.length) return res.status(400).json({ error: "선정할 사람을 체크해주세요." });
+    res.json({ results: await trialAdmin.select(ids) });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+app.post("/api/admin/trial/status", adminOnly, async (req, res) => {
+  try {
+    const { id, value } = req.body || {};
+    if (!["대기", "탈락", "선정"].includes(value)) return res.status(400).json({ error: "상태 값이 올바르지 않아요." });
+    await trialAdmin.setSelection(id, value);
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // 이웃 소통 화면의 '주제 추천': 이웃들의 최근 글에서 여러 명이 같이 쓰는 주제·키워드
 // (성과 통계를 아직 안 불러왔어도 동작한다 — 그땐 '내가 이미 쓴 주제' 비교만 빠진다)
 app.get("/api/neighbor-trends", (req, res) => {
