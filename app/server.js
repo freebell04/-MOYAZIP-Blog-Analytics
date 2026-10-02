@@ -27,9 +27,9 @@ const aiChat = require("./lib/aiChat");
 const blogFormat = require("./lib/blogFormat");
 // 이웃들이 요즘 쓰는 글로 주제 추천 (이웃 소통 화면의 '주제 추천' 탭)
 const trendsLib = require("./lib/trends");
-// 성과 통계 화면에 이웃 트렌드를 섞어 보여주는 건 개인판 전용
-const trendsFor = () => null;
-const statsWithTrends = (d) => d;
+// 성과 통계 + 이웃 트렌드 추천을 합친 데이터 (통계 화면·엑셀·노션 리포트에 쓴다)
+const trendsFor = (d) => (d && trendsLib ? trendsLib.buildTrends(d, neighbors.getCached()) : null);
+const statsWithTrends = (d) => (trendsLib ? trendsLib.withTrendIdeas(d, trendsFor(d)) : d);
 const { buildWeekly, buildMonthly, buildMemoOnly, memoBlocks, MEMO_HEADING, memoHeading } = require("./lib/notionReport");
 
 /**

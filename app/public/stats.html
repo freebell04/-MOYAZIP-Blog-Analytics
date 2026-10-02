@@ -75,6 +75,10 @@
   .kind.cross { background: #e6f7f7; color: #0f7a7a; }
   .kind.season { background: #fdecef; color: #c2334f; }
   .idea .ex { margin: 6px 0 0; padding-left: 16px; font-size: 12px; color: var(--ink-soft); }
+  .idea .qs { margin: 8px 0 2px; padding: 8px 10px; border-radius: 8px; background: var(--green-tint, #e6f9ee); font-size: 12px; }
+  .idea .qs span { font-weight: 700; color: var(--green-dark, #029b46); }
+  .idea .qs ul { margin: 4px 0 0; padding-left: 16px; color: var(--ink); }
+  .idea .btn-write { display: inline-block; margin-top: 8px; padding: 5px 12px; border-radius: 999px; border: 1px solid var(--green, #03c75a); color: var(--green-dark, #029b46); font-size: 12px; font-weight: 700; text-decoration: none; }
   .idea .ex a { color: var(--ink-soft); }
   .kw-chips { display: flex; flex-wrap: wrap; gap: 6px; }
   .kw { font-size: 13px; padding: 4px 10px; border-radius: 999px; background: #f3e8ff; color: #5b2a9a; cursor: default; }
@@ -392,8 +396,8 @@ function render() {
 
     <section class="card">
       <h2>💡 다음 콘텐츠 추천</h2>
-      <p class="sub">내 검색어·인기 글${S.trends ? " + 이웃들이 요즘 쓰는 글" : ""}을 기준으로 골랐어요</p>
-      <div class="ideas">${[...a.ideas, ...(S.trends ? S.trends.ideas : [])].map(ideaCard).join("")}</div>
+      <p class="sub">${S.trends && S.trends.postCount ? `이웃 ${S.trends.neighborCount}명의 최근 글 + 내 검색어·인기 글을 보고, 내 블로그와 이어지면서 사람들이 궁금해할 만한 주제로 골랐어요` : "내 검색어·인기 글을 기준으로 골랐어요 · 이웃 소통에서 [새로 불러오기]를 하면 이웃 글도 참고해서 더 폭넓게 추천해요"}</p>
+      <div class="ideas">${[...(S.trends ? S.trends.ideas : []), ...a.ideas].map(ideaCard).join("")}</div>
     </section>
 
     <section class="card" id="records"></section>`;
@@ -419,17 +423,43 @@ function render() {
 
 const IDEA_KIND = {
   gap: "검색 수요 있음 · 새 글", series: "후속편·시리즈", top: "인기 주제 확장",
+  trend: "이웃 글 기반 · 내 블로그와 연결", cross: "내 강점 × 이웃 관심", season: "시즌",
 };
 function ideaCard(i) {
   const ex = (i.examples || []).map((e) => `<li><a href="${esc(e.link)}" target="_blank" rel="noopener">${esc(e.nick)} 「${esc(e.title.slice(0, 34))}${e.title.length > 34 ? "…" : ""}」</a></li>`).join("");
   return `<div class="idea">
     <span class="kind ${i.type}">${IDEA_KIND[i.type] || i.type}</span>
     <b>${esc(i.title)}</b><p>${esc(i.reason)}</p>
-    ${ex ? `<ul class="ex">${ex}</ul>` : ""}
+    ${(i.questions || []).length ? `<div class="qs"><span>사람들이 궁금해할 질문</span><ul>${i.questions.map((q) => `<li>${esc(q)}</li>`).join("")}</ul></div>` : ""}
+    ${ex ? `<p class="muted" style="margin:6px 0 2px;font-size:12px">참고한 이웃 글</p><ul class="ex">${ex}</ul>` : ""}
+    ${i.keyword ? `<a class="btn-write" href="/?keyword=${encodeURIComponent(i.keyword)}">✍️ 이 주제로 글감 찾기</a>` : ""}
   </div>`;
 }
 
-function renderTrends() { const el = $("#trends"); if (el) el.remove(); }
+// ---------------- 이웃들이 요즘 쓰는 주제 ----------------
+function renderTrends() {
+  const el = $("#trends");
+  const t = S.trends;
+  if (!t || !t.postCount) {
+    el.innerHTML = `<h2>👥 이웃들이 요즘 쓰는 주제</h2><p class="muted">이웃 소통 화면에서 [새로 불러오기]를 하면 이웃들의 최근 글로 주제를 분석해요.</p>`;
+    return;
+  }
+  el.innerHTML = `<h2>👥 이웃들이 요즘 쓰는 주제</h2>
+    <p class="sub">이웃 ${t.neighborCount}명의 최근 ${t.recentDays}일 글 ${t.postCount}개 기준 · 내 주력 주제: <b>${esc(t.myMainTopic || "-")}</b>
+      ${t.hasRecentPosts ? "" : `<br><span class="error">지금은 이웃별 최신 글 1개만 반영됐어요. 이웃 소통에서 [새로 불러오기]를 한 번 하면 최근 글 최대 10개씩으로 더 정확해져요.</span>`}</p>
+    <div class="grid2" style="gap:24px">
+      <div>
+        <p class="sub" style="margin-bottom:6px"><b>주제별</b> (몇 명의 이웃이 썼는지 · 괄호는 내 글 수)</p>
+        ${hbars(t.topics, { name: (x) => `${x.topic} (내 글 ${x.mine})`, value: (x) => x.neighborCount, unit: "명", alt: (x) => x.mine > 0 })}
+        <p class="legend-note">진한 막대 = 내가 아직 안 쓴 주제 · 연한 막대 = 나도 쓴 주제</p>
+      </div>
+      <div>
+        <p class="sub" style="margin-bottom:6px"><b>여러 이웃이 같이 쓴 키워드</b> (숫자 = 이웃 수)</p>
+        <div class="kw-chips">${t.keywords.map((k) => `<span class="kw ${k.covered ? "covered" : ""}" title="${esc(k.examples.map((e) => `${e.nick}: ${e.title}`).join("\n"))}">${esc(k.keyword)}<b>${k.neighborCount}</b></span>`).join("") || `<span class="muted">아직 겹치는 키워드가 없어요</span>`}</div>
+        <p class="legend-note">회색 = 내 글 제목에도 있는 키워드 · 마우스를 올리면 어떤 이웃 글인지 보여요</p>
+      </div>
+    </div>`;
+}
 
 // ---------------- 목표(KPI) ----------------
 const GOAL_FIELDS = [

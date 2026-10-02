@@ -86,7 +86,10 @@ async function refresh() {
       .map((r) => ({ week: r.date, cv: r.total, uv: uvByWeek[r.date] ?? null, friend: r.friend, follow: r.follow, etc: r.etc }))
       .sort((a, b) => a.week.localeCompare(b.week));
 
-    const monthly = rowsOf(await api(`blog/visit/cv?timeDimension=MONTH&startDate=${thisMonth1}`), "cv")
+    // 월별 조회수: 네이버가 "이번 달 1일"을 기준으로 요청하면 500 오류(Internal service Error)를 낸다 (매달 1일에 통계가 안 불러와졌음).
+    // 오늘 날짜로 요청하고, 오늘이 그 달 1일이라 그것마저 실패하면 지난달 1일로 다시 요청한다 (둘 다 완료된 달까지의 같은 데이터).
+    const monthlyJson = await api(`blog/visit/cv?timeDimension=MONTH&startDate=${today}`).catch(() => api(`blog/visit/cv?timeDimension=MONTH&startDate=${lastMonth1}`));
+    const monthly = rowsOf(monthlyJson, "cv")
       .map((r) => ({ month: r.date.slice(0, 7), cv: r.total, friend: r.friend, follow: r.follow, etc: r.etc }))
       .filter((r) => r.cv > 0)
       .sort((a, b) => a.month.localeCompare(b.month));

@@ -614,6 +614,7 @@ async function loadTrends() {
     ? t.ideas
         .map(
           (i) => `<div class="tr-card"><h4>${esc(i.title)}</h4><p>${esc(i.reason)}</p>
+      ${(i.questions || []).length ? `<p style="margin:0 0 4px"><b>사람들이 궁금해할 질문</b></p><ul class="ex" style="color:var(--ink)">${i.questions.map((q) => `<li>${esc(q)}</li>`).join("")}</ul>` : ""}
       ${i.examples && i.examples.length ? `<ul class="ex">${i.examples.map((e) => `<li><a href="${esc(e.link)}" target="_blank" rel="noopener">${esc(e.nick)} · ${esc(e.title)}</a></li>`).join("")}</ul>` : ""}
       ${i.keyword ? write(i.keyword) : ""}</div>`
         )

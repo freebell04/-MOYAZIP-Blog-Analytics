@@ -26,7 +26,7 @@ function keywordsOf(title) {
     if (/^[A-Za-z]+$/.test(tok)) tok = tok.toUpperCase(); // 영문은 대소문자 통일 (GPT, gpt)
     const stripped = tok.replace(PARTICLE, "");
     if (stripped.length >= 2 && stripped !== tok) tok = stripped;
-    if (tok.length < 2 || /^\d+$/.test(tok) || STOP.has(tok.toLowerCase()) || STOP.has(tok)) continue;
+    if (tok.length < 2 || /^\d+$/.test(tok) || /^\d+[월일주차년회편화]$/.test(tok) || STOP.has(tok.toLowerCase()) || STOP.has(tok)) continue; // "9월"처럼 날짜 표현도 주제가 아님
     if (/(까|까요|길래|나요|죠|니다|어요|아요|해요|세요|는지|을까)$/.test(tok)) continue; // 질문·서술형 말끝은 주제가 아님
     out.add(tok);
   }
@@ -135,13 +135,45 @@ function buildTrends(d, nb) {
   const ex = (list) => list.map((p) => ({ nick: p.nick, title: p.title, link: p.link }));
   const ideas = [];
 
-  // (1) 이웃 트렌드 키워드인데 나는 아직 안 쓴 것
-  for (const k of keywordList.filter((k) => !k.covered).slice(0, 4)) {
+  // 내 블로그와 이어 붙이기 위한 재료: 내 인기 글, 내 글을 찾아오는 검색어
+  const mainName = myMain ? myMain[0] : "";
+  const myTopPost = [d.month, d.week].map((x) => x && x.topPosts && x.topPosts[0]).find(Boolean);
+  const myQuery = [d.month, d.week].map((x) => x && (x.queries || []).find((q) => q.query && q.query !== "기타")).find(Boolean);
+  const bridgeNote = myTopPost
+    ? ` 내 인기 글 「${String(myTopPost.title).slice(0, 24)}${String(myTopPost.title).length > 24 ? "…" : ""}」 끝에 '함께 보면 좋은 글'로 이어붙이기 좋아요.`
+    : mainName
+      ? ` 내가 가장 많이 쓰는 '${mainName}' 글과 이어서 읽히게 써보세요.`
+      : "";
+  // 사람들이 궁금해할 만한 질문 (글 제목·소제목으로 바로 쓸 수 있게)
+  const questionsFor = (kw) =>
+    [
+      `'${kw}', 처음이라면 어디서부터 시작해야 할까요?`,
+      `'${kw}' 해본 사람들이 가장 많이 막히는 부분 3가지`,
+      mainName === "AI" ? `'${kw}', AI한테 시키면 시간이 얼마나 줄어들까요? (직접 해본 후기)` : mainName ? `'${kw}', '${mainName}' 하는 사람이라면 이렇게 정리해보세요` : `'${kw}', 비용·시간·준비물은 얼마나 들까요?`,
+    ];
+
+  // 받침 유무에 따라 을/를
+const eul = (w) => { const c = String(w).trim().slice(-1).charCodeAt(0); return c >= 0xac00 && c <= 0xd7a3 && (c - 0xac00) % 28 !== 0 ? "을" : "를"; };
+// 내 주제 × 이웃 인기 주제를 엮은 글의 질문
+  const crossQuestions = (m, t) =>
+    m === "AI"
+      ? [`'${t}', AI로 해보면 어떨까요? 직접 해본 과정 공유`, `'${t}'에 바로 써먹는 AI 프롬프트 모음`, `${t}${eul(t)} 처음 시작하는 사람이 AI에게 꼭 물어봐야 할 것`]
+      : [`'${t}', '${m}' 하는 사람은 뭐가 다를까요?`, `${t}${eul(t)} '${m}' 관점으로 정리해보면`, `'${t}' 초보가 가장 많이 묻는 질문 정리`];
+
+  // (1) 이웃 트렌드 키워드인데 나는 아직 안 쓴 것 — 내 블로그와 이어질 만한 것만
+  // (내가 쓰는 주제에 속하거나 어느 주제에도 안 속하는 키워드. 전혀 다른 주제는 아래 '내 주제 × 이웃 인기 주제'로 엮어서 추천한다)
+  // 내가 쓰는 주제로 분류되는 키워드만 (분류가 안 되는 단어는 '일정'·'먼저'처럼 의미 없는 말이 많아서 뺀다)
+  const relatesToMe = (kw) => {
+    const t = topicOf(kw);
+    return !!t && !!myTopicCount[t];
+  };
+  for (const k of keywordList.filter((k) => !k.covered && relatesToMe(k.keyword)).slice(0, 4)) {
     ideas.push({
       type: "trend",
-      title: `이웃 트렌드: "${k.keyword}"`,
-      reason: `최근 ${RECENT_DAYS}일 동안 이웃 ${k.neighborCount}명이 '${k.keyword}' 글을 올렸어요${k.closeCount ? ` (그중 가까운 이웃 ${k.closeCount}명)` : ""}. 나는 아직 이 키워드로 쓴 글이 없어요.`,
+      title: mainName ? `"${k.keyword}" × 내 블로그(${mainName}) 이어 쓰기` : `이웃 트렌드: "${k.keyword}"`,
+      reason: `최근 ${RECENT_DAYS}일 동안 이웃 ${k.neighborCount}명이 '${k.keyword}' 글을 올렸어요${k.closeCount ? ` (그중 가까운 이웃 ${k.closeCount}명)` : ""}. 나는 아직 이 키워드로 쓴 글이 없어요.${bridgeNote}`,
       keyword: k.keyword,
+      questions: questionsFor(k.keyword),
       examples: ex(k.examples),
     });
   }
@@ -149,12 +181,13 @@ function buildTrends(d, nb) {
   // (2) 내 주력 주제 × 이웃 인기 주제
   if (myMain) {
     // 명절은 아래 시즌 추천에서 따로 다룬다
-    for (const t of topicList.filter((t) => t.topic !== myMain[0] && t.topic !== "명절" && t.neighborCount >= 2).slice(0, 3)) {
+    for (const t of topicList.filter((t) => t.topic !== myMain[0] && t.topic !== "명절" && t.neighborCount >= 2).slice(0, 5)) {
       ideas.push({
         type: "cross",
         title: angleTitle(myMain[0], t.topic),
         reason: `이웃 ${t.neighborCount}명이 최근 '${t.topic}' 글을 썼어요 (나는 ${t.mine}개). 내가 가장 많이 쓰는 '${myMain[0]}' 관점으로 풀면 이웃 공감과 검색 유입을 같이 노릴 수 있어요.`,
         keyword: t.topic,
+        questions: crossQuestions(mainName, t.topic),
         examples: ex(t.examples),
       });
     }
@@ -171,6 +204,9 @@ function buildTrends(d, nb) {
       examples: ex(season.examples),
     });
   }
+
+  const rank = { cross: 0, trend: 1, season: 2 };
+  ideas.sort((x, y) => (rank[x.type] ?? 9) - (rank[y.type] ?? 9));
 
   return {
     recentDays: RECENT_DAYS,
