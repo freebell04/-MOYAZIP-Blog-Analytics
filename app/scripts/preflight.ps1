@@ -87,7 +87,7 @@ function Apply-StagedUpdate {
   # 바로가기는 이미 있으면(아이콘을 이 폴더 위치로 맞춰둔 상태) 새 버전으로 덮어쓰지 않는다
   $skip = @((Join-Path $src.FullName "index.html"), (Join-Path $src.FullName ".nojekyll"))
   $lnkName = "블로그 도우미 스튜디오.lnk"
-  if (Test-Path -LiteralPath (Join-Path $root $lnkName)) { $skip += (Join-Path $src.FullName $lnkName) }
+  if (Test-Path -LiteralPath (Join-Path $root $lnkName)) { $skip += (Join-Path $src.FullName $lnkName), (Join-Path $src.FullName "실행하기.vbs") }
   robocopy $src.FullName $root /E /XD data node_modules .git .staged /XF .gitignore .version server.log @skip /NFL /NDL /NJH /NJS /NP | Out-Null
   if ($LASTEXITCODE -ge 8) { throw "새 버전 파일 복사 실패 (robocopy $LASTEXITCODE)" }
   Set-Content -Path $verFile -Value $sha -Encoding ASCII
@@ -155,10 +155,11 @@ function Stage-UpdateInBackground {
 function Update-Shortcut {
   try {
     $lnkPath = Join-Path $root "블로그 도우미 스튜디오.lnk"
-    if (-not (Test-Path -LiteralPath $lnkPath)) { return }
     $vbs = Join-Path $PSScriptRoot "launch.vbs"
     $want = (Join-Path $app "assets\icon.ico") + ",0"
+    # 압축에는 바로가기 대신 상대경로로 도는 실행하기.vbs만 들어 있다 → 처음 켤 때 이 PC·이 위치에 맞는 바로가기를 만든다
     $l = (New-Object -ComObject WScript.Shell).CreateShortcut($lnkPath)
+    if (-not (Test-Path -LiteralPath $lnkPath)) { $l.Description = "블로그 도우미 스튜디오"; $l.IconLocation = "$env:SystemRoot\System32\wscript.exe,0" }
     if ($l.IconLocation -ne $want -or $l.TargetPath -ne $vbs) {
       $l.TargetPath = $vbs
       $l.IconLocation = $want
