@@ -65,6 +65,7 @@ async function syncMemoToNotion(rec) {
 const { buildWorkbook } = require("./lib/statsExcel");
 
 const app = express();
+app.disable("x-powered-by");
 app.use(express.json({ limit: "10mb" }));
 
 // --- 사용 키 (체험단·구매자용). 키는 별도의 체험단 관리자 프로그램이 만든다 ---
@@ -99,7 +100,8 @@ app.post("/api/setup", (req, res) => {
 });
 // 아직 설정 전이면 모든 화면을 설정 화면으로 보낸다
 app.use((req, res, next) => {
-  if (config.isConfigured() || req.path === "/setup.html" || req.path.startsWith("/api/setup") || /\.(css|js|png|ico)$/.test(req.path)) return next();
+  // 키 입력 화면은 설정 전에도 열려야 한다 (새 설치: 키 → 설정 순서. 여기서 막으면 서로 리디렉션하며 무한 반복된다)
+  if (config.isConfigured() || req.path === "/setup.html" || req.path === "/license.html" || req.path.startsWith("/api/setup") || req.path.startsWith("/api/license") || /\.(css|js|png|ico|svg)$/.test(req.path)) return next();
   if (req.path.startsWith("/api/")) return res.status(400).json({ error: "먼저 블로그 아이디를 설정해주세요." });
   res.redirect("/setup.html");
 });

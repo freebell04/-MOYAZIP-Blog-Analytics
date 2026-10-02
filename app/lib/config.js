@@ -5,10 +5,15 @@ const fs = require("fs");
 
 const CONFIG_PATH = path.join(__dirname, "..", "data", "app-config.json");
 
+// 요청마다 파일을 다시 읽고 JSON 파싱하지 않도록, 파일이 바뀌었을 때(수정 시각)만 다시 읽는다
+let cache = { mtime: -1, data: {} };
 function load() {
   try {
-    return JSON.parse(fs.readFileSync(CONFIG_PATH, "utf-8"));
+    const m = fs.statSync(CONFIG_PATH).mtimeMs;
+    if (m !== cache.mtime) cache = { mtime: m, data: JSON.parse(fs.readFileSync(CONFIG_PATH, "utf-8")) };
+    return cache.data;
   } catch {
+    cache = { mtime: -1, data: {} };
     return {};
   }
 }

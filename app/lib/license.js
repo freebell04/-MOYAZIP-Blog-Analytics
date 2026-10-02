@@ -44,10 +44,14 @@ function saved() {
 }
 
 /** 지금 이 컴퓨터에서 프로그램을 쓸 수 있는지 */
+// 모든 화면·API 요청마다 호출되므로, 파일 읽기와 서명 검증 결과를 잠깐(5초) 기억해둔다
+let cached = { at: 0, result: null };
 function status() {
+  if (cached.result && Date.now() - cached.at < 5000) return cached.result;
   const key = saved();
-  if (!key) return { ok: false, reason: "사용 키를 입력해주세요." };
-  return check(key);
+  const result = key ? check(key) : { ok: false, reason: "사용 키를 입력해주세요." };
+  cached = { at: Date.now(), result };
+  return result;
 }
 
 function activate(key) {
@@ -55,6 +59,7 @@ function activate(key) {
   if (!r.ok) return r;
   fs.mkdirSync(DATA, { recursive: true });
   fs.writeFileSync(LICENSE_PATH, JSON.stringify({ key: String(key).trim(), activatedAt: new Date().toISOString() }, null, 2));
+  cached = { at: 0, result: null }; // 방금 넣은 키가 바로 적용되게
   return r;
 }
 
