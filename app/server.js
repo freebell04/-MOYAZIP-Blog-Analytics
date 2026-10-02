@@ -38,6 +38,15 @@ const { buildWeekly, buildMonthly, buildMemoOnly, memoBlocks, MEMO_HEADING, memo
  * - 없으면: 지난주면 전체 주간 리포트를, 더 예전 주면 숫자+회고만 담은 짧은 페이지를 새로 만든다
  */
 async function syncMemoToNotion(rec) {
+  // 이 메모는 바로 앞 주(지난주) 리포트에도 "이어지는 주 메모"로 보여준다 → 그 리포트가 노션에 있고 그 주 회고가 비어 있으면 같이 갱신
+  const prevWeek = require("./lib/notionReport").addDays(rec.week, -7);
+  const prevEntries = (notion.getLog()[`week:${prevWeek}`] || []).filter((e) => e.pageId);
+  const prevLast = prevEntries[prevEntries.length - 1];
+  if (prevLast) {
+    try {
+      await notion.replaceSection(prevLast.pageId, MEMO_HEADING, require("./lib/notionReport").memoSectionBlocks(stats.getHistory(), prevWeek), memoHeading());
+    } catch {} // 지난주 리포트 갱신 실패는 이번 주 회고 저장에 영향 없음
+  }
   const entries = (notion.getLog()[`week:${rec.week}`] || []).filter((e) => e.pageId);
   const last = entries[entries.length - 1];
   if (last) {

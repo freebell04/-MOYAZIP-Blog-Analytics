@@ -69,6 +69,24 @@ function memoBlocks(memo) {
   ].filter(Boolean);
 }
 
+const hasMemo = (m) => !!(m && (m.did || m.good || m.next));
+
+/**
+ * 그 주 리포트의 "회고" 칸 내용. 그 주 회고가 비어 있는데 바로 다음 주(진행 중인 주)에 적어둔 메모가 있으면
+ * 그걸 안내 문구와 함께 대신 보여준다 (주 회고를 이번 주 칸에 적는 경우가 많아서).
+ */
+function memoSectionBlocks(history, week) {
+  const weeks = (history && history.weeks) || {};
+  const own = weeks[week] && weeks[week].memo;
+  if (hasMemo(own)) return memoBlocks(own);
+  const nextWeek = addDays(week, 7);
+  const next = weeks[nextWeek] && weeks[nextWeek].memo;
+  if (hasMemo(next)) {
+    return [p(`(이 주 칸은 비어 있어서, 이어지는 ${nextWeek.slice(5).replace("-", "/")}~ 주에 적은 메모를 보여줘요)`, { italic: true, color: "gray" }), ...memoBlocks(next)];
+  }
+  return memoBlocks(own);
+}
+
 function commonAnalysis(a) {
   return [
     h2("🧭 분석 (저장 시점의 최신 통계 기준)"),
@@ -126,7 +144,7 @@ function buildWeekly(d, { goals, history }) {
     ),
     // 적어둔 주간 회고는 맨 위쪽에 바로 보이게 (저장 후에 회고를 고치면 이 부분만 노션에서 바뀐다)
     h2("✍️ 회고"),
-    ...memoBlocks(h.memo),
+    ...memoSectionBlocks(history, week),
     h2("🎯 목표 대비"),
     goals
       ? table(["항목", "목표", "실제", "달성률"], [
@@ -222,4 +240,4 @@ function buildMemoOnly(rec) {
 
 const MEMO_HEADING = "✍️ 회고";
 
-module.exports = { buildWeekly, buildMonthly, buildMemoOnly, memoBlocks, MEMO_HEADING, memoHeading: () => h2(MEMO_HEADING) };
+module.exports = { buildWeekly, buildMonthly, buildMemoOnly, memoBlocks, memoSectionBlocks, addDays, MEMO_HEADING, memoHeading: () => h2(MEMO_HEADING) };
