@@ -413,3 +413,12 @@ function loadPost(post) {
   $("#step-preview").scrollIntoView({ behavior: "smooth" });
   $("#save-draft-btn").click();
 }
+
+// 이웃 소통 '주제 추천'에서 [이 주제로 글감 찾기]로 넘어온 경우: 키워드를 넣고 바로 검색
+(() => {
+  const kw = new URLSearchParams(location.search).get("keyword");
+  if (!kw) return;
+  $("#keyword").value = kw;
+  history.replaceState(null, "", location.pathname); // 새로고침해도 다시 검색하지 않게 주소에서 지운다
+  $("#search-btn").click();
+})();

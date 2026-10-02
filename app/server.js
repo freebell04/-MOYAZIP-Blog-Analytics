@@ -25,6 +25,9 @@ const notion = require("./lib/notion");
 const config = require("./lib/config");
 const aiChat = require("./lib/aiChat");
 const blogFormat = require("./lib/blogFormat");
+// 이웃들이 요즘 쓰는 글로 주제 추천 (이웃 소통 화면의 '주제 추천' 탭)
+const trendsLib = require("./lib/trends");
+// 성과 통계 화면에 이웃 트렌드를 섞어 보여주는 건 개인판 전용
 const trendsFor = () => null;
 const statsWithTrends = (d) => d;
 const { buildWeekly, buildMonthly, buildMemoOnly, memoBlocks, MEMO_HEADING, memoHeading } = require("./lib/notionReport");
@@ -332,6 +335,16 @@ app.post("/api/finalize-toc", async (req, res) => {
 });
 
 // --- 이웃 소통: 내 글에 공감/댓글 남긴 사람 모아보기 (답방은 사용자가 직접) ---
+// 이웃 소통 화면의 '주제 추천': 이웃들의 최근 글에서 여러 명이 같이 쓰는 주제·키워드
+// (성과 통계를 아직 안 불러왔어도 동작한다 — 그땐 '내가 이미 쓴 주제' 비교만 빠진다)
+app.get("/api/neighbor-trends", (req, res) => {
+  try {
+    res.json({ trends: trendsLib.buildTrends(stats.getCached() || { posts: [] }, neighbors.getCached()) });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.get("/api/neighbors", (req, res) => {
   res.json({
     blogId: neighbors.BLOG_ID,

@@ -151,6 +151,7 @@
   <button class="tab" data-tab="reply">💬 댓글 답글 <span class="cnt" id="cnt-reply">0</span></button>
   <button class="tab" data-tab="neighbors">👥 이웃 목록 <span class="cnt" id="cnt-neighbors">0</span></button>
   <button class="tab" data-tab="posts">📝 내 글 현황 <span class="cnt" id="cnt-posts">0</span></button>
+  <button class="tab" data-tab="trends">💡 주제 추천 <span class="cnt" id="cnt-trends">-</span></button>
 </nav>
 
 <!-- 답방 -->
@@ -222,6 +223,27 @@
     </table>
   </div>
 </section>
+
+<!-- 이웃 글 기반 주제 추천 -->
+<section class="panel" id="panel-trends" hidden>
+  <p class="hint" id="trends-hint" style="margin-bottom:12px"></p>
+  <div id="trends-ideas" class="list"></div>
+  <h3 class="tr-h">🔥 이웃들이 같이 쓰는 키워드</h3>
+  <div id="trends-keywords" class="tr-chips"></div>
+  <h3 class="tr-h">📚 이웃들이 요즘 많이 쓰는 주제</h3>
+  <div id="trends-topics" class="tr-chips"></div>
+</section>
+<style>
+  .tr-card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px; margin-bottom: 10px; }
+  .tr-card h4 { margin: 0 0 6px; font-size: 15px; }
+  .tr-card p { margin: 0 0 8px; font-size: 13px; color: var(--ink-soft); line-height: 1.6; }
+  .tr-card .ex { font-size: 12px; color: var(--ink-soft); margin: 0 0 10px; padding-left: 16px; }
+  .tr-card .ex a { color: inherit; }
+  .tr-h { font-size: 14px; margin: 20px 0 8px; }
+  .tr-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .tr-chips .chip b { color: var(--green-dark); margin-left: 4px; }
+  .tr-chips .chip.mine { opacity: .55; }
+</style>
 
 <script src="suggest-templates.js"></script>
 <script>
@@ -312,6 +334,7 @@ function render() {
   const d = S.data;
   document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("on", t.dataset.tab === S.tab));
   document.querySelectorAll(".panel").forEach((p) => (p.hidden = p.id !== "panel-" + S.tab));
+  if (S.tab === "trends") loadTrends();
   if (!d) { $("#checklist").innerHTML = ""; return; }
 
   const neighbors = d.neighbors || [];
@@ -566,6 +589,39 @@ async function markVisited(blogId, done) {
   }).then((r) => r.json());
   S.visited = r.visited;
   render();
+}
+
+// ---------- 주제 추천 (이웃 글 기반) ----------
+let trendsSig = "";
+async function loadTrends() {
+  const r = await fetch("/api/neighbor-trends").then((r) => r.json()).catch((e) => ({ error: e.message }));
+  const t = r.trends;
+  const sig = JSON.stringify([S.data && S.data.updatedAt, t && t.postCount, t && t.ideas.length, r.error]);
+  if (sig === trendsSig) return;
+  trendsSig = sig;
+  $("#cnt-trends").textContent = t ? t.ideas.length : "-";
+  if (r.error || !t) {
+    $("#trends-hint").innerHTML = r.error ? `<span class="error">⚠ ${esc(r.error)}</span>` : "이웃 목록을 먼저 불러와야 추천할 수 있어요. 위의 [새로 불러오기]를 눌러주세요.";
+    $("#trends-ideas").innerHTML = $("#trends-keywords").innerHTML = $("#trends-topics").innerHTML = "";
+    return;
+  }
+  $("#trends-hint").innerHTML =
+    `최근 ${t.recentDays}일 동안 이웃 ${t.neighborCount}명이 쓴 글 ${t.postCount}개를 보고 골랐어요.` +
+    (t.myMainTopic ? ` 내가 가장 많이 쓰는 주제: <b>${esc(t.myMainTopic)}</b>` : " (성과 통계를 한 번 불러오면 내가 이미 쓴 주제는 빼고 추천해요)") +
+    (t.hasRecentPosts ? "" : " · 이웃별 최근 글을 더 모으려면 [새로 불러오기]를 한 번 더 눌러주세요.");
+  const write = (kw) => `<a class="btn btn-primary" style="font-size:13px;padding:6px 12px" href="/?keyword=${encodeURIComponent(kw)}">✍️ 이 주제로 글감 찾기</a>`;
+  $("#trends-ideas").innerHTML = t.ideas.length
+    ? t.ideas
+        .map(
+          (i) => `<div class="tr-card"><h4>${esc(i.title)}</h4><p>${esc(i.reason)}</p>
+      ${i.examples && i.examples.length ? `<ul class="ex">${i.examples.map((e) => `<li><a href="${esc(e.link)}" target="_blank" rel="noopener">${esc(e.nick)} · ${esc(e.title)}</a></li>`).join("")}</ul>` : ""}
+      ${i.keyword ? write(i.keyword) : ""}</div>`
+        )
+        .join("")
+    : '<p class="hint">아직 여러 이웃이 같이 쓰는 주제가 없어요. 이웃 글이 더 쌓이면 다시 확인해보세요.</p>';
+  const chip = (label, n, kw, mine) => `<a class="chip${mine ? " mine" : ""}" href="/?keyword=${encodeURIComponent(kw)}" title="이 키워드로 글감 찾기">${esc(label)}<b>${n}명</b></a>`;
+  $("#trends-keywords").innerHTML = t.keywords.map((k) => chip(k.keyword, k.neighborCount, k.keyword, k.covered)).join("") || '<span class="hint">아직 없어요</span>';
+  $("#trends-topics").innerHTML = t.topics.map((k) => chip(k.topic, k.neighborCount, k.topic, false)).join("") || '<span class="hint">아직 없어요</span>';
 }
 
 function setTab(tab) {
