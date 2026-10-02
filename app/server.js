@@ -70,7 +70,11 @@ app.use(express.json({ limit: "10mb" }));
 
 // --- 사용 키 (체험단·구매자용). 키는 별도의 체험단 관리자 프로그램이 만든다 ---
 const license = require("./lib/license");
-app.get("/api/license", (req, res) => res.json(license.status()));
+app.get("/api/license", (req, res) => res.json({ ...license.status(), trial: license.trialAvailable() }));
+app.post("/api/license/trial", async (req, res) => {
+  const r = await license.startTrial(req.body || {});
+  res.status(r.ok ? 200 : 400).json(r);
+});
 app.post("/api/license", (req, res) => {
   const r = license.activate((req.body || {}).key);
   res.status(r.ok ? 200 : 400).json(r);

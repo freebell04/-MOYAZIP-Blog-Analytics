@@ -14,6 +14,9 @@ MCowBQYDK2VwAyEALvlPAnQtHYYI2koy0xcoLXIAaFMomunj64Ji/og2sew=
 const DATA = path.join(__dirname, "..", "data");
 const LICENSE_PATH = path.join(DATA, "license.json");
 
+// 자동 무료 체험 서버(Cloudflare Worker) 주소. 비어 있으면 키 입력 화면에 "무료 체험 시작"이 나오지 않는다.
+const TRIAL_URL = process.env.NBH_TRIAL_URL || "https://blog-studio-trial.moyazip-studio.workers.dev";
+
 const today = () => new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10); // 한국 날짜
 
 /** 키 확인. {ok, name, start, end, daysLeft, reason} */
@@ -63,4 +66,39 @@ function activate(key) {
   return r;
 }
 
-module.exports = { check, status, activate, today };
+/** 이 컴퓨터를 구분하는 값 (같은 컴퓨터가 여러 번 무료 체험을 받지 못하게 서버가 기억한다) */
+function deviceId() {
+  const p = path.join(DATA, "device.json");
+  try {
+    const d = JSON.parse(fs.readFileSync(p, "utf-8")).id;
+    if (d) return d;
+  } catch {}
+  const id = crypto.createHash("sha256").update(require("os").hostname() + "|" + crypto.randomBytes(16).toString("hex")).digest("hex").slice(0, 32);
+  fs.mkdirSync(DATA, { recursive: true });
+  fs.writeFileSync(p, JSON.stringify({ id }));
+  return id;
+}
+
+/** 이름·블로그를 서버에 보내 무료 체험(14일) 키를 받아 바로 적용한다 */
+async function startTrial({ name, blog }) {
+  if (!TRIAL_URL) return { ok: false, reason: "무료 체험 서버가 아직 준비되지 않았어요. 받으신 사용 키를 입력해주세요." };
+  let res;
+  try {
+    res = await fetch(TRIAL_URL.replace(/\/$/, "") + "/start", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, blog, device: deviceId() }),
+      signal: AbortSignal.timeout(20000),
+    });
+  } catch {
+    return { ok: false, reason: "체험 서버에 연결하지 못했어요. 인터넷 연결을 확인하고 다시 시도해주세요." };
+  }
+  const j = await res.json().catch(() => ({}));
+  if (!j.ok) return { ok: false, reason: j.reason || "체험을 시작하지 못했어요.", closed: j.closed, expired: j.expired };
+  const r = activate(j.key);
+  return r.ok ? { ...r, existing: !!j.existing } : r;
+}
+
+const trialAvailable = () => !!TRIAL_URL;
+
+module.exports = { check, status, activate, today, startTrial, trialAvailable };
