@@ -74,6 +74,106 @@ async function searchNaver(keyword) {
   };
 }
 
+
+// ---------------------------------------------------------------------------
+// 글감 묶음 검색: 인기글 / 나무위키(근거) / 후기·리뷰 / 뉴스 로 나눠서 돌려준다.
+// round가 올라갈수록(🔄 다시 찾기) 다음 페이지·다른 검색어로 넘어가고, exclude(이미 보여준 링크)는 뺀다.
+// ---------------------------------------------------------------------------
+const REVIEW_WORDS = ["후기", "리뷰", "내돈내산", "솔직후기", "사용기", "방문후기"];
+const GROUP_SIZE = 6;
+
+const PARSE_CARDS = () => {
+  const out = [];
+  document.querySelectorAll("a").forEach((a) => {
+    const headline = a.querySelector(".sds-comps-text-type-headline1");
+    if (!headline) return;
+    let snippet = "";
+    let node = a.parentElement;
+    for (let depth = 0; depth < 6 && node; depth++) {
+      for (const el of node.querySelectorAll(".sds-comps-text-type-body1, .sds-comps-text-type-body2")) {
+        const parentA = el.closest("a");
+        if (!parentA || parentA === a) {
+          const t = el.textContent.trim();
+          if (t.length > snippet.length) snippet = t;
+        }
+      }
+      if (snippet.length > 30) break;
+      node = node.parentElement;
+    }
+    out.push({ href: a.href || "", title: headline.textContent.trim(), snippet });
+  });
+  return out;
+};
+
+const enc = encodeURIComponent;
+const blogTabUrl = (q, start, latest) =>
+  `https://search.naver.com/search.naver?ssc=tab.blog.all&sm=tab_opt&query=${enc(q)}&start=${start}` + (latest ? "&nso=so%3Add%2Cp%3Aall" : "");
+
+async function pageCards(page, url) {
+  try {
+    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 20000 });
+    await page.waitForTimeout(1200);
+    return await page.evaluate(PARSE_CARDS);
+  } catch {
+    return [];
+  }
+}
+
+/** @returns {Promise<{popular, namu, review, news, round, exhausted}>} */
+async function searchGrouped(keyword, round = 0, exclude = []) {
+  const seen = new Set(exclude);
+  const take = (items, ok, n = GROUP_SIZE) => {
+    const out = [];
+    for (const it of items) {
+      if (!it.title || !it.href || !ok(it.href) || seen.has(it.href)) continue;
+      seen.add(it.href);
+      out.push({ title: it.title, link: it.href, snippet: it.snippet });
+      if (out.length >= n) break;
+    }
+    return out;
+  };
+  const isBlog = (h) => /^https?:\/\/(m\.)?blog\.naver\.com\//.test(h);
+  const isNamu = (h) => /^https?:\/\/(www\.)?namu\.wiki\//.test(h);
+  const isNews = (h) => !/naver\.com|namu\.wiki/.test(h);
+
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage();
+    const words = keyword.split(/\s+/).filter((w) => w.length >= 2);
+
+    // 인기글: 관련도순 블로그 탭. 다시 찾을 때마다 다음 페이지. 새 글이 모자라면 최신순으로 채운다.
+    let popular = take(await pageCards(page, blogTabUrl(keyword, 1 + 10 * round, false)), isBlog);
+    if (popular.length < GROUP_SIZE) popular = popular.concat(take(await pageCards(page, blogTabUrl(keyword, 1 + 10 * round, true)), isBlog, GROUP_SIZE - popular.length));
+
+    // 나무위키: "키워드 나무위키" 검색에서 namu.wiki 문서만. 검색어를 단어별로도 바꿔가며 문서를 더 모은다.
+    const namuQueries = [keyword, ...words.filter((w) => w !== keyword)];
+    let namu = [];
+    for (const q of namuQueries) {
+      namu = namu.concat(take(await pageCards(page, `https://search.naver.com/search.naver?query=${enc(q + " 나무위키")}`), isNamu));
+      if (namu.length >= 4) break;
+    }
+
+    // 후기·리뷰: 후기/리뷰/내돈내산... 단어를 번갈아 붙여 블로그 탭 검색
+    const w = REVIEW_WORDS[round % REVIEW_WORDS.length];
+    const reviewPage = 1 + 10 * Math.floor(round / REVIEW_WORDS.length);
+    let review = take(await pageCards(page, blogTabUrl(`${keyword} ${w}`, reviewPage, false)), isBlog);
+    if (review.length < GROUP_SIZE) review = review.concat(take(await pageCards(page, blogTabUrl(`${keyword} 리뷰`, 1 + 10 * round, true)), isBlog, GROUP_SIZE - review.length));
+    // 제목에 후기·리뷰 말이 들어간 글을 위로
+    const isReviewy = (x) => /후기|리뷰|내돈내산|사용기|써보|해보/.test(x.title);
+    review.sort((a, b) => Number(isReviewy(b)) - Number(isReviewy(a)));
+
+    // 뉴스: 최신순 뉴스 탭
+    // (검색 화면 옆의 관련 없는 기사가 섞이므로, 제목·요약에 검색어 단어가 들어간 것만 남긴다)
+    const rel = (it) => (words.length ? words : [keyword]).some((k) => (it.title + " " + (it.snippet || "")).includes(k));
+    const newsCards = (await pageCards(page, `https://search.naver.com/search.naver?ssc=tab.news.all&query=${enc(keyword)}&sort=1&start=${1 + 10 * round}`)).filter(rel);
+    const news = take(newsCards, isNews, 5);
+
+    return { popular, namu, review, news, round, exhausted: !popular.length && !namu.length && !review.length && !news.length, namuSearchUrl: `https://namu.wiki/Search?q=${enc(keyword)}` };
+  } finally {
+    await browser.close();
+  }
+}
+
 /**
  * 후보 글 링크의 본문을 가져온다 (뉴스/블로그 공용, 대략적인 텍스트 추출).
  */
@@ -103,4 +203,4 @@ async function fetchArticleText(url) {
   }
 }
 
-module.exports = { searchNaver, fetchArticleText };
+module.exports = { searchNaver, searchGrouped, fetchArticleText };

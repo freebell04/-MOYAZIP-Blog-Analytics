@@ -207,6 +207,12 @@ textarea { resize: vertical; margin-top: 4px; }
 }
 .item .tag.news { background: #e8f0fe; color: #1a56db; }
 .item .tag.blog { background: var(--green-tint); color: var(--green-dark); }
+.item .tag.wiki { background: #f1ecff; color: #5b3fc4; }
+.item .tag.review { background: #fff4e0; color: #b45309; }
+.grp-title { margin: 16px 0 6px; font-size: 15px; }
+.grp-title small { font-weight: 400; color: var(--muted, #6b7280); font-size: 12px; margin-left: 6px; }
+.reload-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 16px; }
+.reload-row small { color: var(--muted, #6b7280); }
 .item a { font-weight: 600; text-decoration: none; color: var(--ink); font-size: 14px; }
 .item a:hover { color: var(--green-dark); }
 .item small { color: #999; display: block; margin-top: 4px; font-size: 12px; line-height: 1.4; }

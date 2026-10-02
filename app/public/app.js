@@ -60,67 +60,110 @@ $("#login-btn").addEventListener("click", async () => {
   }
 });
 
-$("#search-btn").addEventListener("click", async () => {
-  const keyword = $("#keyword").value.trim();
-  if (!keyword) return alert("키워드를 입력해주세요.");
-  $("#search-results").textContent = "검색 중...";
+// ---- 글감 찾기: 인기글 / 나무위키 / 후기·리뷰 / 뉴스로 나눠서 보여주고, 🔄로 새 글감을 다시 찾는다 ----
+const GROUPS = [
+  { key: "popular", icon: "🔥", name: "인기글", type: "블로그", cls: "blog", hint: "지금 많이 읽히는 글 — 주제 잡기·제목 참고용" },
+  { key: "namu", icon: "📚", name: "나무위키", type: "나무위키", cls: "wiki", hint: "정확한 개념·배경을 확인할 수 있는 근거 자료" },
+  { key: "review", icon: "⭐", name: "후기·리뷰", type: "후기", cls: "review", hint: "직접 써보고 쓴 글 — 경험담·장단점 참고용" },
+  { key: "news", icon: "📰", name: "최신 뉴스", type: "뉴스", cls: "news", hint: "요즘 이슈·수치 확인용" },
+];
+let searchState = { keyword: "", round: 0, shown: new Set(), all: [] };
+const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
+function itemHtml(item, i, checked) {
+  return `
+    <label class="item">
+      <input type="checkbox" data-idx="${i}" class="pick"${checked ? " checked" : ""} />
+      <div>
+        <span class="tag ${item.cls}">${esc(item.type)}</span>
+        <a href="${esc(item.link)}" target="_blank">${esc(item.title)}</a>
+        <small>${esc(item.snippet || "")}</small>
+      </div>
+    </label>`;
+}
+
+function renderSearch(r, pinned) {
+  // 이번에 새로 찾은 글 + 지난번에 체크해둔 글(맨 위에 고정)
+  const all = [];
+  const sections = [];
+  if (pinned.length) {
+    sections.push(`<h3 class="grp-title">✅ 선택해둔 글감 <small>(다시 찾아도 유지돼요)</small></h3>` + pinned.map((it) => (all.push(it), itemHtml(it, all.length - 1, true))).join(""));
+  }
+  for (const g of GROUPS) {
+    const list = (r[g.key] || []).map((x) => ({ ...x, type: g.type, cls: g.cls }));
+    let body = list.map((it) => (all.push(it), itemHtml(it, all.length - 1, false))).join("");
+    if (g.key === "namu" && !list.length) {
+      body = `<div class="empty-state">이 키워드의 새 나무위키 문서가 없어요. <a href="${esc(r.namuSearchUrl)}" target="_blank">나무위키에서 직접 검색 ↗</a></div>`;
+    } else if (!list.length) {
+      body = `<div class="empty-state">새로 찾은 글이 없어요.</div>`;
+    }
+    sections.push(`<h3 class="grp-title">${g.icon} ${g.name} <small>${esc(g.hint)}</small></h3>` + body);
+  }
+  searchState.all = all;
+
+  const box = $("#search-results");
+  box.classList.remove("empty-state");
+  box.innerHTML =
+    sections.join("") +
+    `<div class="reload-row"><button id="reload-btn" class="btn btn-outline">🔄 다른 글감 새로 찾기</button>
+       <small>${searchState.round + 1}번째 결과 · 누를 때마다 새로운 글·다른 검색어로 다시 찾아요 (체크한 글감은 그대로 남아요)</small></div>`;
+
+  box.querySelectorAll(".pick").forEach((cb) => {
+    cb.addEventListener("change", () => {
+      const item = all[Number(cb.dataset.idx)];
+      if (cb.checked) selectedItems.push(item);
+      else selectedItems = selectedItems.filter((x) => x.link !== item.link);
+    });
+  });
+  // 제목 링크는 체크박스(label) 안에 있어서 target="_blank"가 브라우저에 따라 새 탭 대신
+  // 현재 화면을 바꿔버리는 경우가 있다. 확실하게 새 창으로 열리도록 직접 처리한다.
+  box.querySelectorAll("a").forEach((a) => {
+    a.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      window.open(a.href, "_blank", "noopener,noreferrer");
+    });
+  });
+  $("#reload-btn").addEventListener("click", () => runSearch(searchState.keyword, searchState.round + 1));
+}
+
+async function runSearch(keyword, round) {
+  const pinned = selectedItems.slice(); // 체크해둔 글감은 다시 찾아도 유지
+  $("#search-btn").disabled = true;
+  if ($("#reload-btn")) $("#reload-btn").disabled = true;
+  $("#search-results").classList.add("empty-state");
+  if (!round) $("#search-results").textContent = "검색 중... (인기글·나무위키·후기를 찾는 중이라 10~20초 걸려요)";
+  else $("#reload-btn").textContent = "찾는 중...";
+
+  const exclude = round ? [...searchState.shown] : [];
   const r = await fetch("/api/search", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ keyword }),
-  }).then((r) => r.json());
+    body: JSON.stringify({ keyword, round, exclude }),
+  })
+    .then((r) => r.json())
+    .catch((e) => ({ error: e.message }));
+  $("#search-btn").disabled = false;
 
   if (r.error) {
     $("#search-results").textContent = "오류: " + r.error;
     return;
   }
-
-  const all = [
-    ...r.news.map((x) => ({ ...x, type: "뉴스" })),
-    ...r.blogs.map((x) => ({ ...x, type: "블로그" })),
-  ];
-
-  $("#search-results").classList.remove("empty-state");
-  $("#search-results").innerHTML = all.length
-    ? all
-        .map(
-          (item, i) => `
-    <label class="item">
-      <input type="checkbox" data-idx="${i}" class="pick" />
-      <div>
-        <span class="tag ${item.type === "뉴스" ? "news" : "blog"}">${item.type}</span>
-        <a href="${item.link}" target="_blank">${item.title}</a>
-        <small>${item.snippet || ""}</small>
-      </div>
-    </label>`
-        )
-        .join("")
-    : `<div class="empty-state">검색 결과가 없습니다. 다른 키워드로 시도해보세요.</div>`;
-
-  document.querySelectorAll(".pick").forEach((cb) => {
-    cb.addEventListener("change", () => {
-      const idx = Number(cb.dataset.idx);
-      const item = all[idx];
-      if (cb.checked) selectedItems.push(item);
-      else selectedItems = selectedItems.filter((x) => x !== item);
-    });
-  });
-
-  // 제목 링크는 체크박스(label) 안에 있어서 target="_blank"가 브라우저에 따라 새 탭 대신
-  // 현재 화면을 바꿔버리는 경우가 있다. 확실하게 새 창으로 열리도록 직접 처리한다.
-  $("#search-results")
-    .querySelectorAll("a")
-    .forEach((a) => {
-      a.addEventListener("click", (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        window.open(a.href, "_blank", "noopener,noreferrer");
-      });
-    });
+  if (!round) searchState = { keyword, round: 0, shown: new Set(), all: [] };
+  searchState.round = round;
+  for (const g of GROUPS) for (const x of r[g.key] || []) searchState.shown.add(x.link);
+  if (!round) selectedItems = [];
+  renderSearch(r, round ? pinned : []);
+  if (r.exhausted) $("#reload-btn").insertAdjacentHTML("afterend", `<p class="hint">더 이상 새로 보여줄 글이 없어요. 다른 키워드를 넣어보세요.</p>`);
 
   $("#step-generate").hidden = false;
   setActiveStep(2);
+}
+
+$("#search-btn").addEventListener("click", () => {
+  const keyword = $("#keyword").value.trim();
+  if (!keyword) return alert("키워드를 입력해주세요.");
+  runSearch(keyword, 0);
 });
 
 $("#open-editor-btn").addEventListener("click", async () => {

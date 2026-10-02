@@ -14,7 +14,7 @@ process.on("uncaughtException", (err) => {
 
 const { askClaude, extractJson, openLoginWindow } = require("./lib/claude");
 const session = require("./lib/session");
-const { searchNaver, fetchArticleText } = require("./lib/scraper");
+const { searchNaver, searchGrouped, fetchArticleText } = require("./lib/scraper");
 const { findAndJudgeImages } = require("./lib/images");
 const { saveDraftToNaver, finalizeTocAndSummary, openTemplateEditor } = require("./lib/blogEditor");
 const neighbors = require("./lib/neighbors");
@@ -140,8 +140,10 @@ app.post("/api/search", async (req, res) => {
   const { keyword } = req.body;
   if (!keyword) return res.status(400).json({ error: "keyword가 필요합니다." });
   try {
-    const result = await searchNaver(keyword);
-    res.json(result);
+    // round/exclude가 오면 "다시 찾기": 이미 보여준 글은 빼고 다음 글·다른 검색어로 새로 찾는다
+    const round = Math.max(0, Math.min(50, Number(req.body.round) || 0));
+    const exclude = Array.isArray(req.body.exclude) ? req.body.exclude.slice(0, 500).map(String) : [];
+    res.json(await searchGrouped(String(keyword).trim().slice(0, 100), round, exclude));
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
