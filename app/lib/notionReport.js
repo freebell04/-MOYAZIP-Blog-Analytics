@@ -40,6 +40,25 @@ const addDays = (s, n) => {
   return ymd(d);
 };
 
+const WEEKDAY = ["일", "월", "화", "수", "목", "금", "토"];
+const md = (s) => `${Number(s.slice(5, 7))}/${Number(s.slice(8, 10))}(${WEEKDAY[new Date(s + "T00:00:00").getDay()]})`;
+
+/** 글 올린 날 정리: 날짜별로 묶는다 → [{date, titles}] (날짜 오름차순) */
+function postDays(posts) {
+  const by = {};
+  for (const x of posts) (by[x.date] ||= []).push(x.title);
+  return Object.keys(by).sort().map((date) => ({ date, titles: by[date] }));
+}
+
+/** 리포트 맨 위에 놓는 "글 올린 날" 칸. 날짜와 그날 올린 글을 함께 적는다 (withTitles: 월간은 길어서 날짜만) */
+function postedDaysBlock(posts, totalDays, withTitles) {
+  const days = postDays(posts);
+  const head = `글 올린 날 ${days.length}일 / ${totalDays}일 · 발행 ${posts.length}개`;
+  if (!days.length) return callout(`${head}\n이 기간에 올린 글이 없어요`, "📅");
+  const lines = withTitles ? days.map((d) => `${md(d.date)}  ${d.titles.join(" · ")}`) : [days.map((d) => md(d.date)).join("  ")];
+  return callout([head, ...lines].join("\n"), "📅");
+}
+
 function memoBlocks(memo) {
   if (!memo || !(memo.did || memo.good || memo.next)) return [p("(아직 회고를 적지 않았어요 — 통계 페이지의 📒 주간 기록에서 적을 수 있어요)", { italic: true, color: "gray" })];
   return [
@@ -98,12 +117,16 @@ function buildWeekly(d, { goals, history }) {
   const earlyOfWeek = d.early ? d.early.posts.filter((e) => e.date >= week && e.date <= end) : [];
 
   const blocks = [
+    postedDaysBlock(posts, 7, true),
     callout(
       `조회수 ${fmt(w.cv)}회 (전주 ${fmt(prev.cv)}회, ${signed(pct(w.cv, prev.cv))}) · 순방문자 ${fmt(w.uv)}명\n` +
         `공감 ${fmt(h.like)} · 댓글 ${fmt(h.comment)} · 이웃 증감 ${h.relation != null ? (h.relation >= 0 ? "+" : "") + h.relation : "-"} · 발행 ${posts.length}개` +
         (goal ? `\n목표 ${fmt(goal)}회 → 달성률 ${Math.round((w.cv / goal) * 100)}%${w.cv >= goal ? " 🎉" : ""}` : ""),
       "📊"
     ),
+    // 적어둔 주간 회고는 맨 위쪽에 바로 보이게 (저장 후에 회고를 고치면 이 부분만 노션에서 바뀐다)
+    h2("✍️ 회고"),
+    ...memoBlocks(h.memo),
     h2("🎯 목표 대비"),
     goals
       ? table(["항목", "목표", "실제", "달성률"], [
@@ -119,7 +142,6 @@ function buildWeekly(d, { goals, history }) {
   if (earlyOfWeek.length) blocks.push(h3("🚀 발행 후 3일 성과"), earlyTable(earlyOfWeek));
   blocks.push(...periodTables(d.week, "지난주"));
   blocks.push(...commonAnalysis(d.analysis));
-  blocks.push(h2("✍️ 회고"), ...memoBlocks(h.memo));
   blocks.push(divider(), p(`블로그 자동화 대시보드에서 ${new Date().toLocaleString("ko-KR")}에 저장`, { color: "gray" }));
 
   return {
@@ -150,6 +172,7 @@ function buildMonthly(d, { goals, history }) {
   const goal = goals && goals.monthlyViews && goals.updatedAt && goals.updatedAt.slice(0, 10) <= end ? goals.monthlyViews : null;
 
   const blocks = [
+    postedDaysBlock(posts, end.slice(8, 10) * 1, false),
     callout(
       `${month} 조회수 ${fmt(m.cv)}회 (전월 ${fmt(pm.cv)}회, ${signed(pct(m.cv, pm.cv))})\n` +
         `서로이웃 ${fmt(m.friend)} · 이웃 ${fmt(m.follow)} · 그 외 ${fmt(m.etc)} · 발행 ${posts.length}개` +

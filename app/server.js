@@ -435,8 +435,8 @@ app.post("/api/stats/memo", async (req, res) => {
   const { week, did, good, next } = req.body || {};
   if (!/^\d{4}-\d{2}-\d{2}$/.test(week || "")) return res.status(400).json({ error: "week(YYYY-MM-DD)가 필요합니다." });
   const record = stats.setMemo(week, { did, good, next });
-  // 노션 설정이 되어 있고 화면에서 "노션에도 반영"을 켰으면 같이 반영 (실패해도 회고 저장은 유지)
-  if (req.body.notion === true && notion.isReady()) {
+  // 노션 설정이 되어 있으면 회고를 바로 노션에도 반영 (화면에서 "노션에도 반영"을 끈 경우만 제외, 실패해도 회고 저장은 유지)
+  if (req.body.notion !== false && notion.isReady()) {
     try {
       return res.json({ record, notion: await syncMemoToNotion(record) });
     } catch (e) {
