@@ -2,10 +2,8 @@
 //
 // 키 = "NBH-" + base64url(내용) + "." + base64url(서명)
 //   내용: {n: 이름, s: 시작일(YYYY-MM-DD), e: 마지막 사용일(YYYY-MM-DD), id: 체험단 DB 페이지 id}
-//   서명: Ed25519. 서명용 개인키(data/license-private.pem)는 블로그 주인 컴퓨터에만 있고,
-//         프로그램에는 확인용 공개키만 들어 있어서 다른 사람은 키를 만들 수 없다.
-//
-// 개인키가 있는 컴퓨터(= 관리자)는 키 없이 쓴다.
+//   서명: Ed25519. 키는 블로그 주인 컴퓨터에만 있는 별도의 '체험단 관리자' 프로그램이 만들고,
+//         이 프로그램에는 확인용 공개키만 들어 있어서 다른 사람은 키를 만들 수 없다.
 const path = require("path");
 const fs = require("fs");
 const crypto = require("crypto");
@@ -15,23 +13,8 @@ MCowBQYDK2VwAyEALvlPAnQtHYYI2koy0xcoLXIAaFMomunj64Ji/og2sew=
 -----END PUBLIC KEY-----`;
 const DATA = path.join(__dirname, "..", "data");
 const LICENSE_PATH = path.join(DATA, "license.json");
-const PRIVATE_KEY_PATH = path.join(DATA, "license-private.pem");
 
-const b64u = (buf) => Buffer.from(buf).toString("base64url");
 const today = () => new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10); // 한국 날짜
-
-function isAdmin() {
-  return fs.existsSync(PRIVATE_KEY_PATH);
-}
-
-/** 관리자 컴퓨터에서만: 시작일부터 days일 동안 쓸 수 있는 키를 만든다 */
-function issue({ name, start = today(), days = 14, id = "" }) {
-  if (!isAdmin()) throw new Error("키를 만들 수 있는 컴퓨터가 아니에요.");
-  const end = new Date(new Date(start + "T00:00:00Z").getTime() + (days - 1) * 86400000).toISOString().slice(0, 10);
-  const payload = Buffer.from(JSON.stringify({ n: name, s: start, e: end, id }));
-  const sig = crypto.sign(null, payload, fs.readFileSync(PRIVATE_KEY_PATH, "utf-8"));
-  return { key: `NBH-${b64u(payload)}.${b64u(sig)}`, start, end };
-}
 
 /** 키 확인. {ok, name, start, end, daysLeft, reason} */
 function check(key) {
@@ -62,7 +45,6 @@ function saved() {
 
 /** 지금 이 컴퓨터에서 프로그램을 쓸 수 있는지 */
 function status() {
-  if (isAdmin()) return { ok: true, admin: true };
   const key = saved();
   if (!key) return { ok: false, reason: "사용 키를 입력해주세요." };
   return check(key);
@@ -76,4 +58,4 @@ function activate(key) {
   return r;
 }
 
-module.exports = { isAdmin, issue, check, status, activate, today };
+module.exports = { check, status, activate, today };

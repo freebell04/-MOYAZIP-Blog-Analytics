@@ -423,8 +423,3 @@ function loadPost(post) {
   $("#search-btn").click();
 })();
 
-// 관리자 컴퓨터(사용 키를 만드는 컴퓨터)에서만 '체험단 선정' 버튼을 보여준다
-fetch("/api/admin/is-admin")
-  .then((r) => r.json())
-  .then((r) => { if (r.admin) $("#admin-link").hidden = false; })
-  .catch(() => {});
