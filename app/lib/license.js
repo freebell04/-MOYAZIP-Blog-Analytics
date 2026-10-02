@@ -101,4 +101,4 @@ async function startTrial({ name, blog }) {
 
 const trialAvailable = () => !!TRIAL_URL;
 
-module.exports = { check, status, activate, today, startTrial, trialAvailable };
+module.exports = { check, status, activate, today, startTrial, trialAvailable, TRIAL_URL };

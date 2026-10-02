@@ -26,15 +26,10 @@
 
 <section class="card" id="trial-box" hidden>
   <div class="card-head">
-    <h2>🎁 무료 체험 2주 시작하기</h2>
-    <p class="hint">키가 없어도 돼요. 이름과 내 네이버 블로그를 넣으면 <b>오늘부터 2주</b> 바로 쓸 수 있어요. (블로그와 컴퓨터마다 한 번만 가능해요)</p>
+    <h2>🎁 아직 키가 없다면</h2>
+    <p class="hint">무료 체험 신청 페이지에서 이름과 블로그를 넣으면 <b>오늘부터 2주</b> 쓸 수 있어요. 신청이 끝나면 <b>"🚀 내 프로그램에서 바로 시작"</b> 버튼으로 이 프로그램에 키가 자동으로 들어가요.</p>
   </div>
-  <label class="field-label">이름 (또는 닉네임)</label>
-  <input id="t-name" autocomplete="off" placeholder="예: 모야" />
-  <label class="field-label">네이버 블로그 주소 또는 아이디</label>
-  <input id="t-blog" autocomplete="off" placeholder="예: blog.naver.com/내아이디" />
-  <button id="t-start" class="btn btn-primary" style="margin-top:10px">무료 체험 시작</button>
-  <p id="t-msg" class="status-line"></p>
+  <a id="t-link" class="btn btn-primary" href="#" target="_blank" rel="noopener" style="display:inline-block;text-decoration:none">무료 체험 신청하러 가기</a>
 </section>
 <script>
 const $ = (s) => document.querySelector(s);
@@ -42,18 +37,9 @@ const $ = (s) => document.querySelector(s);
 const preKey = new URLSearchParams(location.search).get("key");
 if (preKey) { $("#key").value = preKey; history.replaceState(null, "", location.pathname); setTimeout(() => $("#save").click(), 300); }
 fetch("/api/license").then((r) => r.json()).then((st) => {
-  if (st.trial) $("#trial-box").hidden = false;
+  if (st.trial) { $("#trial-box").hidden = false; $("#t-link").href = st.trialUrl || "#"; }
   if (st.ok) location.href = "/";
   else if (st.expired) $("#why").textContent = `사용 기간이 끝났어요 (${st.start} ~ ${st.end}). 계속 쓰시려면 새 키를 입력해주세요.`;
-});
-$("#t-start").addEventListener("click", async () => {
-  $("#t-start").disabled = true;
-  $("#t-msg").textContent = "체험을 시작하는 중이에요...";
-  const r = await fetch("/api/license/trial", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: $("#t-name").value, blog: $("#t-blog").value }) }).then((r) => r.json()).catch(() => ({ ok: false, reason: "연결하지 못했어요." }));
-  $("#t-start").disabled = false;
-  if (!r.ok) { $("#t-msg").innerHTML = `<span class="error">${r.reason}</span>`; return; }
-  $("#t-msg").innerHTML = `<span class="ok">✅ ${r.name}님, ${r.existing ? "이미 시작한 체험이 있어서 이어서 쓸게요" : "무료 체험이 시작됐어요"}! ${r.start} ~ ${r.end} (남은 기간 ${r.daysLeft}일)</span>`;
-  setTimeout(() => (location.href = "/"), 1500);
 });
 $("#save").addEventListener("click", async () => {
   const r = await fetch("/api/license", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: $("#key").value }) }).then((r) => r.json());
