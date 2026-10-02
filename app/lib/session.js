@@ -73,8 +73,67 @@ async function saveNaverSession(context) {
  * 디버그 모드 크롬(전용 프로필)이 떠있는지 확인하고, 없으면 새로 띄운다.
  * @returns {Promise<{alreadyRunning: boolean}>}
  */
+/** 탭 하나가 응답하는지 (CDP로 간단한 계산을 시켜본다). 멈춘 탭은 응답이 없다. */
+function tabResponds(wsUrl, ms = 2000) {
+  return new Promise((resolve) => {
+    let done = false;
+    let ws;
+    const finish = (v) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      try { ws && ws.close(); } catch {}
+      resolve(v);
+    };
+    const timer = setTimeout(() => finish(false), ms);
+    try {
+      ws = new WebSocket(wsUrl);
+      ws.onopen = () => ws.send(JSON.stringify({ id: 1, method: "Runtime.evaluate", params: { expression: "1", returnByValue: true } }));
+      ws.onmessage = (ev) => { try { if (JSON.parse(ev.data).id === 1) finish(true); } catch {} };
+      ws.onerror = () => finish(false);
+    } catch {
+      finish(false);
+    }
+  });
+}
+
+/**
+ * 크롬이 오래 켜져 있으면 일부 탭이 멈춰서(응답 없음) Playwright가 크롬에 연결하다가 30초를 기다린 뒤 실패한다
+ * ("connectOverCDP: Timeout"). 연결하기 전에 멈춘 탭을 찾아서, 앞으로 가져와 깨워보고 그래도 안 되면 닫는다.
+ * 글쓰기 화면은 임시저장 안 한 글이 있을 수 있어서 응답이 없어도 닫지 않는다.
+ */
+async function closeHungTabs() {
+  const closed = [];
+  try {
+    const list = (await (await fetch(`${CDP_URL}/json/list`, { signal: AbortSignal.timeout(3000) })).json()).filter((t) => t.type === "page" && /^https?:/.test(t.url) && t.webSocketDebuggerUrl);
+    const states = await Promise.all(list.map(async (t) => ({ t, ok: await tabResponds(t.webSocketDebuggerUrl) })));
+    const hung = states.filter((s) => !s.ok).map((s) => s.t);
+    // 멈춘 탭이 여러 개여도 오래 걸리지 않게 한꺼번에 처리한다
+    await Promise.all(
+      hung.map(async (t) => {
+        await fetch(`${CDP_URL}/json/activate/${t.id}`, { signal: AbortSignal.timeout(3000) }).catch(() => {});
+        await sleep(1200);
+        if (await tabResponds(t.webSocketDebuggerUrl, 2000)) return; // 깨어났다
+        if (/postwrite|PostWriteForm|Redirect=Write/i.test(t.url)) return; // 글쓰기 탭은 건드리지 않는다
+        await fetch(`${CDP_URL}/json/close/${t.id}`, { signal: AbortSignal.timeout(3000) }).catch(() => {});
+        closed.push(t.url);
+      })
+    );
+    // 앞으로 가져와 본 탭 중 하나가 화면을 차지하고 있을 수 있어서, 남은 탭 중 처음 것을 다시 앞으로
+    if (hung.length) {
+      const rest = (await (await fetch(`${CDP_URL}/json/list`)).json()).filter((t) => t.type === "page" && /^https?:/.test(t.url));
+      if (rest[0]) await fetch(`${CDP_URL}/json/activate/${rest[0].id}`).catch(() => {});
+    }
+  } catch {}
+  if (closed.length) console.log(`[크롬 정리] 멈춰서 응답 없는 탭 ${closed.length}개를 닫았어요:`, closed.map((u) => u.slice(0, 60)).join(" | "));
+  return closed;
+}
+
 async function ensureDebugChrome() {
-  if (await isCdpUp()) return { alreadyRunning: true };
+  if (await isCdpUp()) {
+    await closeHungTabs();
+    return { alreadyRunning: true };
+  }
 
   const chromePath = findChromePath();
   if (!chromePath) throw new Error("크롬 실행 파일을 찾을 수 없습니다 (C:\\Program Files\\Google\\Chrome\\...).");
