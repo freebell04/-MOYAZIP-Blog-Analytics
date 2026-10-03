@@ -61,10 +61,21 @@
   .head-row { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; flex-wrap: wrap; }
 
   /* 분석 */
-  .insights { display: flex; flex-direction: column; gap: 8px; }
-  .insight { background: var(--bg); border-radius: 10px; padding: 10px 12px; font-size: 14px; }
-  .tips { margin: 0; padding-left: 20px; font-size: 14px; }
-  .tips li { margin: 6px 0; }
+  /* 한눈에 보기: 아이콘 + 핵심 한 줄(숫자 강조) + 보충 설명을 카드로 */
+  .insights { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 10px; }
+  .insight { display: flex; gap: 12px; align-items: flex-start; background: var(--bg); border-radius: 12px; padding: 14px; }
+  .insight .ico { font-size: 22px; line-height: 1.2; flex: none; }
+  .insight .head { font-size: 15px; font-weight: 600; line-height: 1.5; word-break: keep-all; }
+  .insight .more { margin-top: 3px; font-size: 13px; color: var(--muted, #6b7280); line-height: 1.55; word-break: keep-all; }
+  .insight .num { color: var(--green-dark, #047857); }
+  .insight .up { color: #047857; } .insight .down { color: #dc2626; }
+  /* 앞으로 이렇게 올려보세요: 분류 + 현황(회색) + 이렇게 해보세요(굵게) */
+  .tips { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; margin: 0; padding: 0; list-style: none; counter-reset: tip; }
+  .tipcard { counter-increment: tip; border: 1px solid var(--line, #e5e7eb); border-radius: 12px; padding: 14px 14px 14px 14px; background: #fff; }
+  .tipcard .cat { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; color: var(--green-dark, #047857); background: var(--green-tint, #e8f8ee); border-radius: 999px; padding: 3px 10px; }
+  .tipcard .now { margin: 10px 0 0; font-size: 13px; color: var(--muted, #6b7280); line-height: 1.6; word-break: keep-all; }
+  .tipcard .do { margin: 8px 0 0; font-size: 14.5px; font-weight: 600; line-height: 1.6; word-break: keep-all; padding-left: 10px; border-left: 3px solid var(--green, #10b981); }
+  .tipcard .do::before { content: "이렇게 해보세요"; display: block; font-size: 11px; font-weight: 700; color: var(--green-dark, #047857); margin-bottom: 2px; }
   .ideas { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   .idea { border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; background: #fff; }
   .idea .kind { font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 999px; display: inline-block; margin-bottom: 6px; }
@@ -314,7 +325,8 @@ function render() {
 
     <section class="card">
       <h2>🧭 한눈에 보기</h2>
-      <div class="insights">${a.insights.map((i) => `<div class="insight">${i.icon} ${esc(i.text)}</div>`).join("")}</div>
+      <p class="sub">내 블로그 상태를 숫자 위주로 정리했어요 (초록 = 좋아진 것, 빨강 = 줄어든 것)</p>
+      <div class="insights">${a.insights.map(insightCard).join("")}</div>
     </section>
 
     <section class="card">
@@ -388,8 +400,8 @@ function render() {
 
     <section class="card">
       <h2>📌 앞으로 이렇게 올려보세요</h2>
-      <p class="sub">위 숫자로 계산한 기본 분석이에요</p>
-      <ul class="tips">${a.tips.map((t) => `<li>${esc(t)}</li>`).join("")}</ul>
+      <p class="sub">위 숫자로 계산한 기본 분석이에요 · 회색 글씨는 지금 상황, 굵은 글씨는 해볼 일이에요</p>
+      <ul class="tips">${a.tips.map(tipCard).join("")}</ul>
     </section>
 
     <section class="card" id="trends"></section>
@@ -425,6 +437,45 @@ const IDEA_KIND = {
   gap: "검색 수요 있음 · 새 글", series: "후속편·시리즈", top: "인기 주제 확장",
   trend: "이웃 글 기반 · 내 블로그와 연결", cross: "내 강점 × 이웃 관심", season: "시즌",
 };
+// 참고 이웃 글 중 키워드가 제목에 실제로 들어간 글만 (주제 분류가 느슨해서 상관없는 글이 섞일 때가 있다). 하나도 없으면 전부.
+function relevantRefs(i) {
+  const all = i.examples || [];
+  const hit = all.filter((e) => i.keyword && String(e.title).includes(i.keyword));
+  return hit.length ? hit : all;
+}
+// 숫자·퍼센트를 강조하고, +는 초록·-는 빨강으로 (문장 안의 사용자 글자는 먼저 이스케이프)
+function emph(text) {
+  return esc(text).replace(/(?<!&#)([+\-−▲▼]?\d[\d,\.]*\s?(?:%|회|개|명|시|위|일)?)/g, (m) => {
+    if (/^[+▲]\d/.test(m)) return `<b class="up">${m}</b>`;
+    if (/^[\-−▼]\d/.test(m) && /[%]/.test(m)) return `<b class="down">${m}</b>`;
+    return /\d/.test(m) && /(%|회|개|명|시|위)$/.test(m.trim()) ? `<b class="num">${m}</b>` : m;
+  });
+}
+// 한눈에 보기: 첫 문장(핵심)은 굵게, 나머지는 보충 설명으로
+function insightCard(i) {
+  const t = String(i.text || "");
+  const m = t.match(/^(.*?)(?: — | · |, )(.+)$/);
+  const head = m ? m[1] : t, more = m ? m[2].replace(/ · /g, " · ") : "";
+  return `<div class="insight"><span class="ico">${i.icon}</span><div><div class="head">${emph(head)}</div>${more ? `<div class="more">${emph(more)}</div>` : ""}</div></div>`;
+}
+// 앞으로 이렇게 올려보세요: 분류 + 현황 + 해볼 일(마지막 문장)
+const TIP_CATS = [
+  [/홈판|메인|썸네일/, "🏠 노출·썸네일"],
+  [/요일|시간대|시에|발행하면/, "🕒 올리는 때"],
+  [/제목|검색어|검색이에요|검색으로/, "🔎 제목·검색어"],
+  [/이웃|팔로워|답방/, "👥 이웃 소통"],
+  [/줄었|후속편|업데이트|떨어/, "📉 조회수 되살리기"],
+  [/꾸준|주 \d회|발행 중/, "✍️ 발행 꾸준히"],
+];
+function tipCard(t) {
+  const text = String(t || "").trim();
+  const cat = (TIP_CATS.find(([re]) => re.test(text)) || [0, "💡 참고"])[1];
+  const sents = text.split(/(?<=[요다])\.\s+/).map((x) => x.trim()).filter(Boolean);
+  const now = sents.length > 1 ? sents.slice(0, -1).join(" ") : "";
+  const act = sents.length > 1 ? sents[sents.length - 1] : sents[0];
+  return `<li class="tipcard"><span class="cat">${cat}</span>${now ? `<p class="now">${emph(now)}</p>` : ""}<p class="do">${emph(act)}</p></li>`;
+}
+
 function ideaCard(i) {
   const ex = (i.examples || []).map((e) => `<li><a href="${esc(e.link)}" target="_blank" rel="noopener">${esc(e.nick)} 「${esc(e.title.slice(0, 34))}${e.title.length > 34 ? "…" : ""}」</a></li>`).join("");
   return `<div class="idea">
@@ -432,7 +483,7 @@ function ideaCard(i) {
     <b>${esc(i.title)}</b><p>${esc(i.reason)}</p>
     ${(i.questions || []).length ? `<div class="qs"><span>사람들이 궁금해할 질문</span><ul>${i.questions.map((q) => `<li>${esc(q)}</li>`).join("")}</ul></div>` : ""}
     ${ex ? `<p class="muted" style="margin:6px 0 2px;font-size:12px">참고한 이웃 글</p><ul class="ex">${ex}</ul>` : ""}
-    ${i.keyword ? `<a class="btn-write" href="/?keyword=${encodeURIComponent(i.keyword)}">✍️ 이 주제로 글감 찾기</a>` : ""}
+    ${i.keyword ? `<a class="btn-write" data-ctx="${esc(JSON.stringify({ keyword: i.keyword, title: i.title, questions: i.questions || [], refs: relevantRefs(i).map((e) => ({ nick: e.nick, title: e.title, link: e.link })) }))}" href="/?keyword=${encodeURIComponent(i.keyword)}">✍️ 이 주제로 글감 찾기</a>` : ""}
   </div>`;
 }
 
@@ -803,6 +854,10 @@ loadNotion();
 
 
 load();
+document.addEventListener("click", (e) => {
+  const w = e.target.closest("[data-ctx]");
+  if (w) { try { localStorage.setItem("nbh.ctx", w.dataset.ctx); } catch {} }
+});
 </script>
 </body>
 </html>

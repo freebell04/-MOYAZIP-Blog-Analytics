@@ -260,3 +260,8 @@ textarea { resize: vertical; margin-top: 4px; }
   color: #adadad;
   margin-top: 24px;
 }
+
+.item .tag.neighbor { background: #e6f7f1; color: #0f766e; }
+.ctx-box { background: #f6fbf8; border: 1px solid #cdeedd; border-radius: 12px; padding: 12px 14px; margin: 12px 0; font-size: 14px; }
+.ctx-box ul { margin: 0; padding-left: 18px; }
+.ctx-box li { margin: 2px 0; }

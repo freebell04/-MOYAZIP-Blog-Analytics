@@ -120,7 +120,26 @@ async function pageCards(page, url) {
 }
 
 /** @returns {Promise<{popular, namu, review, news, round, exhausted}>} */
-async function searchGrouped(keyword, round = 0, exclude = []) {
+/**
+ * 이웃 글 제목 등에서 "이 주제를 구체적으로 만드는 단어"를 뽑아 검색어를 보강한다.
+ * 예) 키워드 '맛집' + 이웃 글 제목들 → '맛집 성수 브런치'  (그냥 '맛집'보다 글감이 구체적으로 나온다)
+ */
+function enrichKeyword(keyword, titles = []) {
+  const { keywordsOf } = require("./trends");
+  const base = new Set(String(keyword).split(/\s+/).map((w) => w.toLowerCase()));
+  const count = new Map();
+  for (const t of titles) for (const w of keywordsOf(t)) {
+    if (base.has(w.toLowerCase()) || String(keyword).includes(w)) continue;
+    count.set(w, (count.get(w) || 0) + 1);
+  }
+  // 여러 글에 공통으로 나오는 단어만 (한 글에만 나오는 '통장어탕' 같은 말은 검색을 너무 좁힌다).
+  // 없으면 첫 번째 제목(= 아이디어 제목)의 핵심어 하나만 붙인다.
+  let top = [...count.entries()].filter((e) => e[1] >= 2).sort((a, b) => b[1] - a[1]).slice(0, 2).map((e) => e[0]);
+  if (!top.length && titles[0]) top = [...count.keys()].filter((w) => keywordsOf(titles[0]).includes(w)).slice(0, 1);
+  return top.length ? `${keyword} ${top.join(" ")}` : keyword;
+}
+
+async function searchGrouped(keyword, round = 0, exclude = [], hints = {}) {
   const seen = new Set(exclude);
   const take = (items, ok, n = GROUP_SIZE) => {
     const out = [];
@@ -142,7 +161,12 @@ async function searchGrouped(keyword, round = 0, exclude = []) {
     const words = keyword.split(/\s+/).filter((w) => w.length >= 2);
 
     // 인기글: 관련도순 블로그 탭. 다시 찾을 때마다 다음 페이지. 새 글이 모자라면 최신순으로 채운다.
-    let popular = take(await pageCards(page, blogTabUrl(keyword, 1 + 10 * round, false)), isBlog);
+    // (이웃 글 같은 참고 제목이 있으면 거기서 뽑은 단어를 붙인 보강 검색어를 먼저 쓰고, 모자라면 원래 키워드로 채운다)
+    const refTitles = Array.isArray(hints.titles) ? hints.titles.slice(0, 8).map(String) : [];
+    const rich = refTitles.length ? enrichKeyword(keyword, refTitles) : keyword;
+    let popular = [];
+    if (rich !== keyword) popular = take(await pageCards(page, blogTabUrl(rich, 1 + 10 * round, false)), isBlog);
+    if (popular.length < GROUP_SIZE) popular = popular.concat(take(await pageCards(page, blogTabUrl(keyword, 1 + 10 * round, false)), isBlog, GROUP_SIZE - popular.length));
     if (popular.length < GROUP_SIZE) popular = popular.concat(take(await pageCards(page, blogTabUrl(keyword, 1 + 10 * round, true)), isBlog, GROUP_SIZE - popular.length));
 
     // 나무위키: "키워드 나무위키" 검색에서 namu.wiki 문서만. 검색어를 단어별로도 바꿔가며 문서를 더 모은다.
@@ -156,7 +180,7 @@ async function searchGrouped(keyword, round = 0, exclude = []) {
     // 후기·리뷰: 후기/리뷰/내돈내산... 단어를 번갈아 붙여 블로그 탭 검색
     const w = REVIEW_WORDS[round % REVIEW_WORDS.length];
     const reviewPage = 1 + 10 * Math.floor(round / REVIEW_WORDS.length);
-    let review = take(await pageCards(page, blogTabUrl(`${keyword} ${w}`, reviewPage, false)), isBlog);
+    let review = take(await pageCards(page, blogTabUrl(`${rich} ${w}`, reviewPage, false)), isBlog);
     if (review.length < GROUP_SIZE) review = review.concat(take(await pageCards(page, blogTabUrl(`${keyword} 리뷰`, 1 + 10 * round, true)), isBlog, GROUP_SIZE - review.length));
     // 제목에 후기·리뷰 말이 들어간 글을 위로
     const isReviewy = (x) => /후기|리뷰|내돈내산|사용기|써보|해보/.test(x.title);
@@ -168,7 +192,7 @@ async function searchGrouped(keyword, round = 0, exclude = []) {
     const newsCards = (await pageCards(page, `https://search.naver.com/search.naver?ssc=tab.news.all&query=${enc(keyword)}&sort=1&start=${1 + 10 * round}`)).filter(rel);
     const news = take(newsCards, isNews, 5);
 
-    return { popular, namu, review, news, round, exhausted: !popular.length && !namu.length && !review.length && !news.length, namuSearchUrl: `https://namu.wiki/Search?q=${enc(keyword)}` };
+    return { popular, namu, review, news, round, richKeyword: rich, exhausted: !popular.length && !namu.length && !review.length && !news.length, namuSearchUrl: `https://namu.wiki/Search?q=${enc(keyword)}` };
   } finally {
     await browser.close();
   }
@@ -203,4 +227,4 @@ async function fetchArticleText(url) {
   }
 }
 
-module.exports = { searchNaver, searchGrouped, fetchArticleText };
+module.exports = { searchNaver, searchGrouped, enrichKeyword, fetchArticleText };

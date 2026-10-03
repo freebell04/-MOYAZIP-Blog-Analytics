@@ -248,6 +248,13 @@ function buildPostPrompt(data) {
     meaningfulStyleGuide(data.styleGuide) && d.kind !== "saved" ? `\n[이 블로그 말투·스타일 가이드]\n${data.styleGuide.trim()}` : "",
     "",
     `[검색 키워드] ${data.keyword}`,
+    ...(data.context
+      ? [
+          `[글 주제 방향] ${data.context.title}`,
+          ...(data.context.questions.length ? ["[이 글에서 꼭 답해줬으면 하는 질문]", ...data.context.questions.map((q) => `- ${q}`)] : []),
+          ...(data.context.refs.length ? ["[참고: 이웃 블로거들이 최근 쓴 글 (내용은 베끼지 말고 어떤 주제가 인기인지 참고만)]", ...data.context.refs.map((r) => `- ${r.nick ? r.nick + " · " : ""}${r.title}`)] : []),
+        ]
+      : []),
     ...data.items.map(
       (it, i) => `\n[글감 ${i + 1}] ${it.title}\n링크: ${it.link}\n${(it.text || it.snippet || "(본문을 못 가져왔어요 — 링크 참고)").slice(0, 2500)}`
     ),

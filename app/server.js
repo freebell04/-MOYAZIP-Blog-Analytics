@@ -143,7 +143,8 @@ app.post("/api/search", async (req, res) => {
     // round/exclude가 오면 "다시 찾기": 이미 보여준 글은 빼고 다음 글·다른 검색어로 새로 찾는다
     const round = Math.max(0, Math.min(50, Number(req.body.round) || 0));
     const exclude = Array.isArray(req.body.exclude) ? req.body.exclude.slice(0, 500).map(String) : [];
-    res.json(await searchGrouped(String(keyword).trim().slice(0, 100), round, exclude));
+    const hints = req.body.ctx && Array.isArray(req.body.ctx.titles) ? { titles: req.body.ctx.titles.slice(0, 8) } : {};
+    res.json(await searchGrouped(String(keyword).trim().slice(0, 100), round, exclude, hints));
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -223,7 +224,7 @@ const HANDOFF_GUIDE = [
 ].join("\n");
 
 // 체크한 글감의 본문을 모아 handoff.json으로 저장하고 그 내용을 돌려준다
-async function makeHandoff(keyword, selected) {
+async function makeHandoff(keyword, selected, context) {
     const items = [];
     for (const it of selected) {
       const text = await fetchArticleText(it.link).catch(() => "");
@@ -233,6 +234,7 @@ async function makeHandoff(keyword, selected) {
     const data = {
       guide: HANDOFF_GUIDE,
       keyword: keyword || "",
+      context: context && context.title ? { title: String(context.title).slice(0, 200), questions: (context.questions || []).slice(0, 6).map(String), refs: (context.refs || []).slice(0, 5).map((r) => ({ nick: String(r.nick || ""), title: String(r.title || "") })) } : null,
       savedAt: new Date().toISOString(),
       blogName: config.blogName(),
       styleGuide: fs.existsSync(styleGuidePath) ? fs.readFileSync(styleGuidePath, "utf-8").trim() : "",
@@ -244,10 +246,10 @@ async function makeHandoff(keyword, selected) {
 }
 
 app.post("/api/handoff", async (req, res) => {
-  const { keyword, selected } = req.body; // selected: [{title, link, snippet}]
+  const { keyword, selected, context } = req.body; // selected: [{title, link, snippet}]
   if (!selected || !selected.length) return res.status(400).json({ error: "글감을 하나 이상 체크해주세요." });
   try {
-    const data = await makeHandoff(keyword, selected);
+    const data = await makeHandoff(keyword, selected, context);
     res.json({ success: true, count: data.items.length, withText: data.items.filter((x) => x.text).length, prompt: blogFormat.buildPostPrompt(data) });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -256,11 +258,11 @@ app.post("/api/handoff", async (req, res) => {
 
 // --- AI 채팅(ChatGPT/Gemini/Claude) 연결: 로그인용 크롬에 채팅 탭을 열고 요청문을 보낸 뒤, 결과 JSON을 자동으로 받아온다 ---
 app.post("/api/ai-chat", async (req, res) => {
-  const { ai, keyword, selected } = req.body;
+  const { ai, keyword, selected, context } = req.body;
   if (!aiChat.SITES[ai]) return res.status(400).json({ error: "지원하지 않는 AI예요." });
   if (!selected || !selected.length) return res.status(400).json({ error: "글감을 하나 이상 체크해주세요." });
   try {
-    const data = await makeHandoff(keyword, selected);
+    const data = await makeHandoff(keyword, selected, context);
     const prompt = blogFormat.buildPostPrompt(data);
     const st = await aiChat.start(ai, prompt);
     res.json({ success: true, ...st, count: data.items.length, prompt });

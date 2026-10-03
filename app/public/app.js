@@ -62,12 +62,14 @@ $("#login-btn").addEventListener("click", async () => {
 
 // ---- 글감 찾기: 인기글 / 나무위키 / 후기·리뷰 / 뉴스로 나눠서 보여주고, 🔄로 새 글감을 다시 찾는다 ----
 const GROUPS = [
+  { key: "neighbor", icon: "👥", name: "이웃 블로거 글", type: "이웃 글", cls: "neighbor", hint: "이 주제로 이웃들이 최근 쓴 글 — 어떤 점이 인기인지 참고용" },
   { key: "popular", icon: "🔥", name: "인기글", type: "블로그", cls: "blog", hint: "지금 많이 읽히는 글 — 주제 잡기·제목 참고용" },
   { key: "namu", icon: "📚", name: "나무위키", type: "나무위키", cls: "wiki", hint: "정확한 개념·배경을 확인할 수 있는 근거 자료" },
   { key: "review", icon: "⭐", name: "후기·리뷰", type: "후기", cls: "review", hint: "직접 써보고 쓴 글 — 경험담·장단점 참고용" },
   { key: "news", icon: "📰", name: "최신 뉴스", type: "뉴스", cls: "news", hint: "요즘 이슈·수치 확인용" },
 ];
 let searchState = { keyword: "", round: 0, shown: new Set(), all: [] };
+let searchCtx = null; // 이웃 소통·성과 통계에서 넘어온 주제 정보 {keyword,title,questions,refs}
 const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
 function itemHtml(item, i, checked) {
@@ -90,7 +92,9 @@ function renderSearch(r, pinned) {
     sections.push(`<h3 class="grp-title">✅ 선택해둔 글감 <small>(다시 찾아도 유지돼요)</small></h3>` + pinned.map((it) => (all.push(it), itemHtml(it, all.length - 1, true))).join(""));
   }
   for (const g of GROUPS) {
-    const list = (r[g.key] || []).map((x) => ({ ...x, type: g.type, cls: g.cls }));
+    const src = g.key === "neighbor" ? (searchCtx ? searchCtx.refs || [] : []).map((x) => ({ title: x.title, link: x.link, snippet: (x.nick ? x.nick + " 님의 글" : "") })) : r[g.key] || [];
+    if (g.key === "neighbor" && !src.length) continue; // 이웃 글 정보가 없으면 이 묶음은 숨김
+    const list = src.filter((x) => !pinned.some((p) => p.link === x.link)).map((x) => ({ ...x, type: g.type, cls: g.cls }));
     let body = list.map((it) => (all.push(it), itemHtml(it, all.length - 1, false))).join("");
     if (g.key === "namu" && !list.length) {
       body = `<div class="empty-state">이 키워드의 새 나무위키 문서가 없어요. <a href="${esc(r.namuSearchUrl)}" target="_blank">나무위키에서 직접 검색 ↗</a></div>`;
@@ -139,7 +143,7 @@ async function runSearch(keyword, round) {
   const r = await fetch("/api/search", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ keyword, round, exclude }),
+    body: JSON.stringify({ keyword, round, exclude, ctx: searchCtx ? { titles: [searchCtx.title, ...(searchCtx.refs || []).map((x) => x.title)] } : undefined }),
   })
     .then((r) => r.json())
     .catch((e) => ({ error: e.message }));
@@ -152,6 +156,7 @@ async function runSearch(keyword, round) {
   if (!round) searchState = { keyword, round: 0, shown: new Set(), all: [] };
   searchState.round = round;
   for (const g of GROUPS) for (const x of r[g.key] || []) searchState.shown.add(x.link);
+  if (r.richKeyword && r.richKeyword !== keyword) $("#ctx-rich") && ($("#ctx-rich").textContent = r.richKeyword);
   if (!round) selectedItems = [];
   renderSearch(r, round ? pinned : []);
   if (r.exhausted) $("#reload-btn").insertAdjacentHTML("afterend", `<p class="hint">더 이상 새로 보여줄 글이 없어요. 다른 키워드를 넣어보세요.</p>`);
@@ -163,6 +168,7 @@ async function runSearch(keyword, round) {
 $("#search-btn").addEventListener("click", () => {
   const keyword = $("#keyword").value.trim();
   if (!keyword) return alert("키워드를 입력해주세요.");
+  if (searchCtx && keyword !== searchCtx.keyword) { searchCtx = null; renderCtxBox(); } // 직접 다른 키워드를 검색하면 이어받은 주제 정보는 쓰지 않는다
   runSearch(keyword, 0);
 });
 
@@ -390,7 +396,7 @@ document.querySelectorAll(".handoff-btn").forEach((btn) => {
     const r = await fetch("/api/ai-chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ai, keyword: $("#keyword").value.trim(), selected: selectedItems }),
+      body: JSON.stringify({ ai, keyword: $("#keyword").value.trim(), selected: selectedItems, context: searchCtx ? { title: searchCtx.title, questions: searchCtx.questions, refs: searchCtx.refs } : undefined }),
     })
       .then((r) => r.json())
       .catch((e) => ({ error: e.message }));
@@ -457,10 +463,28 @@ function loadPost(post) {
   $("#save-draft-btn").click();
 }
 
+function renderCtxBox() {
+  const box = $("#ctx-box");
+  if (!searchCtx) { box.hidden = true; box.innerHTML = ""; return; }
+  const qs = (searchCtx.questions || []).map((q) => `<li>${esc(q)}</li>`).join("");
+  box.hidden = false;
+  box.innerHTML = `<b>💡 이 주제로 쓸 글: ${esc(searchCtx.title)}</b>
+    <p class="hint" style="margin:4px 0">이웃 글 제목에서 뽑은 단어를 붙여 더 구체적으로 찾고 있어요: <b id="ctx-rich">${esc(searchCtx.keyword)}</b></p>
+    ${qs ? `<p style="margin:6px 0 2px"><b>이 글에서 답해주면 좋은 질문</b></p><ul>${qs}</ul>` : ""}
+    <p class="hint" style="margin:4px 0 0">이 방향과 질문은 AI에게 글을 부탁할 때 요청문에 같이 들어가요.</p>`;
+}
+
 // 이웃 소통 '주제 추천'에서 [이 주제로 글감 찾기]로 넘어온 경우: 키워드를 넣고 바로 검색
 (() => {
   const kw = new URLSearchParams(location.search).get("keyword");
   if (!kw) return;
+  // 아이디어 카드의 제목·질문·참고한 이웃 글을 같이 받아서 글감 찾기에 활용한다
+  try {
+    const c = JSON.parse(localStorage.getItem("nbh.ctx") || "null");
+    localStorage.removeItem("nbh.ctx");
+    if (c && c.keyword === kw) searchCtx = c;
+  } catch {}
+  renderCtxBox();
   $("#keyword").value = kw;
   history.replaceState(null, "", location.pathname); // 새로고침해도 다시 검색하지 않게 주소에서 지운다
   $("#search-btn").click();

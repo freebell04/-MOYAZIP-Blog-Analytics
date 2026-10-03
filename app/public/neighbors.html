@@ -592,6 +592,12 @@ async function markVisited(blogId, done) {
 }
 
 // ---------- 주제 추천 (이웃 글 기반) ----------
+// 참고 이웃 글 중 키워드가 제목에 실제로 들어간 글만 (주제 분류가 느슨해서 상관없는 글이 섞일 때가 있다). 하나도 없으면 전부.
+function relevantRefs(i) {
+  const all = i.examples || [];
+  const hit = all.filter((e) => i.keyword && String(e.title).includes(i.keyword));
+  return hit.length ? hit : all;
+}
 let trendsSig = "";
 async function loadTrends() {
   const r = await fetch("/api/neighbor-trends").then((r) => r.json()).catch((e) => ({ error: e.message }));
@@ -609,14 +615,16 @@ async function loadTrends() {
     `최근 ${t.recentDays}일 동안 이웃 ${t.neighborCount}명이 쓴 글 ${t.postCount}개를 보고 골랐어요.` +
     (t.myMainTopic ? ` 내가 가장 많이 쓰는 주제: <b>${esc(t.myMainTopic)}</b>` : " (성과 통계를 한 번 불러오면 내가 이미 쓴 주제는 빼고 추천해요)") +
     (t.hasRecentPosts ? "" : " · 이웃별 최근 글을 더 모으려면 [새로 불러오기]를 한 번 더 눌러주세요.");
-  const write = (kw) => `<a class="btn btn-primary" style="font-size:13px;padding:6px 12px" href="/?keyword=${encodeURIComponent(kw)}">✍️ 이 주제로 글감 찾기</a>`;
+  // 키워드만 넘기면 '맛집'처럼 너무 넓게 검색되므로, 아이디어 제목·질문·참고한 이웃 글도 같이 넘겨서 글감 찾기에 활용한다
+  const ctxOf = (i) => JSON.stringify({ keyword: i.keyword, title: i.title, questions: i.questions || [], refs: relevantRefs(i).map((e) => ({ nick: e.nick, title: e.title, link: e.link })) });
+  const write = (i) => `<a class="btn btn-primary" style="font-size:13px;padding:6px 12px" data-ctx="${esc(ctxOf(i))}" href="/?keyword=${encodeURIComponent(i.keyword)}">✍️ 이 주제로 글감 찾기</a>`;
   $("#trends-ideas").innerHTML = t.ideas.length
     ? t.ideas
         .map(
           (i) => `<div class="tr-card"><h4>${esc(i.title)}</h4><p>${esc(i.reason)}</p>
       ${(i.questions || []).length ? `<p style="margin:0 0 4px"><b>사람들이 궁금해할 질문</b></p><ul class="ex" style="color:var(--ink)">${i.questions.map((q) => `<li>${esc(q)}</li>`).join("")}</ul>` : ""}
       ${i.examples && i.examples.length ? `<ul class="ex">${i.examples.map((e) => `<li><a href="${esc(e.link)}" target="_blank" rel="noopener">${esc(e.nick)} · ${esc(e.title)}</a></li>`).join("")}</ul>` : ""}
-      ${i.keyword ? write(i.keyword) : ""}</div>`
+      ${i.keyword ? write(i) : ""}</div>`
         )
         .join("")
     : '<p class="hint">아직 여러 이웃이 같이 쓰는 주제가 없어요. 이웃 글이 더 쌓이면 다시 확인해보세요.</p>';
@@ -632,6 +640,8 @@ function setTab(tab) {
 }
 
 document.addEventListener("click", (e) => {
+  const w = e.target.closest("[data-ctx]");
+  if (w) { try { localStorage.setItem("nbh.ctx", w.dataset.ctx); } catch {} } // 글감 찾기 화면이 이어받는다
   const tab = e.target.closest(".tab");
   if (tab) return setTab(tab.dataset.tab);
 
