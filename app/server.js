@@ -79,6 +79,16 @@ app.post("/api/license", (req, res) => {
   const r = license.activate((req.body || {}).key);
   res.status(r.ok ? 200 : 400).json(r);
 });
+// --- 체험 후기 설문 안내 (3일째·7일째·마지막 날) ---
+const survey = require("./lib/survey");
+const surveyStatus = () => survey.pending(license.status(), process.env.NBH_SURVEY_TODAY || license.today());
+app.get("/api/survey", (req, res) => res.json(surveyStatus()));
+app.post("/api/survey", (req, res) => {
+  const action = String((req.body || {}).action || "");
+  if (!["open", "close", "later"].includes(action)) return res.status(400).json({ error: "action이 올바르지 않아요." });
+  survey.record(license.status(), process.env.NBH_SURVEY_TODAY || license.today(), action);
+  res.json({ ok: true });
+});
 // 키가 없거나 기간이 끝났으면 모든 화면을 키 입력 화면으로 보낸다
 app.use((req, res, next) => {
   if (req.path === "/license.html" || req.path.startsWith("/api/license") || /\.(css|js|png|ico|svg)$/.test(req.path)) return next();
