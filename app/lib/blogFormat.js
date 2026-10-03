@@ -11,7 +11,10 @@ const FORMAT_PATH = path.join(__dirname, "..", "data", "blog-format.json");
 
 // 저장된 형식이 없을 때 쓰는 기본값.
 // 개인판(모야ZIP)은 네이버 '앞으로 쓸 템플릿'에 맞춘 고정 5섹션, 배포판은 누구에게나 맞는 자유 형식.
-const DEFAULT_KIND = "free";
+// @private-start
+const DEFAULT_KIND = "moyazip";
+// @private-end
+// @public: const DEFAULT_KIND = "free";
 
 // 이 컴퓨터에만 있는 개인 설정 (data 폴더는 GitHub에도 안 올라가고 업데이트로도 안 바뀐다).
 //   {"moyazipTemplate": true} → 형식을 따로 저장하지 않았을 때 모야ZIP 템플릿을 기본으로 쓴다 (블로그 주인 컴퓨터에만 둔다)
@@ -179,6 +182,28 @@ function meaningfulStyleGuide(text) {
   return body.length >= 20 ? text.trim() : "";
 }
 
+// 최종 JSON 끝에 추천 이미지(img 태그)와 키워드 태그를 함께 받는다
+const IMG_EXAMPLE =
+  '<img src="https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?auto=format&fit=crop&w=800&q=80" alt="이미지 설명" style="max-width:100%; border-radius:12px; margin: 15px 0;">';
+const IMAGE_TAG_RULES = [
+  "최종 JSON 마지막에 추천 이미지(images)와 키워드 태그(tags)도 꼭 넣어줘:",
+  "- images: 글 주제와 글 형식을 함께 고려해서 사람들이 좋아할 만한 이미지를 3~5개 추천해줘. 각 항목은 아래 형식의 img 태그 문자열이고, src에는 실제로 열리는 이미지 링크(예: Unsplash)를 꼭 함께 적고, alt에는 이미지 설명을 넣어줘.",
+  `  ${IMG_EXAMPLE}`,
+  "- 실제로 있는 이미지 링크인지 확실하지 않으면 src는 비워두고 alt에 어떤 이미지를 찾으면 좋은지만 적어줘 (없는 링크를 지어내지 말 것)",
+  "- JSON 문자열 안이니 img 태그의 큰따옴표(\")는 \\\"로 이스케이프해줘 (그래야 프로그램이 읽을 수 있어)",
+  "- tags: 이 글에 달 키워드 태그 5~10개 (# 없이 단어만)",
+];
+function withExtras(schemaStr) {
+  try {
+    const o = JSON.parse(schemaStr);
+    o.images = [IMG_EXAMPLE.replace("이미지 설명", "이미지 설명1"), IMG_EXAMPLE.replace("이미지 설명", "이미지 설명2")];
+    o.tags = ["키워드1", "키워드2", "키워드3"];
+    return JSON.stringify(o);
+  } catch {
+    return schemaStr;
+  }
+}
+
 function buildPostPrompt(data) {
   const d = describe();
   let rules, schema;
@@ -206,13 +231,17 @@ function buildPostPrompt(data) {
       '"sections": ["1번 섹션 본문","2번 섹션 본문","3번 섹션 본문"]}';
   }
   return [
-    `너는 네이버 블로그 글쓰기 도우미야. 아래 글감으로 "${data.blogName}" 블로그 초안을 나와 같이 쓸 거야.`,
+    "너는 프로 블로거야. 좋은 정보를 올리고, 동시에 사람들이 궁금해할 만한 후기나 정보를 알차게 올려주는 역할이지.",
+    `아래 글감으로 "${data.blogName}" 블로그 초안을 나와 같이 쓸 거야.`,
+    "알차고 많은 정보를 잘 만들어 줘. 글 형식에 맞게 네가 알맞게 글을 배치해줘.",
     "",
     "진행 순서 (꼭 지켜줘):",
     "1) 바로 쓰지 말고, 글감의 핵심을 2줄로 요약한 뒤 주제·방향·제목 후보 3개를 번호로 제안하고 내가 고를 때까지 기다려.",
     "2) 내가 고르면 초안을 읽기 좋게 보여주고, 수정 요청을 반영해줘.",
     '3) 내가 "완성"이라고 하면, 최종본을 아래 JSON 형식 그대로 코드블록 하나로만 출력해. (프로그램에 붙여넣을 거라 형식이 중요해)',
-    schema,
+    withExtras(schema),
+    "",
+    ...IMAGE_TAG_RULES,
     "",
     `글 형식 규칙 (${d.name}):`,
     ...rules,
@@ -222,6 +251,8 @@ function buildPostPrompt(data) {
     ...data.items.map(
       (it, i) => `\n[글감 ${i + 1}] ${it.title}\n링크: ${it.link}\n${(it.text || it.snippet || "(본문을 못 가져왔어요 — 링크 참고)").slice(0, 2500)}`
     ),
+    "",
+    '마지막으로, 위 진행 순서(방향 확인 → 초안 → "완성")를 거쳐 최종본이 되면 json 형식으로 만들어줘.',
   ].join("\n");
 }
 
