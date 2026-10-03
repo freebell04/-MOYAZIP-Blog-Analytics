@@ -11,10 +11,7 @@ const FORMAT_PATH = path.join(__dirname, "..", "data", "blog-format.json");
 
 // 저장된 형식이 없을 때 쓰는 기본값.
 // 개인판(모야ZIP)은 네이버 '앞으로 쓸 템플릿'에 맞춘 고정 5섹션, 배포판은 누구에게나 맞는 자유 형식.
-// @private-start
-const DEFAULT_KIND = "moyazip";
-// @private-end
-// @public: const DEFAULT_KIND = "free";
+const DEFAULT_KIND = "free";
 
 // 이 컴퓨터에만 있는 개인 설정 (data 폴더는 GitHub에도 안 올라가고 업데이트로도 안 바뀐다).
 //   {"moyazipTemplate": true} → 형식을 따로 저장하지 않았을 때 모야ZIP 템플릿을 기본으로 쓴다 (블로그 주인 컴퓨터에만 둔다)
