@@ -8,7 +8,7 @@ const { keywordsOf } = require("./trends");
 const scraper = require("./scraper");
 
 const HELP_PATH = path.join(__dirname, "..", "data", "neighbors-help.json");
-const HELP_VERSION = 1;
+const HELP_VERSION = 2;
 
 const stripEmoji = (s) =>
   String(s || "")
@@ -41,6 +41,7 @@ function buildQuery(text, myTitle) {
   return [...topic, ...core, "방법"].join(" ").trim();
 }
 
+const isJunk = (w) => /^(안녕하세|제가|저는|저도|올해|오늘|이번|그리고|하지만|정말|진짜|너무|사실|생각|우리|감사|처음|이야기|소개|정리|방법|내용)$/.test(w) || /^x?\d{1,3}$/i.test(w);
 const NUM = /\d+\s*(분|초|단계|개|원|%|번|일|명|가지|시간|회|MB|GB|px)/;
 const STEP = /^\s*(\d+[.)]|[①-⑩]|STEP|Step|step|첫째|둘째|셋째)|(클릭|선택|누르|입력|들어가|설정|이동|체크|연결|복사|붙여)/;
 
@@ -109,6 +110,117 @@ function compose(u, r) {
   ];
 }
 
+// 댓글 의도: 사용 요청 / 질문·어려움 / 그 밖(감사·인사·짧은 반응)
+const REQUEST = /(사용|써|쓰|이용|체험|신청|받|참여|해보|써보).{0,8}(싶|하고\s?싶|할게|하고파|가능)|링크.{0,8}(주세|부탁|보내|알려)|신청\s?(할게|합니다|해요)|(주세요|부탁).{0,4}(링크|프로그램)|프로그램.{0,10}(싶|궁금|받)/;
+const intentOf = (text) => (REQUEST.test(stripEmoji(text)) ? "request" : isQuestion(text) ? "question" : "other");
+
+const topicTitle = (t) => shorten(String(t || "").replace(/["'“”]|\([^)]*\)/g, "").replace(/\s+/g, " ").trim(), 22);
+
+/** 어떤 댓글이든 의도에 맞는 답글 예시 {list, kind, ...} */
+function composeFor(q, r) {
+  const nick = q.nickname || "";
+  const intent = intentOf(q.text);
+  if (intent === "question" && r) return { kind: "question", list: compose(q, r), query: r.query, facts: r.facts, sources: r.sources, found: r.facts.length > 0 };
+  if (intent === "request") {
+    const link = require("./license").TRIAL_URL;
+    return {
+      kind: "request",
+      list: [
+        `${nick}님 관심 가져주셔서 감사해요! 사용 링크 보내드릴게요. 체험은 2주 동안 무료로 쓰실 수 있어요.`,
+        `감사합니다 ${nick}님! 아래 링크에서 이름과 블로그만 입력하시면 바로 체험해보실 수 있어요. ${link}`,
+      ],
+    };
+  }
+  const t = topicTitle(q.title);
+  const len = stripEmoji(q.text).replace(/[~!?.ㅎㅋㅠㅜ\s]/g, "").length;
+  return {
+    kind: "other",
+    list:
+      len < 6
+        ? [`${nick}님 댓글 남겨주셔서 감사해요. 또 놀러 오세요!`, `${nick}님 들러주셔서 감사해요. 편하게 또 얘기 나눠요.`]
+        : [
+            `${nick}님, '${t}' 글 읽어주시고 댓글까지 남겨주셔서 감사해요. 도움이 되셨다니 저도 기쁘네요.`,
+            `${nick}님 덕분에 힘이 나요. '${t}' 내용 중에 궁금한 점 생기면 편하게 물어봐 주세요.`,
+          ],
+  };
+}
+
+// ---------- 이웃 글에 남길 댓글 (Claude 없이, 글 속 문구를 집어서) ----------
+const GREET = /^(안녕|반갑|방문|이웃|구독|공감|오늘도|항상|감사)/;
+const PROMO = /광고|협찬|구독|이웃추가|문의|http|www\.|\[사진|\[이미지|☎|010-|카카오|상담|예약|할인|이벤트/;
+const STORY_RE = /영화|드라마|웹툰|소설|서평|결말|줄거리|시리즈|넷플릭스|\d+화/;
+// 사진 설명·주소·표 항목처럼 감상 대상이 아닌 문장
+const CAPTION = /모습|배치|촬영|출처|사진|이미지|주소|위치|영업시간|전화|번호|\d+(로|길)\s?\d|층\s?\w*호|:\s/;
+// 글쓴이의 판단·이유·느낌이 담긴 표현
+const EVAL = /좋|맛있|추천|비교|차이|문제|필요|중요|핵심|때문|덕분|느꼈|생각|의외|아쉬|놀라|편하|불편|만족|후회|깨달|알게/;
+const SOLVE_RE = /해결|안\s?될\s?때|안\s?됨|오류|에러|방법|하는 법|하는법|설정|꿀팁|정리|가이드|\d+단계|\d+가지/;
+
+/** 글에서 인용할 만한 문장 하나: 인사·광고가 아니고 숫자·구체어가 있는 것 */
+function pickQuote(text, title) {
+  const titleSet = new Set(keywordsOf(title || ""));
+  const lines = String(text || "").split("\n").map((l) => l.trim()).filter(Boolean);
+  const cands = [];
+  for (const [i, l] of lines.entries()) {
+    for (const sent of l.split(/(?<=[.!?다요죠])\s+/)) {
+      const t = sent.replace(/\s+/g, " ").replace(/[ㅎㅋㅠㅜ]{2,}/g, "").trim();
+      if (t.length < 14 || t.length > 48 || GREET.test(t) || PROMO.test(t) || CAPTION.test(t) || /^[#*\[\(▫️▪️■□●○◆◇▶▷※]/.test(t)) continue;
+      if (!/([.!]|습니다|세요|어요|아요|해요|예요|이에요|네요|죠|군요|거든요|같아요|돼요|됐어요|있어요|없어요|했어요|였어요)$/.test(t) || /(보다|까요|\?)$/.test(t)) continue; // 온전한 서술 문장만 (끊긴 조각·질문·표 항목 제외)
+      const kws = keywordsOf(t).filter((w) => !titleSet.has(w) && !isJunk(w)).length;
+      let sc = kws * 2 + (/\d/.test(t) ? 2 : 0) + (EVAL.test(t) ? 3 : 0);
+      if (i < 2) sc -= 3;
+      if (i > lines.length - 3) sc -= 1;
+      if (sc > 0) cands.push({ t: t.replace(/[.!?]+$/, ""), sc });
+    }
+  }
+  cands.sort((x, y) => y.sc - x.sc);
+  return cands.length ? cands[0].t : "";
+}
+
+/** 숫자+단위가 들어간 정량 문구 하나 (예: "5시간 컷", "31.5g") */
+function pickNumber(text) {
+  const m = String(text || "").match(/\d[\d,.]*\s?(?:만원|원|분|초|시간|개월|년|명|개|%|퍼센트|kg|mAh|mm|cm|km|단계|가지|종|회|배|레벨)(?![가-힣A-Za-z])/g);
+  return m ? m.sort((a, b) => b.length - a.length)[0].replace(/[.,)\]]+$/, "") : "";
+}
+
+function composeVisit(p, text) {
+  const title = p.latestPost.title;
+  const q = pickQuote(text, title);
+  const n = pickNumber(text) || pickNumber(title);
+  const topic = require("../public/suggest-templates.js").topicOf(title);
+  const story = STORY_RE.test(title) || topic === "책";
+  const solve = SOLVE_RE.test(title);
+  const Q = q ? `“${q}”` : "";
+  const t = topicTitle(title);
+  let list;
+  if (story) {
+    list = [
+      `${Q ? Q + " 이 대목이 오래 남았어요. " : ""}결말이 어떻게 이어지는지 곱씹게 되는 글이라 읽고 나서도 여운이 길게 남네요. 감사합니다.`,
+      `${Q ? Q + " 부분 읽으면서 " : "읽으면서 "}저도 그 장면이 떠올랐어요. 마지막이 시원하게 안 풀려서 답답했던 마음까지 공감돼요.`,
+    ];
+  } else if (solve) {
+    list = [
+      `${Q ? Q + " 이 부분이 핵심이네요. " : ""}${n ? n + " 같은 기준까지 " : "순서까지 "}정리해주셔서 따라 하기 좋아요. 저장해두고 막힐 때 써볼게요. 감사합니다.`,
+      `이런 해결법을 여기서 볼 수 있네요. ${Q ? Q + " 이 부분은 저도 적용해볼게요. " : ""}좋은 정보 감사합니다.`,
+    ];
+  } else if (["맛집", "나들이", "여행"].includes(topic)) {
+    list = [
+      `${Q ? Q + " 이 부분 보고 저도 가보고 싶어졌어요. " : ""}${n ? n + " 같은 구체적인 정보까지 " : "후기를 자세히 "}알려주셔서 도움 됐어요. 감사합니다.`,
+      `${Q ? Q + " 라는 말이 와닿아서 기억에 남아요. " : ""}다음에 갈 때 이 글 참고할게요. 좋은 후기 감사합니다.`,
+    ];
+  } else if (["일상", "육아", "연애", "반려동물", "사주", "명절"].includes(topic)) {
+    list = [
+      `${Q ? Q + " 이 문장에서 글쓴이 마음이 느껴졌어요. " : ""}읽는 내내 공감하면서 봤어요. 잘 읽었습니다.`,
+      `${Q ? Q + " 이 부분을 읽고 한참 생각했어요. " : ""}'${t}' 이야기 나눠주셔서 감사합니다.`,
+    ];
+  } else {
+    list = [
+      `${Q ? Q + " 이 부분이 제일 인상 깊었어요. " : ""}${n ? n + " 같은 수치까지 " : "내용을 "}알려주셔서 도움 많이 됐어요. 감사합니다.`,
+      `이런 내용을 여기서 볼 수 있네요. ${Q ? Q + " 이 부분은 저도 참고해볼게요. " : ""}좋은 글 감사합니다.`,
+    ];
+  }
+  return { kind: "visit", list: list.map((x) => x.replace(/\s+/g, " ").trim()), quote: q, number: n };
+}
+
 function readAll() {
   try {
     return JSON.parse(fs.readFileSync(HELP_PATH, "utf-8"));
@@ -126,49 +238,74 @@ function readHelp() {
 
 const helpKey = (c) => `help:${c.logNo}:${c.blogId}:${c.date}`;
 
-/** 캐시된 이웃 데이터에서 질문 댓글들을 모은다 [{key, logNo, blogId, nickname, date, text, title}] */
-function collectQuestions(cache) {
+/** 답글을 달 댓글들: 사람별 최근 3개 + 아직 답 안 한 댓글 [{key, logNo, blogId, nickname, date, text, title}] */
+function collectComments(cache) {
   const out = new Map();
   for (const p of cache.people || []) {
-    for (const c of p.comments || []) {
-      if (!isQuestion(c.text)) continue;
+    for (const c of (p.comments || []).slice().sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 3)) {
       const it = { logNo: c.logNo, blogId: p.blogId, nickname: p.nickname, date: c.date, text: c.text, title: c.title };
       out.set(helpKey(it), it);
     }
   }
-  for (const u of cache.unanswered || []) {
-    if (!isQuestion(u.text)) continue;
-    out.set(helpKey(u), { logNo: u.logNo, blogId: u.blogId, nickname: u.nickname, date: u.date, text: u.text, title: u.title });
-  }
+  for (const u of cache.unanswered || []) out.set(helpKey(u), { logNo: u.logNo, blogId: u.blogId, nickname: u.nickname, date: u.date, text: u.text, title: u.title });
   return [...out.values()].map((q) => ({ ...q, key: helpKey(q) }));
 }
+const collectQuestions = collectComments;
+const visitLocalKey = (p) => `lv:${p.blogId}:${p.latestPost.logNo}`;
 
 let state = { running: false, progress: "" };
 const getState = () => state;
 const postCache = new Map(); // logNo → 내 글 본문 (한 번만 읽는다)
 
-/** 아직 답을 안 만든 질문들에 대해 근거를 찾아 저장한다 (백그라운드) */
+/** 해야 할 일 개수 (댓글 답글 + 이웃 글 댓글) */
+function todoCount(cache) {
+  const have = readHelp();
+  const c = collectComments(cache).filter((q) => !have[q.key]).length;
+  const v = (cache.neighbors || cache.people || []).filter((p) => p.latestPost && !have[visitLocalKey(p)]).length;
+  return c + v;
+}
+
+/** 아직 없는 것들을 만들어 저장한다 (백그라운드): 댓글 답글(질문이면 검색) + 이웃 글 댓글 */
 async function build(cache, { force = false } = {}) {
   if (state.running || !cache) return;
   const have = readHelp();
-  const todo = collectQuestions(cache).filter((q) => force || !have[q.key]);
-  if (!todo.length) return;
-  state = { running: true, progress: `질문 답변 찾는 중 (0/${todo.length})` };
+  const comments = collectComments(cache).filter((q) => force || !have[q.key]);
+  const visits = (cache.neighbors || cache.people || []).filter((p) => p.latestPost && (force || !have[visitLocalKey(p)]));
+  const total = comments.length + visits.length;
+  if (!total) return;
+  let done = 0;
+  state = { running: true, progress: `답글 준비 중 (0/${total})` };
   try {
     const cfg = require("./config");
     const { fetchPostTextOf } = require("./suggest");
     const all = readAll();
-    for (const [i, q] of todo.entries()) {
-      state.progress = `질문 답변 찾는 중 (${i + 1}/${todo.length})`;
-      if (!postCache.has(q.logNo)) postCache.set(q.logNo, await fetchPostTextOf(cfg.blogId(), q.logNo).catch(() => ""));
-      const r = await research(q.text, q.title, postCache.get(q.logNo), cfg.blogId());
-      all[q.key] = { v: HELP_VERSION, list: compose(q, r), query: r.query, facts: r.facts, sources: r.sources, found: r.facts.length > 0 };
-      fs.writeFileSync(HELP_PATH, JSON.stringify(all, null, 2));
+    const save = () => fs.writeFileSync(HELP_PATH, JSON.stringify(all, null, 2));
+    for (const q of comments) {
+      let r = null;
+      if (intentOf(q.text) === "question") {
+        if (!postCache.has(q.logNo)) postCache.set(q.logNo, await fetchPostTextOf(cfg.blogId(), q.logNo).catch(() => ""));
+        r = await research(q.text, q.title, postCache.get(q.logNo), cfg.blogId());
+      }
+      all[q.key] = { v: HELP_VERSION, ...composeFor(q, r) };
+      save();
+      state.progress = `답글 준비 중 (${++done}/${total})`;
     }
+    let next = 0;
+    const worker = async () => {
+      while (next < visits.length) {
+        const p = visits[next++];
+        const text = await fetchPostTextOf(p.blogId, p.latestPost.logNo).catch(() => "");
+        all[visitLocalKey(p)] = { v: HELP_VERSION, ...composeVisit(p, text) };
+        state.progress = `답글 준비 중 (${++done}/${total})`;
+        if (done % 10 === 0) save();
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(4, visits.length) }, worker));
+    save();
     state = { running: false, progress: "완료" };
   } catch (e) {
     state = { running: false, progress: "", error: e.message };
   }
 }
 
-module.exports = { isQuestion, coreTerms, buildQuery, pickLines, research, compose, readHelp, collectQuestions, build, getState, helpKey, _test: { stripEmoji } };
+module.exports = { isQuestion, intentOf, coreTerms, buildQuery, pickLines, research, compose, composeFor, composeVisit, readHelp, collectQuestions, collectComments, todoCount, visitLocalKey, build, getState, helpKey, _test: { stripEmoji } };

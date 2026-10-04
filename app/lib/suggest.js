@@ -208,6 +208,7 @@ function bodySpecifics(it) {
 function isGood(comment, it) {
   const c = String(comment || "").trim();
   if (c.length < 20 || BANNED.test(c)) return false;
+  if (it.kind === "reply" && (it.help || require("./helpAnswer").intentOf(it.u.text) !== "other")) return true; // 요청·질문 답글은 그 댓글에 맞게 답했는지가 중요하지 본문 단어 수가 아님
   const { body, words } = bodySpecifics(it);
   if (body.length < 300) return true;
   return words.filter((w) => c.includes(w)).length >= 2;
@@ -242,7 +243,11 @@ function buildPrompt(batch, myComments, stricter = false) {
       `내가 그 글에 쓴 내용:\n${it.myText || "(본문을 못 읽음 — 제목만 참고)"}\n` +
       (it.u.rootText ? `원댓글: ${it.u.rootText || "(스티커)"}\n` : "") +
       `상대가 마지막으로 남긴 말: ${it.u.text.trim() || "(스티커/이미지만 남김)"}` +
-      (it.help
+      (require("./helpAnswer").intentOf(it.u.text) === "request"
+        ? `
+★ 이 댓글은 사용/체험을 해보고 싶다는 요청이야. 감사 인사와 함께 "사용 링크 보내드릴게요"처럼 링크를 보내주겠다는 답으로 써줘.`
+        : "") +
+      (it.help && it.help.kind === "question"
         ? `
 ★ 이 댓글은 질문/어려움이야. 아래 "찾아둔 근거"에 있는 방법·숫자로 질문에 직접 답해줘 (근거에 없는 내용은 지어내지 마). 근거: ${it.help.facts.map((f) => f.text).join(" / ") || "(못 찾음 — 어디서 막혔는지 되묻기)"}`
         : "") +
@@ -260,11 +265,13 @@ function buildPrompt(batch, myComments, stricter = false) {
     `3. 그중 1~2개를 골라 댓글 속에서 직접 짚어. 본문에 없는 내용은 절대 지어내지 마.\n\n` +
     `댓글 형식 (이웃 글에 남기는 댓글): 항목마다 예시 2개, 각 2~3문장, 90~140자.
 ` +
-    `- 글쓴이의 문장을 그대로 옮기거나 따옴표로 인용하지 마. 읽고 난 "내 감상평"을 내 말로 새로 써.
+    `- 글 속 문구 하나만 짧게 따옴표(“…”)로 집고, 그 다음에 이어지는 내 생각·감상은 내 말로 새로 써. 글을 통째로 옮기거나 여러 문장을 베끼지 마.
 ` +
     `- 글 종류에 따라 이렇게 써:
 ` +
     `  · 글쓴이가 어려움·고민·문제를 얘기하면: 공감 한마디 + 그걸 해결하는 방법을 간단히(한두 줄) 알려줘. 실제로 통하는 일반적인 해결법만 쓰고, 확실하지 않은 건 "저는 ~해봤더니 괜찮았어요" 식으로 가볍게.
+` +
+    `  · 영화·드라마·책 글이면: 결말·전개를 곱씹은 솔직한 감상 (예: 마지막에 연결이 안 돼서 답답했던 점, 여운이 남는 장면)을 쓰고 문구 하나를 집어서 이어가.
 ` +
     `  · 경험담·후기·이야기면: 그 이야기(어떤 일이 있었는지)를 한 줄로 언급하고 감상을 붙여.
 ` +

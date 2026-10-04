@@ -458,7 +458,7 @@ app.get("/api/neighbors", (req, res) => {
   res.json({
     help,
     helpState: helpAnswer.getState(),
-    helpTodo: nbCache ? helpAnswer.collectQuestions(nbCache).filter((q) => !help[q.key]).length : 0,
+    helpTodo: nbCache ? helpAnswer.todoCount(nbCache) : 0,
     blogId: neighbors.BLOG_ID,
     data: neighbors.getCached(),
     visited: neighbors.getVisited(),

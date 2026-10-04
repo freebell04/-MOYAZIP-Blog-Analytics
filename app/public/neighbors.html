@@ -299,15 +299,23 @@ const isFresh = (post) => post && Date.now() - ts(post.date) < 24 * 3600000;
 let helpAsked = null;
 const helpKey = (c) => `help:${c.logNo}:${c.blogId}:${c.date}`;
 
-/** 질문 댓글에 프로그램이 찾아 만든 답변 (있을 때만) */
+/** 내 글에 달린 댓글에 프로그램이 만든 답글 (사용 요청 / 질문 답변 / 감사 인사) */
 function helpBlock(c) {
   const h = S.help[helpKey(c)];
   if (!h) return "";
-  const src = (h.sources || []).slice(0, 2).map((s) => `<a href="${esc(s.link)}" target="_blank" rel="noopener">${esc(s.title.slice(0, 28))}</a>`).join(" · ");
+  const src = (h.sources || []).slice(0, 2).map((x) => `<a href="${esc(x.link)}" target="_blank" rel="noopener">${esc(x.title.slice(0, 28))}</a>`).join(" · ");
+  const head = h.kind === "request" ? "🙋 사용 요청 답글" : h.kind === "question" ? "❓ 질문 답변" : "💬 댓글 답글";
+  const note = h.kind === "question" ? (h.found ? `'${esc(h.query)}'로 찾은 내용${src ? " · 참고: " + src : " (내 글 기준)"}` : "근거를 못 찾아서 되묻는 답이에요") : "이 댓글에 대한 답글 예시";
   return `<div class="sugg">
-    <div class="sugg-head">❓ 질문 답변 ${h.found ? '<span class="ai-tag">찾아봄</span>' : ''}<small>${h.found ? `'${esc(h.query)}'로 찾은 내용${src ? " · 참고: " + src : " (내 글 기준)"}` : "근거를 못 찾아서 되묻는 답이에요"}</small></div>
+    <div class="sugg-head">${head} ${h.kind === "question" && h.found ? '<span class="ai-tag">찾아봄</span>' : ""}<small>${note}</small></div>
     ${h.list.map((t) => `<div class="sugg-item"><span>${esc(t)}</span><button class="copy-btn" data-copy="${esc(t)}">복사</button></div>`).join("")}
   </div>`;
+}
+
+/** 이웃 글에 남길 댓글: Claude AI가 만든 게 있으면 그것, 없으면 글 속 문구를 집어 프로그램이 만든 것, 그것도 없으면 기본 문구 */
+function visitFallback(p) {
+  const lv = S.help[`lv:${p.blogId}:${p.latestPost.logNo}`];
+  return lv ? lv.list : templateVisit(p);
 }
 
 async function load() {
@@ -520,7 +528,7 @@ function visitRow(p) {
         ${comments.slice(1).map(cmt).join("")}
         ${p.likes.length ? `<ul>${p.likes.map((l) => `<li>❤️ ${esc(l.title)} <small>${md(l.date)}</small></li>`).join("")}</ul>` : ""}
       </details>` : ""}
-      ${lp ? `<details class="sugg-wrap" data-sugg-key="${esc(key)}" ${S.openSugg[key] ? "open" : ""}><summary>💡 추천 댓글 보기</summary>${suggestBlock(key, "추천 댓글", templateVisit(p))}</details>` : ""}
+      ${lp ? `<details class="sugg-wrap" data-sugg-key="${esc(key)}" ${S.openSugg[key] ? "open" : ""}><summary>💡 추천 댓글 보기</summary>${suggestBlock(key, "추천 댓글", visitFallback(p))}</details>` : ""}
     </div>
     <div class="side">
       ${lp ? `<div class="post-title">${isFresh(lp) ? "🆕 " : "📝 "}${esc(lp.title)}</div><small class="muted">${ago(lp.date)}</small>
@@ -546,8 +554,7 @@ function renderReply() {
         <div class="meta">${esc(u.title)} · ${ago(u.date)}</div>
         ${u.rootText != null ? `<div class="snippet"><small>원댓글: ${esc(u.rootText) || "(스티커)"}</small></div>` : ""}
         <div class="snippet" style="white-space:normal">${u.text.trim() ? esc(u.text) : "<small>(스티커/이미지)</small>"}</div>
-        ${S.help[helpKey(u)] ? helpBlock(u) : ""}
-        ${suggestBlock(replyKey(u), "추천 답글", templateReply(u))}
+        ${suggestBlock(replyKey(u), "추천 답글", S.help[helpKey(u)] ? S.help[helpKey(u)].list : templateReply(u))}
       </div>
       <div class="side">
         <a class="btn btn-primary" href="https://m.blog.naver.com/CommentList.naver?blogId=${esc(S.blogId)}&logNo=${esc(u.logNo)}" target="_blank" rel="noopener">답글 달러 가기</a>
