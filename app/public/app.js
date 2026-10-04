@@ -265,15 +265,23 @@ $("#save-draft-btn").addEventListener("click", async () => {
       sectionHeadingLines: currentPost.sectionHeadingLines,
       sections: currentPost.sections,
       imagePaths: Object.values(selectedImagePaths),
+      chapterImagePaths: currentPost.chapterImagePaths || [],
       useTemplate: $("#use-template-checkbox").checked,
       continueDraft: $("#continue-draft-checkbox").checked,
     }),
   }).then((r) => r.json());
 
   $("#save-draft-btn").disabled = false;
+  const imgRes = r.imageResults || [];
+  const imgLine = imgRes.length
+    ? " " + (imgRes.filter((x) => x.state === "ok").length ? `🖼️ 소제목 아래에 이미지 ${imgRes.filter((x) => x.state === "ok").length}장 올렸어요.` : "") +
+      (imgRes.filter((x) => x.state === "placed").length ? ` 이미지 ${imgRes.filter((x) => x.state === "placed").length}장은 올라갔는데 위치는 확인하지 못했어요 — 에디터에서 확인해주세요.` : "") +
+      (imgRes.filter((x) => x.state === "failed").length ? ` ⚠ ${imgRes.filter((x) => x.state === "failed").map((x) => `${x.chapter + 1}번 챕터(${x.reason})`).join(", ")}은 못 올렸어요 — 에디터에서 직접 넣어주세요.` : "")
+    : "";
   $("#save-status").textContent = r.error
     ? "오류: " + r.error
-    : "본문 임시저장 완료! 네이버 에디터에서 검토/수정 후, 아래 4단계에서 목차·요약을 채워주세요.";
+    : "본문 임시저장 완료! 네이버 에디터에서 검토/수정 후, 아래 4단계에서 목차·요약을 채워주세요." + imgLine;
+  if (!r.error) window.__draftSaved = true;
   if (!r.error) {
     $("#step-finalize").hidden = false;
     setActiveStep(4);
@@ -513,9 +521,10 @@ function renderSectionImages(post) {
     const heading = ((post.sectionHeadingLines || [])[i] || []).join(" ").trim() || `${i + 1}번 챕터`;
     const tag = String(tags[i] || "").trim();
     const ko = String(kws[i] || "").trim() || [topic, heading].filter(Boolean).join(" ").slice(0, 40); // AI가 안 줬으면 주제 키워드 + 챕터 제목
-    return { src, alt: alt || heading, heading, tag, ko, ok: src ? "wait" : "none" };
+    return { src, alt: alt || heading, heading, tag, ko, path: "", ok: src ? "wait" : "none" };
   });
   post.sectionImages = items.map((it) => buildImgTag(it.src, it.alt)); // 글 데이터에도 최신 태그를 유지한다
+  post.chapterImagePaths = items.map(() => null); // 컴퓨터에 저장된 이미지 파일 (임시저장 때 소제목 아래에 올라간다)
 
   const rowHtml = (it, i) => `<div class="si-row" data-i="${i}">
       <div class="si-head">${i + 1}. ${esc(it.heading)}</div>
@@ -525,7 +534,8 @@ function renderSectionImages(post) {
           <div class="si-alt">${esc(it.alt)}</div>
           <div class="si-tag">검색어: <b>${esc(it.ko)}</b>${it.tag ? ` · 영어 태그: <b>${esc(it.tag)}</b>` : ""}</div>
           <div class="si-links">${SEARCH_LINKS(it.ko, it.tag).map((l) => `<a href="${esc(l.url)}" target="_blank" rel="noopener" class="si-link${l.free ? " free" : ""}" title="${l.free ? "무료로 쓸 수 있는 사진 사이트" : "저작권을 꼭 확인하세요"}">${l.label}</a>`).join("")}</div>
-          <div class="si-paste"><input class="si-input" type="text" placeholder="마음에 드는 이미지를 찾으면 → 우클릭 '이미지 주소 복사' → 여기에 붙여넣기" autocomplete="off" /></div>
+          <div class="si-paste"><input class="si-input" type="text" placeholder="복사한 이미지(Ctrl+V)나 이미지 주소를 여기에 붙여넣기 · 파일을 끌어다 놓아도 돼요" autocomplete="off" /></div>
+          <div class="si-pick"><label class="btn btn-outline btn-sm" style="cursor:pointer">📁 내 컴퓨터에서 파일 선택<input type="file" accept="image/png,image/jpeg,image/webp,image/gif" class="si-file" hidden /></label></div>
           <div class="si-state"></div>
           <div><button type="button" class="btn btn-outline btn-sm si-copy">📋 img 태그 복사</button></div>
         </div>
@@ -560,7 +570,13 @@ function renderSectionImages(post) {
     state.textContent = "확인 중...";
     thumb.innerHTML = `<img class="si-img" alt="${esc(it.alt)}" referrerpolicy="no-referrer">`;
     const img = thumb.querySelector("img");
-    img.addEventListener("load", () => { it.ok = "ok"; state.textContent = "✅ 이미지가 들어갔어요"; update(); });
+    img.addEventListener("load", () => {
+      it.ok = "ok";
+      state.innerHTML = it.path
+        ? "✅ 이미지가 들어갔어요 · 임시저장하면 이 소제목 아래에 올라가요"
+        : it.uploading ? "✅ 이미지가 들어갔어요 · 글에 올릴 파일로 저장하는 중..." : "✅ img 태그에는 들어갔어요 · <b>글에 바로 올리려면 이미지를 복사(우클릭 → 이미지 복사)해서 여기에 붙여넣어 주세요</b>";
+      update();
+    });
     img.addEventListener("error", () => { it.ok = "bad"; img.style.display = "none"; thumb.insertAdjacentHTML("beforeend", `<div class="si-empty">안 열려요</div>`); state.innerHTML = "⚠ 이 주소는 이미지가 안 열려요 — 이미지 위에서 우클릭 → '이미지 주소 복사'로 다시 붙여넣어 주세요"; update(); });
     img.src = it.src;
     update();
@@ -570,18 +586,61 @@ function renderSectionImages(post) {
     const row = rowOf(i);
     if (!url) { row.querySelector(".si-state").innerHTML = `<span class="error">이미지 주소(http…)를 붙여넣어 주세요</span>`; return; }
     items[i].src = url;
+    items[i].path = "";
+    post.chapterImagePaths[i] = null;
+    items[i].uploading = true;
     row.querySelector(".si-input").value = url;
     paint(i);
+    // 글에 올릴 수 있게, 서버가 그 주소의 이미지를 이 컴퓨터에 저장해 둔다 (사이트가 막으면 태그에만 쓸 수 있다)
+    upload({ url }).then((r) => {
+      items[i].uploading = false;
+      if (items[i].src !== url) return; // 그 사이 다른 이미지로 바뀜
+      if (r.ok) { items[i].path = r.path; post.chapterImagePaths[i] = r.path; noteImageAdded(); }
+      else if (items[i].ok !== "bad") row.querySelector(".si-state").innerHTML = `✅ img 태그에는 들어갔어요 · <span class="error">글에 바로 올리지는 못해요: ${esc(r.error)}</span>`;
+      if (r.ok) paint(i);
+    });
+  };
+  // 복사한 이미지·끌어놓은 파일 → 서버에 저장 → 그 파일로 미리보기 (이 이미지는 글에도 바로 올라간다)
+  const applyFile = async (i, file) => {
+    const row = rowOf(i);
+    if (!file || !/^image\/(png|jpe?g|webp|gif)$/i.test(file.type)) { row.querySelector(".si-state").innerHTML = `<span class="error">PNG·JPG·WEBP·GIF 이미지만 쓸 수 있어요</span>`; return; }
+    row.querySelector(".si-state").textContent = "이미지를 저장하는 중...";
+    const dataUrl = await new Promise((res) => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.readAsDataURL(file); });
+    const r = await upload({ dataUrl });
+    if (!r.ok) { row.querySelector(".si-state").innerHTML = `<span class="error">${esc(r.error)}</span>`; return; }
+    items[i].src = location.origin + r.previewUrl; // 태그에는 이 프로그램이 저장한 주소를 쓴다 (블로그에는 업로드한 사진이 올라가요)
+    items[i].path = r.path;
+    post.chapterImagePaths[i] = r.path;
+    row.querySelector(".si-input").value = file.name ? `(붙여넣은 이미지) ${file.name}` : "(붙여넣은 이미지)";
+    paint(i);
+    noteImageAdded();
   };
   box.querySelectorAll(".si-input").forEach((input) => {
     const i = Number(input.closest(".si-row").dataset.i);
     input.value = items[i].src;
     input.addEventListener("paste", (e) => { // 붙여넣는 순간 바로 적용 (엔터를 누르지 않아도)
+      const cd = e.clipboardData || window.clipboardData;
+      const file = [...(cd.files || [])].find((f) => f.type.startsWith("image/")) || [...(cd.items || [])].map((it) => (it.kind === "file" ? it.getAsFile() : null)).find((f) => f && f.type.startsWith("image/"));
       e.preventDefault();
-      apply(i, (e.clipboardData || window.clipboardData).getData("text"));
+      if (file) applyFile(i, file); // 복사한 이미지 자체를 붙여넣은 경우
+      else apply(i, cd.getData("text")); // 이미지 주소·<img> 태그를 붙여넣은 경우
     });
     input.addEventListener("keydown", (e) => { if (e.key === "Enter") apply(i, input.value); });
     input.addEventListener("change", () => { if (input.value.trim() !== items[i].src) apply(i, input.value); });
+  });
+  box.querySelectorAll(".si-row").forEach((row) => {
+    const i = Number(row.dataset.i);
+    row.addEventListener("dragover", (e) => { e.preventDefault(); row.classList.add("drag"); });
+    row.addEventListener("dragleave", () => row.classList.remove("drag"));
+    row.addEventListener("drop", (e) => { // 파일(또는 브라우저에서 끌어온 이미지)을 놓으면 바로 적용
+      e.preventDefault();
+      row.classList.remove("drag");
+      const f = [...(e.dataTransfer.files || [])].find((x) => x.type.startsWith("image/"));
+      if (f) return applyFile(i, f);
+      const dropped = e.dataTransfer.getData("text/uri-list") || e.dataTransfer.getData("text/plain");
+      if (dropped) apply(i, dropped);
+    });
+    row.querySelector(".si-file").addEventListener("change", (e) => { const f = e.target.files[0]; e.target.value = ""; if (f) applyFile(i, f); });
   });
   box.querySelectorAll(".si-copy").forEach((btn) => {
     const i = Number(btn.closest(".si-row").dataset.i);
@@ -589,6 +648,14 @@ function renderSectionImages(post) {
   });
   $("#si-copy-all").addEventListener("click", (e) => copyText(e.currentTarget, items.map((it, i) => `<!-- ${i + 1}. ${it.heading} -->\n${post.sectionImages[i]}`).join("\n")));
   items.forEach((_, i) => paint(i));
+}
+const upload = (body) => fetch("/api/images/upload", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then((r) => r.json()).catch((e) => ({ error: e.message }));
+// 이미 글을 임시저장한 뒤에 이미지를 넣었다면, 같은 글에 덮어쓰는 방식으로 다시 저장하게 안내한다
+function noteImageAdded() {
+  if (!window.__draftSaved) return;
+  const cb = $("#continue-draft-checkbox");
+  if (cb) cb.checked = true;
+  $("#save-status").textContent = "🖼️ 이미지를 넣었어요 — [네이버에 임시저장]을 다시 누르면 같은 글에 이미지까지 넣어서 덮어써요. (이어서 수정 체크됨)";
 }
 async function copyText(btn, text) {
   try { await navigator.clipboard.writeText(text); } catch { return; }

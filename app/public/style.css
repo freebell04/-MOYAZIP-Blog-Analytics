@@ -298,3 +298,6 @@ textarea { resize: vertical; margin-top: 4px; }
 .si-input { width: 100%; padding: 9px 11px; border: 1px solid #cbd5e1; border-radius: 10px; font-size: 13px; }
 .si-input:focus { outline: 2px solid #86e0ad; border-color: #86e0ad; }
 .si-state { min-height: 18px; margin: 2px 0 6px; }
+
+.si-row.drag { outline: 3px dashed #34c759; outline-offset: 2px; background: #f0fbf5; }
+.si-pick { margin: 8px 0 6px; }
