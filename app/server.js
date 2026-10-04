@@ -333,9 +333,10 @@ app.post("/api/handoff", async (req, res) => {
 app.post("/api/ai-chat", async (req, res) => {
   const { ai, keyword, selected, context } = req.body;
   if (!aiChat.SITES[ai]) return res.status(400).json({ error: "지원하지 않는 AI예요." });
-  if (!selected || !selected.length) return res.status(400).json({ error: "글감을 하나 이상 체크해주세요." });
+  // 글감이 없어도(검색 결과가 없는 지점·가게 후기 등) 키워드만으로 시작할 수 있다 — AI가 먼저 내게 질문해서 정보를 받아 쓴다
+  if ((!selected || !selected.length) && !String(keyword || "").trim()) return res.status(400).json({ error: "검색어나 글감이 필요해요. 위 입력칸에 주제를 적어주세요." });
   try {
-    const data = await makeHandoff(keyword, selected, context);
+    const data = await makeHandoff(keyword, selected || [], context);
     const prompt = blogFormat.buildPostPrompt(data);
     const st = await aiChat.start(ai, prompt);
     res.json({ success: true, ...st, count: data.items.length, prompt });

@@ -459,7 +459,8 @@ async function pollAiChat() {
 
 document.querySelectorAll(".handoff-btn").forEach((btn) => {
   btn.addEventListener("click", async () => {
-    if (!selectedItems.length) return alert("글감을 하나 이상 선택해주세요.");
+    if (!selectedItems.length && !$("#keyword").value.trim()) return alert("글감을 하나 이상 선택하거나, 위 입력칸에 주제를 적어주세요.");
+    if (!selectedItems.length && !confirm("선택한 글감 없이 시작할까요?\n\nAI가 먼저 질문을 하고, 내가 답한 사실로만 글을 써요. (검색 결과가 없는 주제에 알맞아요)")) return;
     const ai = btn.dataset.ai;
     setAiButtons(true);
     $("#handoff-status").textContent = "글감 본문을 모으는 중이에요...";
