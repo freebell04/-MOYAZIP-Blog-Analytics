@@ -148,18 +148,10 @@
 
 <footer class="foot-note">임시저장까지 자동으로 진행되고, 최종 발행은 네이버 블로그에서 직접 확인 후 눌러주세요.</footer>
 
-<div id="ai-popup" style="display:none;position:fixed;left:18px;top:50%;transform:translateY(-50%);z-index:99985;width:min(360px,calc(100vw - 36px));background:#fff;border:2px solid #03c75a;border-radius:16px;padding:16px 18px;box-shadow:0 12px 32px rgba(0,0,0,.2);font-family:'Noto Sans KR',system-ui,sans-serif;">
-  <div style="display:flex;gap:10px;align-items:flex-start">
-    <div style="font-size:26px;line-height:1">💬</div>
-    <div style="flex:1;min-width:0">
-      <div id="ai-popup-title" style="font-weight:700;font-size:15px;color:#065f46">AI에서 대화 나눠보세요</div>
-      <div style="margin-top:6px;font-size:13px;color:#374151;line-height:1.65">크롬에 열린 AI 채팅에서 <b>방향을 고르고 초안을 다듬은 뒤</b>, 마지막에 <b>"완성"</b>이라고 보내세요.<br>그러면 이 창이 <b>자동으로 닫히고</b> 글쓰기가 이어져요.</div>
-    </div>
-  </div>
-  <div style="display:flex;gap:8px;margin-top:12px">
-    <button id="ai-popup-go" class="btn btn-primary" style="flex:1">AI 창으로 이동</button>
-    <button id="ai-popup-stop" class="btn btn-outline">그만하기</button>
-  </div>
+<div id="ai-popup" style="display:none;position:fixed;left:18px;top:50%;transform:translateY(-50%);z-index:99985;width:min(300px,calc(100vw - 36px));background:#fff;border:2px solid #03c75a;border-radius:16px;padding:18px 20px;box-shadow:0 12px 32px rgba(0,0,0,.2);font-family:'Noto Sans KR',system-ui,sans-serif;text-align:center;">
+  <div style="width:34px;height:34px;margin:0 auto 10px;border:4px solid #d1fae5;border-top-color:#03c75a;border-radius:50%;animation:busyspin 0.9s linear infinite"></div>
+  <div id="ai-popup-title" style="font-weight:700;font-size:15px;color:#065f46">AI에서 대화 나눠보세요</div>
+  <div style="margin-top:6px;font-size:12.5px;color:#4b5563;line-height:1.6">"완성"이라고 보내면 자동으로 이어져요</div>
 </div>
 <div id="busy-overlay" style="display:none;position:fixed;inset:0;z-index:99990;background:rgba(255,255,255,.82);align-items:center;justify-content:center;cursor:wait;" aria-live="polite">
   <div style="background:#fff;border:2px solid #03c75a;border-radius:16px;padding:26px 30px;max-width:min(420px,calc(100vw - 32px));text-align:center;box-shadow:0 12px 36px rgba(0,0,0,.18);font-family:'Noto Sans KR',system-ui,sans-serif;">
