@@ -13,7 +13,7 @@
       box.style.cssText =
         "position:fixed;top:14px;left:50%;transform:translateX(-50%);z-index:99997;max-width:min(460px,calc(100vw - 24px));width:100%;" +
         "background:#fff7ed;border:2px solid #fb923c;border-radius:14px;padding:14px 16px;box-shadow:0 8px 24px rgba(251,146,60,.35);" +
-        "font-family:'Noto Sans KR',system-ui,sans-serif;display:flex;gap:12px;align-items:flex-start;";
+        "font-family:'Noto Sans KR',system-ui,sans-serif;display:none;gap:12px;align-items:flex-start;";
       document.body.appendChild(box);
     }
     const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
@@ -25,10 +25,14 @@
       (reason ? '<div style="margin-top:2px;color:#c2410c;font-size:12.5px">열린 창: ' + esc(reason) + "</div>" : "") +
       "</div></div>" +
       '<button id="cn-close" aria-label="닫기" style="border:0;background:transparent;font-size:20px;line-height:1;cursor:pointer;color:#9a3412;padding:0 2px">×</button>';
-    box.hidden = false;
-    box.querySelector("#cn-close").onclick = () => (box.hidden = true);
+    // (인라인 display:flex 때문에 hidden 속성이 안 먹으므로 display로 직접 숨긴다)
+    const hide = () => { box.style.display = "none"; clearTimeout(hideTimer); };
+    box.style.display = "flex";
+    box.style.cursor = "pointer";
+    box.title = "눌러서 닫기";
+    box.onclick = hide; // × 버튼이든 카드 어디든 누르면 닫힌다
     clearTimeout(hideTimer);
-    hideTimer = setTimeout(() => box && (box.hidden = true), 25000); // 25초 뒤 저절로 닫힘 (다시 열리면 또 뜬다)
+    hideTimer = setTimeout(hide, 25000); // 25초 뒤 저절로 닫힘 (다시 열리면 또 뜬다)
   }
 
   async function poll() {
