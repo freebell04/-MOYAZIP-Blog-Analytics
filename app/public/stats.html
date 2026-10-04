@@ -830,14 +830,16 @@ async function saveToNotion(period, force = false) {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ period, force }),
     }).then((r) => r.json());
-    if (r.exists) {
-      const last = r.exists[r.exists.length - 1];
-      N.busy = false;
-      if (confirm(`'${r.title}'은(는) ${new Date(last.savedAt).toLocaleString("ko-KR")}에 이미 저장했어요.\n한 번 더 저장하면 새 페이지가 하나 더 생겨요. 저장할까요?`)) return saveToNotion(period, true);
-      $("#status").innerHTML = `이미 저장된 기록: <a href="${esc(last.url)}" target="_blank" rel="noopener">${esc(r.title)}</a>`;
+    if (r.error) { $("#status").innerHTML = `<span class="error">⚠ ${esc(r.error)}</span>`; return; }
+    if (r.updated) {
+      // 같은 기간 리포트가 이미 있어서, 새 페이지를 만들지 않고 그 페이지를 최신 내용으로 고쳤다
+      const u = r.updated;
+      const parts = [`바뀐 구역 <b>${u.replaced.length + u.added.length}</b>개${u.added.length ? ` (새로 생긴 구역 ${u.added.length}개 포함)` : ""}`];
+      if (u.unchanged.length) parts.push(`그대로인 구역 ${u.unchanged.length}개`);
+      if (u.kept.length) parts.push(`노션에서 직접 고치신 <b>${u.kept.length}</b>개 구역(${u.kept.map(esc).join(", ")})은 그대로 뒀어요`);
+      $("#status").innerHTML = `✅ 이미 저장된 노션 페이지를 최신 내용으로 <b>업데이트</b>했어요 (새 페이지는 만들지 않았어요): <a href="${esc(u.url)}" target="_blank" rel="noopener">${esc(u.title)}</a><br><small class="muted">${parts.join(" · ")}</small>`;
       return;
     }
-    if (r.error) { $("#status").innerHTML = `<span class="error">⚠ ${esc(r.error)}</span>`; return; }
     $("#status").innerHTML = `✅ 노션에 저장했어요: <a href="${esc(r.saved.url)}" target="_blank" rel="noopener">${esc(r.saved.title)}</a>`;
   } finally {
     N.busy = false;

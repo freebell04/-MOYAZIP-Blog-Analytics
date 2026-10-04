@@ -159,7 +159,10 @@ async function saveReport(report) {
   }
 
   const log = getLog();
-  (log[report.key] ||= []).push({ pageId: page.id, url: page.url, title: report.title, savedAt: new Date().toISOString(), target: t.title });
+  const entry = { pageId: page.id, url: page.url, title: report.title, savedAt: new Date().toISOString(), createdAt: new Date().toISOString(), target: t.title };
+  // 나중에 "그 사이 노션에서 직접 고친 구역"을 알아볼 수 있게, 방금 저장된 모습의 구역별 지문을 남긴다
+  entry.sectionHashes = await readSectionHashes(c.token, page.id).catch(() => null);
+  (log[report.key] ||= []).push(entry);
   fs.writeFileSync(LOG_PATH, JSON.stringify(log, null, 2));
   return { pageId: page.id, url: page.url, title: report.title, target: t.title };
 }
@@ -213,9 +216,164 @@ async function replaceSection(pageId, headingPrefix, newBlocks, headingBlock) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// 이미 저장한 리포트를 "새 페이지로 또 만들지 않고" 최신 내용으로 고친다.
+//  - 페이지를 제목(heading_2) 단위 구역으로 나눠서, 구역마다 새 내용으로 바꾼다
+//  - 저장했을 때의 구역 지문과 지금 노션 내용이 다르면 = 사용자가 노션에서 직접 고친 구역 → 그대로 둔다
+//  - 새로 생긴 구역은 알맞은 자리에 끼워 넣고, 사용자가 직접 추가한 구역은 건드리지 않는다
+// ---------------------------------------------------------------------------
+const crypto = require("crypto");
+const PLACEHOLDER_REFLECT = "이번 달 가장 잘 된 것 / 아쉬운 것 / 다음 달 집중할 것을 여기에 적어보세요.";
+const FOOTER_RE = /블로그 자동화 대시보드에서 .*에 저장/;
+const LEAD = "맨 위 요약";
+
+/** 블록 목록 → {lead, sections:[{key, heading, blocks}], tail} (구역 = heading_2부터 다음 heading_2/구분선 전까지) */
+function sectionize(blocks) {
+  const lead = [];
+  const sections = [];
+  const tail = [];
+  let cur = null;
+  let inTail = false;
+  for (const b of blocks) {
+    if (inTail) { tail.push(b); continue; }
+    if (b.type === "divider") { inTail = true; cur = null; tail.push(b); continue; }
+    if (b.type === "heading_2") {
+      cur = { key: blockText(b).split(" (")[0].trim(), heading: b, blocks: [] };
+      sections.push(cur);
+      continue;
+    }
+    (cur ? cur.blocks : lead).push(b);
+  }
+  return { lead, sections, tail };
+}
+
+/** 내용 지문: 글자만 본다(표는 칸 수만). 노션이 읽어온 블록과 우리가 만든 블록 모두 같은 규칙으로 계산한다 */
+function hashBlocks(blocks) {
+  const lines = blocks.map((b) => `${b.type}|${b.type === "table" ? "w" + ((b.table && b.table.table_width) || 0) : blockText(b)}`);
+  return crypto.createHash("sha1").update(lines.join("\n")).digest("hex");
+}
+
+function hashesOf(blocks) {
+  const { lead, sections } = sectionize(blocks);
+  const out = { [LEAD]: hashBlocks(lead) };
+  for (const sec of sections) out[sec.key] = hashBlocks(sec.blocks);
+  return out;
+}
+
+async function readSectionHashes(token, pageId) {
+  return hashesOf(await listChildren(token, pageId));
+}
+
+const createdIds = (r) => ((r && r.results) || []).map((x) => x.id);
+
+/**
+ * 같은 기간 리포트가 이미 노션에 있으면 그 페이지를 최신 내용으로 고친다.
+ * @returns null(저장한 적 없음) | {gone:true}(예전 페이지가 지워짐) | {updated:true, replaced, kept, added, unchanged, ...}
+ */
+async function updateReport(report) {
+  const c = getConfig();
+  if (!c.token || !c.target) throw new Error("먼저 ⚙️ 노션 설정에서 토큰과 저장 위치를 저장해주세요.");
+  const log = getLog();
+  const entries = log[report.key] || [];
+  const entry = entries[entries.length - 1];
+  if (!entry) return null;
+  const token = c.token;
+  const t = c.target;
+  const pageId = entry.pageId;
+  const result = { pageId, url: entry.url, title: report.title, updated: true, replaced: [], kept: [], added: [], unchanged: [] };
+  try {
+    const children = await listChildren(token, pageId);
+    const old = sectionize(children);
+    const fresh = sectionize(report.blocks);
+    const stored = entry.sectionHashes || null; // 없으면(예전에 저장한 페이지) 아래에서 보수적으로 판단한다
+    const cur = hashesOf(children);
+
+    // 사용자가 그 구역을 노션에서 직접 고쳤는지: 저장했을 때 지문과 지금 지문이 다르면 고친 것
+    const userEdited = (key, blocks) => {
+      if (stored && stored[key] !== undefined) return stored[key] !== cur[key];
+      // 예전에 저장한 페이지(지문 없음): 사용자가 쓰는 칸(돌아보기)만 placeholder가 아니면 고친 것으로 본다
+      if (key.startsWith("🪞")) return blocks.some((b) => blockText(b) && blockText(b) !== PLACEHOLDER_REFLECT);
+      return false;
+    };
+
+    // (a) 맨 위 요약(글 올린 날·요약 칸): 제목이 없는 구역이라 "예전 맨 위 블록들 바로 뒤에 새로 넣고 예전 것을 지우는" 방식
+    if (fresh.lead.length) {
+      if (hashBlocks(fresh.lead) === cur[LEAD]) result.unchanged.push(LEAD);
+      else if (stored && stored[LEAD] !== undefined && stored[LEAD] !== cur[LEAD]) result.kept.push(LEAD);
+      else {
+        const after = old.lead.length ? old.lead[old.lead.length - 1].id : null;
+        await call(token, "PATCH", `/blocks/${pageId}/children`, { children: fresh.lead, ...(after ? { after } : {}) });
+        for (const b of old.lead) await call(token, "DELETE", `/blocks/${b.id}`);
+        result.replaced.push(LEAD);
+      }
+    }
+
+    // (b) 구역별. endId = 지금까지 처리한 마지막 구역의 끝 블록 (새 구역을 끼워 넣을 자리)
+    let endId = old.lead.length ? old.lead[old.lead.length - 1].id : null;
+    const oldByKey = new Map(old.sections.map((x) => [x.key, x]));
+    for (const ns of fresh.sections) {
+      const os = oldByKey.get(ns.key);
+      if (!os) {
+        // 새로 생긴 구역: 앞 구역 바로 뒤에 끼워 넣는다
+        const body = { children: [{ object: "block", type: "heading_2", heading_2: ns.heading.heading_2 }, ...ns.blocks], ...(endId ? { after: endId } : {}) };
+        const ids = createdIds(await call(token, "PATCH", `/blocks/${pageId}/children`, body));
+        if (ids.length) endId = ids[ids.length - 1];
+        result.added.push(ns.key);
+        continue;
+      }
+      const osEnd = os.blocks.length ? os.blocks[os.blocks.length - 1].id : os.heading.id;
+      if (hashBlocks(ns.blocks) === cur[ns.key]) {
+        result.unchanged.push(ns.key);
+        endId = osEnd;
+      } else if (userEdited(ns.key, os.blocks)) {
+        result.kept.push(ns.key); // 사용자가 노션에서 고친 구역은 그대로 둔다
+        endId = osEnd;
+      } else {
+        // 제목 줄도 최신으로(날짜 등), 내용은 새로 넣고 예전 내용은 지운다
+        await call(token, "PATCH", `/blocks/${os.heading.id}`, { heading_2: { rich_text: ns.heading.heading_2.rich_text } });
+        let lastNew = os.heading.id;
+        if (ns.blocks.length) {
+          const ids = createdIds(await call(token, "PATCH", `/blocks/${pageId}/children`, { children: ns.blocks, after: os.heading.id }));
+          if (ids.length) lastNew = ids[ids.length - 1];
+        }
+        for (const b of os.blocks) await call(token, "DELETE", `/blocks/${b.id}`);
+        result.replaced.push(ns.key);
+        endId = lastNew;
+      }
+    }
+
+    // (c) 맨 아래 "…에 저장" 문구만 최신 시각으로
+    const footer = old.tail.find((b) => b.type === "paragraph" && FOOTER_RE.test(blockText(b)));
+    const newFooter = fresh.tail.find((b) => b.type === "paragraph" && FOOTER_RE.test(blockText(b)));
+    if (footer && newFooter) await call(token, "PATCH", `/blocks/${footer.id}`, { paragraph: { rich_text: newFooter.paragraph.rich_text } });
+
+    // (d) 제목·날짜 속성
+    const titleRich = [{ type: "text", text: { content: report.title.slice(0, 2000) } }];
+    const properties = t.type === "database" ? { [t.titleProp]: { title: titleRich } } : { title: { title: titleRich } };
+    if (t.type === "database" && t.dateProp && report.date) properties[t.dateProp] = { date: { start: report.date.start, end: report.date.end || null } };
+    await call(token, "PATCH", `/pages/${pageId}`, { properties });
+
+    // (e) 지금 모습의 지문을 다시 기록한다 (다음에 또 업데이트할 때 "그 사이 직접 고친 곳"을 알아보려고)
+    entry.title = report.title;
+    entry.savedAt = new Date().toISOString();
+    const readBack = await readSectionHashes(token, pageId).catch(() => null);
+    const next = { ...(readBack || stored || {}) };
+    // 직접 고쳐서 그대로 둔 구역은 "원래 저장됐던 모습"의 지문을 계속 기준으로 삼는다.
+    // (지금 모습으로 기준을 바꾸면, 다음 업데이트 때 그 구역을 고친 적 없는 것으로 착각해서 덮어쓰게 된다)
+    const freshHash = (key) => (key === LEAD ? hashBlocks(fresh.lead) : hashBlocks((fresh.sections.find((x) => x.key === key) || { blocks: [] }).blocks));
+    for (const key of result.kept) next[key] = stored && stored[key] !== undefined ? stored[key] : freshHash(key);
+    entry.sectionHashes = next;
+    fs.writeFileSync(LOG_PATH, JSON.stringify(log, null, 2));
+    return result;
+  } catch (e) {
+    if (e.status === 404 || e.code === "object_not_found") return { gone: true }; // 예전 페이지가 지워졌다 → 호출한 쪽이 새로 저장한다
+    throw new Error(friendlyError(e));
+  }
+}
+
 function isReady() {
   const c = getConfig();
   return !!(c.token && c.target);
 }
 
-module.exports = { getPublicConfig, saveConfig, saveReport, getLog, parseNotionId, replaceSection, isReady, call, getConfig };
+module.exports = { getPublicConfig, saveConfig, saveReport, updateReport, getLog, parseNotionId, replaceSection, isReady, call, getConfig, sectionize, hashBlocks };

@@ -531,8 +531,14 @@ app.post("/api/notion/save", async (req, res) => {
   const dd = statsWithTrends(d);
   const report = period === "month" ? buildMonthly(dd, opts) : buildWeekly(dd, opts);
   const prev = notion.getLog()[report.key];
-  if (prev && prev.length && force !== true) return res.json({ exists: prev, title: report.title });
   try {
+    // 같은 기간을 이미 저장했으면 새 페이지를 또 만들지 않고, 그 페이지를 최신 내용으로 고친다
+    // (노션에서 직접 고친 구역은 그대로 둔다). force:true 일 때만 새 페이지로 따로 저장한다.
+    if (prev && prev.length && force !== true) {
+      const r = await notion.updateReport(report);
+      if (r && r.updated) return res.json({ updated: r });
+      // 예전 페이지가 지워졌으면 아래에서 새로 저장한다
+    }
     res.json({ saved: await notion.saveReport(report) });
   } catch (e) {
     res.status(400).json({ error: e.message });
