@@ -79,6 +79,8 @@ app.post("/api/license", (req, res) => {
   const r = license.activate((req.body || {}).key);
   res.status(r.ok ? 200 : 400).json(r);
 });
+// --- 크롬 창이 열렸을 때 화면에 띄우는 안내용 신호 ---
+app.get("/api/chrome-notice", (req, res) => res.json(require("./lib/session").getChromeNotice()));
 // --- 체험 후기 설문 안내 (3일째·7일째·마지막 날) ---
 const survey = require("./lib/survey");
 const surveyStatus = () => survey.pending(license.status(), process.env.NBH_SURVEY_TODAY || license.today());

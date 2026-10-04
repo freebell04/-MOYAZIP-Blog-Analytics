@@ -129,6 +129,15 @@ async function closeHungTabs() {
   return closed;
 }
 
+// 크롬 창이 열리거나 앞으로 나올 때마다 화면(대시보드)에 "주황빛을 확인해주세요" 안내를 띄우기 위한 신호.
+// 윈도우는 뒤에 있는 창이 앞으로 나오려 하면 포커스를 뺏지 않고 작업 표시줄 아이콘을 주황색으로 깜빡인다.
+// 화면 쪽(public/chrome-notice.js)이 /api/chrome-notice 를 지켜보다가 id가 바뀌면 안내를 띄운다.
+let chromeNotice = { id: 0, at: 0, reason: "" };
+function notifyChrome(reason) {
+  chromeNotice = { id: chromeNotice.id + 1, at: Date.now(), reason: String(reason || "") };
+}
+const getChromeNotice = () => chromeNotice;
+
 async function ensureDebugChrome() {
   if (await isCdpUp()) {
     await closeHungTabs();
@@ -143,6 +152,7 @@ async function ensureDebugChrome() {
     stdio: "ignore",
   });
   child.unref();
+  notifyChrome("크롬이 새로 열렸어요");
 
   // 포트가 뜰 때까지 최대 10초 대기
   for (let i = 0; i < 20; i++) {
@@ -229,6 +239,7 @@ async function startLoginWatch() {
   clearSession(); // 서버에선 로그아웃 상태이므로 옛 쿠키 파일은 버린다 (대시보드에 "로그인 필요"로 보이게)
   await page.goto("https://nid.naver.com/nidlogin.login", { waitUntil: "domcontentloaded" }).catch(() => {});
   await page.bringToFront().catch(() => {});
+  notifyChrome("네이버 로그인 화면");
 
   watchState = { watching: true, error: null };
   // 완료를 기다리지 않고 백그라운드로 계속 확인 (browser는 CDP 연결이라 닫아도 실제 크롬은 안 닫힘,
@@ -275,6 +286,8 @@ module.exports = {
   openLoggedInContext,
   openVisibleContext,
   ensureDebugChrome,
+  notifyChrome,
+  getChromeNotice,
   SESSION_PATH,
   CDP_URL,
 };

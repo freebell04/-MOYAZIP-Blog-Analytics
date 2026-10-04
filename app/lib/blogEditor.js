@@ -590,6 +590,7 @@ async function saveDraftToNaver(post) {
   const { browser, context } = await openVisibleContext();
   const page = await context.newPage();
   await page.bringToFront().catch(() => {});
+  require("./session").notifyChrome("블로그 글쓰기 창");
 
   try {
     // 직접 글쓰기 URL로 바로 가지 않고, 블로그 홈 → '글쓰기' 버튼 클릭 순서로 진입.
@@ -779,6 +780,7 @@ async function finalizeTocAndSummary() {
   const { browser, context } = await openVisibleContext();
   const page = await context.newPage();
   await page.bringToFront().catch(() => {});
+  require("./session").notifyChrome("블로그 글쓰기 창");
 
   try {
     await page.goto(`https://blog.naver.com/${BLOG_ID}`, { waitUntil: "domcontentloaded" });
@@ -855,6 +857,7 @@ async function openTemplateEditor() {
   const { browser, context } = await openVisibleContext();
   const page = await context.newPage();
   await page.bringToFront().catch(() => {});
+  require("./session").notifyChrome("블로그 글쓰기 창");
 
   // 주의: 여기서는 browser.close()를 하지 않는다 — 이건 CDP 연결 해제일 뿐이라 실제로는
   // 상관없지만, 굳이 연결을 끊을 필요도 없으므로 함수가 끝나도 그대로 열어둔 채로 반환한다.

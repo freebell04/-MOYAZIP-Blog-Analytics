@@ -125,6 +125,7 @@ async function start(ai, prompt, kind = "post") {
       const { targetId } = await browserWs.send("Target.createTarget", { url: "about:blank", newWindow: false });
       browserWs.close();
       s.targetId = targetId;
+      session.notifyChrome(`${site.name} 채팅 창`);
       const port = new URL(session.CDP_URL).port || "9222";
       const client = await connectPage(`ws://localhost:${port}/devtools/page/${targetId}`);
       s.client = client;
