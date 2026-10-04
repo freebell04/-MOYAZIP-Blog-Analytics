@@ -343,7 +343,7 @@ function composeStyledBlocks(post) {
   sections.forEach((body, i) => {
     if (i > 0 || intro.length) blocks.push({ type: "hr" });
     const heading = (headings[i] || []).map((l) => l.trim()).filter(Boolean).join(" ");
-    if (heading) blocks.push({ type: "quote", style: "quotation_line", lines: [heading], bold: true, chapter: i });
+    if (heading) blocks.push({ type: "quote", style: "quotation_line", lines: [heading], bold: true });
     for (const raw of String(body || "").split("\n")) {
       const line = raw.trim();
       if (!line) continue;
@@ -405,68 +405,6 @@ async function writeStyledBody(frame, page, blocks) {
       await page.waitForTimeout(300);
     }
   }
-}
-
-/**
- * 챕터별 이미지를 각 소제목(인용구) 바로 아래에 올린다.
- * 소제목 다음 본문 첫 줄의 맨 앞에 커서를 두고 툴바 '사진' → 파일 올리기를 하면, 그 줄 위(= 소제목 바로 아래)에 사진이 들어간다.
- * 하나가 실패해도 글은 그대로 두고 다음 이미지로 넘어가며, 챕터마다 결과를 돌려준다.
- *   state: "ok"(소제목 바로 아래 확인됨) | "placed"(올라갔지만 자리는 확인 못 함) | "failed"(못 올림)
- * @param {{chapter:number, quoteIndex:number, path:string}[]} jobs  quoteIndex = 에디터 안 인용구 순서(소개 인용구 포함)
- */
-async function insertChapterImages(frame, page, jobs) {
-  const f = page.frames().find((x) => x.url().includes("PostWriteForm")) || frame;
-  const results = [];
-  for (const job of jobs) {
-    const r = { chapter: job.chapter, state: "failed", reason: "" };
-    results.push(r);
-    try {
-      const before = await f.evaluate(() => document.querySelectorAll(".se-component.se-image").length);
-      // 이 소제목 인용구 다음 컴포넌트(본문 첫 줄)의 맨 앞을 클릭해 커서를 둔다
-      const target = await f.evaluateHandle((qi) => {
-        const quotes = [...document.querySelectorAll(".se-component.se-quotation")];
-        const q = quotes[qi];
-        if (!q) return null;
-        let next = q.nextElementSibling;
-        while (next && !next.querySelector(".se-text-paragraph")) next = next.nextElementSibling;
-        return next ? next.querySelector(".se-text-paragraph") : null;
-      }, job.quoteIndex);
-      const el = target.asElement();
-      if (!el) { r.reason = "소제목 아래 본문 줄을 못 찾았어요"; continue; }
-      await el.scrollIntoViewIfNeeded();
-      await el.click({ position: { x: 2, y: 2 }, timeout: 8000 });
-      await page.keyboard.press("Home"); // 그 줄의 맨 앞
-      await page.waitForTimeout(250);
-      const photoBtn = f.locator("button[data-name='image'], .se-image-toolbar-button").first();
-      if (!(await photoBtn.isVisible().catch(() => false))) { r.reason = "툴바의 사진 버튼을 못 찾았어요"; continue; }
-      const [chooser] = await Promise.all([page.waitForEvent("filechooser", { timeout: 10000 }).catch(() => null), photoBtn.click()]);
-      if (!chooser) { r.reason = "사진 올리기 창이 안 열렸어요"; continue; }
-      await chooser.setFiles(job.path);
-      await page.waitForTimeout(2500); // 업로드가 끝나 사진이 자리 잡을 때까지
-      const after = await f.evaluate((qi) => {
-        const imgs = document.querySelectorAll(".se-component.se-image").length;
-        const q = [...document.querySelectorAll(".se-component.se-quotation")][qi];
-        let under = false;
-        if (q) {
-          let n = q.nextElementSibling;
-          // 소제목 바로 다음(빈 텍스트 줄은 건너뜀)에 사진이 있으면 제자리
-          while (n && n.classList.contains("se-text") && !n.innerText.replace(/\u200b/g, "").trim()) n = n.nextElementSibling;
-          under = !!(n && n.classList.contains("se-image"));
-        }
-        return { imgs, under };
-      }, job.quoteIndex);
-      if (after.imgs > before) {
-        r.state = after.under ? "ok" : "placed";
-        if (!after.under) r.reason = "사진은 올라갔는데 소제목 바로 아래인지 확인하지 못했어요";
-      } else {
-        r.reason = "사진이 올라간 걸 확인하지 못했어요";
-      }
-      await page.keyboard.press("Escape").catch(() => {});
-    } catch (e) {
-      r.reason = String(e.message || e).split("\n")[0].slice(0, 120);
-    }
-  }
-  return results;
 }
 
 /** 입력 결과가 블록과 맞는지 확인 (인용구 개수·소제목·본문 줄) */
@@ -798,20 +736,6 @@ async function saveDraftToNaver(post) {
       await page.waitForTimeout(500);
     }
 
-    // 챕터별 이미지: 소제목 아래에 올린다 (본문을 소제목 인용구 구조로 쓴 경우에만)
-    let imageResults = [];
-    const chapterPaths = post.chapterImagePaths || [];
-    if (chapterPaths.some(Boolean) && !post.bodyHtml && post.sections && post.sections.length && post.styled !== false && !(useTemplate && post.introLines && post.introLines.length)) {
-      const quotes = composeStyledBlocks(post).filter((b) => b.type === "quote");
-      const jobs = [];
-      quotes.forEach((b, qi) => {
-        if (b.chapter !== undefined && chapterPaths[b.chapter]) jobs.push({ chapter: b.chapter, quoteIndex: qi, path: chapterPaths[b.chapter] });
-      });
-      imageResults = await insertChapterImages(frame, page, jobs);
-    } else if (chapterPaths.some(Boolean)) {
-      imageResults = chapterPaths.map((p, i) => (p ? { chapter: i, state: "failed", reason: "이 글쓰기 방식(템플릿)에서는 챕터 이미지를 자동으로 올리지 못해요" } : null)).filter(Boolean);
-    }
-
     // 이미지 삽입 (툴바 '사진' 버튼 → 파일 업로드)
     for (const imgPath of post.imagePaths || []) {
       const photoBtn = frame.locator("button[data-name='image'], .se-image-toolbar-button").first();
@@ -839,7 +763,7 @@ async function saveDraftToNaver(post) {
     await saveBtn.click({ timeout: 15000, force: true });
     await page.waitForTimeout(2000);
 
-    return { success: true, imageResults };
+    return { success: true };
   } finally {
     await browser.close();
   }
@@ -989,4 +913,4 @@ async function openTemplateEditor() {
   return { success: true };
 }
 
-module.exports = { saveDraftToNaver, finalizeTocAndSummary, openTemplateEditor, _test: { composeStyledBlocks, writeStyledBody, verifyStyledBody, insertChapterImages } };
+module.exports = { saveDraftToNaver, finalizeTocAndSummary, openTemplateEditor, _test: { composeStyledBlocks, writeStyledBody, verifyStyledBody } };

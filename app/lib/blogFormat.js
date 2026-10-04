@@ -179,19 +179,14 @@ function meaningfulStyleGuide(text) {
   return body.length >= 20 ? text.trim() : "";
 }
 
-// 최종 JSON에 "각 소제목(챕터) 바로 아래에 들어갈 이미지"의 검색어와 블로그 키워드 태그를 함께 받는다.
-// 이미지 링크는 AI가 지어내는 일이 많아서, 링크는 확실할 때만 받고 대신 "찾을 수 있는 검색어"를 정확히 받는다.
-// 프로그램은 그 검색어로 이미지 검색 링크를 붙여주고, 사용자가 이미지 주소를 붙여넣으면 바로 img 태그로 만든다.
-const IMG_STYLE = 'style="max-width:100%; border-radius:12px; margin: 15px 0;"';
-const IMG_EXAMPLE = `<img src="" alt="이미지 설명" ${IMG_STYLE}>`;
+// 최종 JSON에 "각 소제목(챕터) 바로 아래에 넣을 이미지"의 검색어와 블로그 키워드 태그를 함께 받는다.
+// 프로그램이 그 검색어로 크롬에서 이미지 검색을 열어주고, 사용자가 이미지를 클릭하면 자동으로 복사해 준다 (링크·img 태그는 필요 없다).
 const IMAGE_TAG_RULES = [
-  "이미지 검색어도 JSON에 같이 넣어줘. 각 소제목(챕터) 바로 아래에 들어갈 이미지를 sections 순서대로 하나씩, 아래 3개 배열에 넣어줘 (개수는 sections와 같게).",
+  "이미지 검색어도 JSON에 같이 넣어줘. 각 소제목(챕터) 바로 아래에 넣을 이미지를 sections 순서대로 하나씩, 아래 3개 배열에 넣어줘 (개수는 sections와 같게).",
   "- sectionImageKeywords: 그 챕터 내용과 글 주제 키워드를 함께 담은 한국어 이미지 검색어 (2~4단어). 네이버·구글 이미지 검색에 그대로 넣으면 어울리는 사진이 나오게 구체적으로. 예: 제주 흑돼지 맛집 한상차림",
   "- sectionImageTags: 같은 이미지를 무료 사진 사이트에서 찾을 영어 검색 태그 (2~3단어). 예: jeju black pork, korean bbq",
-  "- sectionImages: 그 이미지의 img 태그 문자열. alt에는 어떤 이미지인지 한국어로 짧게 설명해줘. src에는 실제로 열리는 이미지 주소가 확실할 때만 넣고, 확실하지 않으면 src=\"\"(빈칸)으로 둬. 없는 주소를 지어내지 말아줘 (빈 칸은 내가 위 검색어로 직접 찾아서 붙일 거야).",
-  `  ${IMG_EXAMPLE}`,
-  "- 각 이미지는 그 챕터의 내용과 글 주제, 글 형식을 함께 고려해서, 사람들이 좋아할 만한 사진이 나오도록 검색어를 잡아줘. 챕터마다 서로 다른 사진이 나오게 해줘.",
-  "- JSON 문자열 안이니 img 태그의 큰따옴표(\")는 \\\"로 이스케이프해줘 (그래야 프로그램이 읽을 수 있어).",
+  "- sectionImageNotes: 그 자리에 어떤 이미지가 들어가면 좋은지 한국어 한 줄 설명. 예: 지글지글 구워지는 흑돼지 고기 클로즈업",
+  "- 각 이미지는 그 챕터의 내용과 글 주제, 글 형식을 함께 고려해서, 사람들이 좋아할 만한 사진이 나오도록 검색어를 잡아줘. 챕터마다 서로 다른 사진이 나오게 해줘. (이미지 링크나 img 태그는 필요 없어. 내가 검색어로 직접 고를 거야)",
   "- tags: 이 글에 달 블로그 키워드 태그 5~10개 (# 없이 단어만).",
 ];
 function withExtras(schemaStr) {
@@ -200,7 +195,7 @@ function withExtras(schemaStr) {
     const n = Array.isArray(o.sections) ? o.sections.length : 3;
     o.sectionImageKeywords = Array.from({ length: n }, (_, i) => `${i + 1}번 챕터 한국어 이미지 검색어, 예: 성수 브런치 카페 디저트`);
     o.sectionImageTags = Array.from({ length: n }, (_, i) => `${i + 1}번 챕터 영어 검색 태그, 예: brunch cafe dessert`);
-    o.sectionImages = Array.from({ length: n }, (_, i) => `<img src="" alt="${i + 1}번 챕터 이미지 설명" ${IMG_STYLE}>`);
+    o.sectionImageNotes = Array.from({ length: n }, (_, i) => `${i + 1}번 챕터에 들어갈 이미지 설명 한 줄`);
     o.tags = ["키워드1", "키워드2", "키워드3"];
     return JSON.stringify(o);
   } catch {

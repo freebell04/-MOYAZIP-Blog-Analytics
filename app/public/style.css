@@ -301,3 +301,10 @@ textarea { resize: vertical; margin-top: 4px; }
 
 .si-row.drag { outline: 3px dashed #34c759; outline-offset: 2px; background: #f0fbf5; }
 .si-pick { margin: 8px 0 6px; }
+
+/* 이미지 고르기 안내·버튼 */
+.si-guide { background: #f6fbf8; border: 1px solid #cdeedd; border-radius: 12px; padding: 10px 14px; margin: 0 0 12px; font-size: 13.5px; line-height: 1.6; }
+.si-guide ol { margin: 4px 0 6px; padding-left: 20px; }
+.si-guide small { color: #64748b; }
+button.si-link { cursor: pointer; font-family: inherit; }
+.si-thumb .si-img:hover { outline: 3px solid #86e0ad; }

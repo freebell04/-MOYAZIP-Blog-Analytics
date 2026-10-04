@@ -107,6 +107,26 @@ app.post("/api/topic-query", async (req, res) => {
     res.status(500).json({ error: e.message });
   }
 });
+// --- 챕터 이미지 고르기: 크롬에서 이미지 검색을 열고, 클릭한 이미지를 자동으로 클립보드에 복사한다 ---
+const imagePick = require("./lib/imagePick");
+app.post("/api/images/pick", async (req, res) => {
+  try {
+    const b = req.body || {};
+    res.json(await imagePick.startPick({ chapter: Number(b.chapter) || 0, query: String(b.query || "").slice(0, 80), engine: String(b.engine || "naver") }));
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+app.get("/api/images/pick/status", (req, res) => res.json(imagePick.getState()));
+app.post("/api/images/pick/stop", (req, res) => { imagePick.stop(); res.json({ ok: true }); });
+app.post("/api/images/copy", async (req, res) => { // 이미 고른 이미지를 다시 클립보드에 복사 (앱에서 이미지를 눌렀을 때)
+  try {
+    await imagePick.copyImageToClipboard(String((req.body || {}).file || ""));
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
 // --- 체험 후기 설문 안내 (3일째·7일째·마지막 날) ---
 const survey = require("./lib/survey");
 const surveyStatus = () => survey.pending(license.status(), process.env.NBH_SURVEY_TODAY || license.today());
@@ -371,48 +391,8 @@ app.post("/api/images", async (req, res) => {
 // --- 네이버 블로그 임시저장 ---
 // title + introLines(3) + sections(5)가 오면 템플릿의 정확한 자리에 채워 넣고,
 // 그게 없으면(구버전 호출 호환) title + body를 그냥 통짜로 입력한다.
-// --- 챕터 이미지 올리기: 붙여넣은 이미지(클립보드)·끌어놓은 파일·이미지 주소를 이 컴퓨터(data/images)에 저장한다 ---
-// 저장된 파일은 임시저장 때 네이버 글쓰기 창의 소제목 아래에 올라간다.
-const IMG_SAVE_DIR = path.join(__dirname, "data", "images");
-const IMG_EXT = { "image/png": "png", "image/jpeg": "jpg", "image/jpg": "jpg", "image/webp": "webp", "image/gif": "gif" };
-const IMG_MAX = 10 * 1024 * 1024;
-const privateHost = (h) => /^(localhost|127\.|0\.|10\.|192\.168\.|169\.254\.|172\.(1[6-9]|2\d|3[01])\.|\[?::1)/i.test(h);
-function saveImageBuffer(buf, mime) {
-  const ext = IMG_EXT[String(mime || "").toLowerCase().split(";")[0]];
-  if (!ext) throw new Error("PNG·JPG·WEBP·GIF 이미지만 쓸 수 있어요.");
-  if (!buf.length) throw new Error("이미지가 비어 있어요.");
-  if (buf.length > IMG_MAX) throw new Error("이미지가 너무 커요 (10MB 이하로 올려주세요).");
-  fs.mkdirSync(IMG_SAVE_DIR, { recursive: true });
-  const file = `chapter-${Date.now()}-${Math.random().toString(36).slice(2, 7)}.${ext}`;
-  fs.writeFileSync(path.join(IMG_SAVE_DIR, file), buf);
-  return { file, path: path.join(IMG_SAVE_DIR, file), previewUrl: `/images/${file}` };
-}
-app.post("/api/images/upload", async (req, res) => {
-  try {
-    const { dataUrl, url } = req.body || {};
-    if (dataUrl) {
-      const m = String(dataUrl).match(/^data:([\w/+.-]+);base64,([A-Za-z0-9+/=]+)$/);
-      if (!m) throw new Error("이미지 데이터를 읽지 못했어요.");
-      return res.json({ ok: true, ...saveImageBuffer(Buffer.from(m[2], "base64"), m[1]) });
-    }
-    if (url) {
-      let u;
-      try { u = new URL(String(url)); } catch { throw new Error("이미지 주소가 올바르지 않아요."); }
-      if (!/^https?:$/.test(u.protocol) || privateHost(u.hostname)) throw new Error("이 주소는 가져올 수 없어요.");
-      const r = await fetch(u, { redirect: "follow", signal: AbortSignal.timeout(15000), headers: { "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36", accept: "image/*,*/*;q=0.5", referer: u.origin + "/" } });
-      if (!r.ok) throw new Error(`이미지를 가져오지 못했어요 (HTTP ${r.status}). 사이트가 다른 곳에서 가져가는 걸 막았을 수 있어요 — 이미지를 직접 복사(우클릭 → 이미지 복사)해서 붙여넣어 보세요.`);
-      const mime = (r.headers.get("content-type") || "").split(";")[0];
-      const buf = Buffer.from(await r.arrayBuffer());
-      return res.json({ ok: true, ...saveImageBuffer(buf, mime) });
-    }
-    res.status(400).json({ error: "dataUrl 또는 url이 필요해요." });
-  } catch (e) {
-    res.status(400).json({ error: e.message });
-  }
-});
-
 app.post("/api/save-draft", async (req, res) => {
-  const { title, body, introLines, sectionHeadingLines, sections, imagePaths, chapterImagePaths, useTemplate, continueDraft } = req.body;
+  const { title, body, introLines, sectionHeadingLines, sections, imagePaths, useTemplate, continueDraft } = req.body;
   if (!title) return res.status(400).json({ error: "title이 필요합니다." });
   if (!body && !sections) return res.status(400).json({ error: "body 또는 sections가 필요합니다." });
 
@@ -424,14 +404,6 @@ app.post("/api/save-draft", async (req, res) => {
       sectionHeadingLines,
       sections,
       imagePaths: imagePaths || [],
-      // 챕터별 이미지: data/images 안에 있는 실제 파일만 허용 (임의의 파일 경로로 올리지 못하게)
-      chapterImagePaths: Array.isArray(chapterImagePaths)
-        ? chapterImagePaths.map((p) => {
-            if (!p) return null;
-            const abs = path.resolve(String(p));
-            return abs.startsWith(IMG_SAVE_DIR + path.sep) && fs.existsSync(abs) ? abs : null;
-          })
-        : [],
       useTemplate: useTemplate !== false,
       continueDraft: continueDraft === true,
     });

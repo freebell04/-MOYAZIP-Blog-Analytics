@@ -176,6 +176,17 @@ async function runSearch(keyword, round) {
   setActiveStep(2);
 }
 
+// 관심분야 입력칸에서 Enter: 처음엔 [뉴스·블로그 찾기], 같은 검색어로 또 누르면 [🔄 다른 글감 새로 찾기]
+$("#keyword").addEventListener("keydown", (e) => {
+  if (e.key !== "Enter" || e.isComposing) return; // 한글을 치는 중(글자 확정 Enter)에는 무시
+  e.preventDefault();
+  if ($("#search-btn").disabled) return; // 찾는 중이면 기다린다
+  const kw = $("#keyword").value.trim();
+  if (!kw) return;
+  if (searchState.keyword && kw === searchState.keyword && searchState.all.length) runSearch(kw, searchState.round + 1);
+  else $("#search-btn").click();
+});
+
 $("#search-btn").addEventListener("click", () => {
   const keyword = $("#keyword").value.trim();
   if (!keyword) return alert("키워드를 입력해주세요.");
@@ -265,23 +276,15 @@ $("#save-draft-btn").addEventListener("click", async () => {
       sectionHeadingLines: currentPost.sectionHeadingLines,
       sections: currentPost.sections,
       imagePaths: Object.values(selectedImagePaths),
-      chapterImagePaths: currentPost.chapterImagePaths || [],
       useTemplate: $("#use-template-checkbox").checked,
       continueDraft: $("#continue-draft-checkbox").checked,
     }),
   }).then((r) => r.json());
 
   $("#save-draft-btn").disabled = false;
-  const imgRes = r.imageResults || [];
-  const imgLine = imgRes.length
-    ? " " + (imgRes.filter((x) => x.state === "ok").length ? `🖼️ 소제목 아래에 이미지 ${imgRes.filter((x) => x.state === "ok").length}장 올렸어요.` : "") +
-      (imgRes.filter((x) => x.state === "placed").length ? ` 이미지 ${imgRes.filter((x) => x.state === "placed").length}장은 올라갔는데 위치는 확인하지 못했어요 — 에디터에서 확인해주세요.` : "") +
-      (imgRes.filter((x) => x.state === "failed").length ? ` ⚠ ${imgRes.filter((x) => x.state === "failed").map((x) => `${x.chapter + 1}번 챕터(${x.reason})`).join(", ")}은 못 올렸어요 — 에디터에서 직접 넣어주세요.` : "")
-    : "";
   $("#save-status").textContent = r.error
     ? "오류: " + r.error
-    : "본문 임시저장 완료! 네이버 에디터에서 검토/수정 후, 아래 4단계에서 목차·요약을 채워주세요." + imgLine;
-  if (!r.error) window.__draftSaved = true;
+    : "본문 임시저장 완료! 네이버 에디터에서 검토/수정 후, 아래 4단계에서 목차·요약을 채워주세요.";
   if (!r.error) {
     $("#step-finalize").hidden = false;
     setActiveStep(4);
@@ -474,194 +477,146 @@ $("#paste-result-btn").addEventListener("click", () => {
 
 // 완성된 글(JSON)을 3단계 미리보기에 넣고, 바로 네이버 글쓰기 창을 열어 채운다 (기존 임시저장 흐름 재사용)
 // ---- 소제목(챕터)별 이미지 ----
-// AI가 준 img 태그·검색 키워드를 챕터마다 보여주고, 이미지 검색 링크를 붙여준다.
-// 사용자가 이미지 주소를 붙여넣으면 그 자리에서 바로 사진이 들어가고 img 태그가 만들어진다.
-const IMG_STYLE = "max-width:100%; border-radius:12px; margin: 15px 0;";
-const SEARCH_LINKS = (ko, en) => {
-  const k = encodeURIComponent(ko || en || "");
-  const e = encodeURIComponent((en || ko || "").trim());
-  const dash = encodeURIComponent((en || ko || "").trim().replace(/[\s,]+/g, "-"));
-  return [
-    { label: "🔍 네이버 이미지", url: `https://search.naver.com/search.naver?where=image&query=${k}`, free: false },
-    { label: "🔍 구글 이미지", url: `https://www.google.com/search?tbm=isch&q=${k}`, free: false },
-    { label: "🆓 Unsplash", url: `https://unsplash.com/s/photos/${dash}`, free: true },
-    { label: "🆓 Pexels", url: `https://www.pexels.com/search/${e}/`, free: true },
-    { label: "🆓 Pixabay", url: `https://pixabay.com/images/search/${e}/`, free: true },
-  ];
-};
-function parseImgTag(html) {
-  const get = (name) => (String(html || "").match(new RegExp(name + `\\s*=\\s*["']([^"']*)["']`, "i")) || [])[1] || "";
-  return { src: get("src").trim(), alt: get("alt").trim() };
-}
-const buildImgTag = (src, alt) => `<img src="${String(src).replace(/"/g, "&quot;")}" alt="${String(alt || "").replace(/"/g, "&quot;")}" style="${IMG_STYLE}">`;
-/** 붙여넣은 것에서 이미지 주소만 뽑는다: 그냥 주소, <img ...> 태그, 따옴표가 붙은 주소 모두 허용 */
-function extractImageUrl(text) {
-  const t = String(text || "").trim();
-  const fromTag = (t.match(/src\s*=\s*["']([^"']+)["']/i) || [])[1];
-  const u = (fromTag || t).replace(/^["'<(]+|["'>)]+$/g, "").trim();
-  return /^https?:\/\/\S+$/i.test(u) ? u : "";
-}
+// 흐름: [검색 버튼] → 크롬에 이미지 검색이 열림 → 마음에 드는 이미지를 클릭하면 자동으로 복사됨
+//       → 네이버 글쓰기 창에서 넣을 자리를 누르고 Ctrl+V.  (앱에 보이는 이미지를 누르면 다시 복사돼요)
+const ENGINE_BTNS = [
+  { id: "naver", label: "🔍 네이버 이미지", free: false },
+  { id: "google", label: "🔍 구글 이미지", free: false },
+  { id: "unsplash", label: "🆓 Unsplash", free: true },
+  { id: "pexels", label: "🆓 Pexels", free: true },
+  { id: "pixabay", label: "🆓 Pixabay", free: true },
+];
+let pickItems = [];
+let pickPoll = null;
+let pickSeen = {}; // 챕터별로 마지막에 화면에 반영한 복사 순번
 
 function renderSectionImages(post) {
   const box = $("#image-candidates");
   box.classList.remove("empty-state");
-  const imgs = Array.isArray(post.sectionImages) ? post.sectionImages : [];
-  const tags = Array.isArray(post.sectionImageTags) ? post.sectionImageTags : [];
-  const kws = Array.isArray(post.sectionImageKeywords) ? post.sectionImageKeywords : [];
-  const n = (post.sections || []).length || imgs.length;
+  clearInterval(pickPoll);
+  pickSeen = {};
+  const n = (post.sections || []).length;
   if (!n) {
     box.classList.add("empty-state");
     box.textContent = "이 글에는 챕터가 없어요.";
     return;
   }
+  const kws = Array.isArray(post.sectionImageKeywords) ? post.sectionImageKeywords : [];
+  const tags = Array.isArray(post.sectionImageTags) ? post.sectionImageTags : [];
+  const notes = Array.isArray(post.sectionImageNotes) ? post.sectionImageNotes : [];
+  const oldImgs = Array.isArray(post.sectionImages) ? post.sectionImages : []; // 예전 형식(img 태그)이 오면 alt를 설명으로 쓴다
   const topic = (post.tags && post.tags[0]) || $("#keyword").value.trim() || "";
-  // 챕터별 데이터: src/alt(AI가 줬으면), 한국어 검색어, 영어 태그
-  const items = Array.from({ length: n }, (_, i) => {
-    const { src, alt } = parseImgTag(imgs[i] || "");
+  pickItems = Array.from({ length: n }, (_, i) => {
     const heading = ((post.sectionHeadingLines || [])[i] || []).join(" ").trim() || `${i + 1}번 챕터`;
-    const tag = String(tags[i] || "").trim();
-    const ko = String(kws[i] || "").trim() || [topic, heading].filter(Boolean).join(" ").slice(0, 40); // AI가 안 줬으면 주제 키워드 + 챕터 제목
-    return { src, alt: alt || heading, heading, tag, ko, path: "", ok: src ? "wait" : "none" };
+    const oldAlt = (String(oldImgs[i] || "").match(/alt\s*=\s*["']([^"']*)["']/i) || [])[1] || "";
+    return {
+      heading,
+      note: String(notes[i] || oldAlt || "").trim(),
+      tag: String(tags[i] || "").trim(),
+      ko: String(kws[i] || "").trim() || [topic, heading].filter(Boolean).join(" ").slice(0, 40), // AI가 안 줬으면 주제 키워드 + 챕터 제목
+      file: "",
+      previewUrl: "",
+      quality: "",
+    };
   });
-  post.sectionImages = items.map((it) => buildImgTag(it.src, it.alt)); // 글 데이터에도 최신 태그를 유지한다
-  post.chapterImagePaths = items.map(() => null); // 컴퓨터에 저장된 이미지 파일 (임시저장 때 소제목 아래에 올라간다)
 
-  const rowHtml = (it, i) => `<div class="si-row" data-i="${i}">
+  box.innerHTML = `<p class="hint" id="si-summary" style="margin:0 0 6px"></p>
+    <div class="si-guide">
+      <b>이렇게 하세요</b>
+      <ol>
+        <li>챕터의 <b>🔍 검색 버튼</b>을 누르면 크롬에 이미지 검색이 열려요 (검색어는 자동으로 들어가 있어요)</li>
+        <li>마음에 드는 이미지를 <b>클릭</b>하면 <b>자동으로 복사</b>돼요</li>
+        <li><b>네이버 글쓰기 창</b>에서 이미지를 넣을 자리를 누르고 <b>Ctrl+V</b></li>
+      </ol>
+      <small>🆓는 무료로 써도 되는 사진 사이트예요. 네이버·구글 이미지는 저작권을 꼭 확인하세요. 아래에 보이는 이미지를 누르면 다시 복사돼요.</small>
+    </div>
+    ${pickItems
+      .map(
+        (it, i) => `<div class="si-row" data-i="${i}">
       <div class="si-head">${i + 1}. ${esc(it.heading)}</div>
       <div class="si-body">
-        <div class="si-thumb"></div>
+        <div class="si-thumb"><div class="si-empty">아직 없음</div></div>
         <div class="si-info">
-          <div class="si-alt">${esc(it.alt)}</div>
+          ${it.note ? `<div class="si-alt">${esc(it.note)}</div>` : ""}
           <div class="si-tag">검색어: <b>${esc(it.ko)}</b>${it.tag ? ` · 영어 태그: <b>${esc(it.tag)}</b>` : ""}</div>
-          <div class="si-links">${SEARCH_LINKS(it.ko, it.tag).map((l) => `<a href="${esc(l.url)}" target="_blank" rel="noopener" class="si-link${l.free ? " free" : ""}" title="${l.free ? "무료로 쓸 수 있는 사진 사이트" : "저작권을 꼭 확인하세요"}">${l.label}</a>`).join("")}</div>
-          <div class="si-paste"><input class="si-input" type="text" placeholder="복사한 이미지(Ctrl+V)나 이미지 주소를 여기에 붙여넣기 · 파일을 끌어다 놓아도 돼요" autocomplete="off" /></div>
-          <div class="si-pick"><label class="btn btn-outline btn-sm" style="cursor:pointer">📁 내 컴퓨터에서 파일 선택<input type="file" accept="image/png,image/jpeg,image/webp,image/gif" class="si-file" hidden /></label></div>
+          <div class="si-links">${ENGINE_BTNS.map((e) => `<button type="button" class="si-link${e.free ? " free" : ""}" data-engine="${e.id}" title="${e.free ? "무료로 쓸 수 있는 사진 사이트" : "저작권을 꼭 확인하세요"}">${e.label}</button>`).join("")}</div>
           <div class="si-state"></div>
-          <div><button type="button" class="btn btn-outline btn-sm si-copy">📋 img 태그 복사</button></div>
         </div>
       </div>
-    </div>`;
-  box.innerHTML =
-    `<p class="hint" id="si-summary" style="margin:0 0 6px"></p>
-     <p class="hint" style="margin:0 0 10px">🆓 표시는 무료로 써도 되는 사진 사이트예요. 네이버·구글 이미지는 저작권을 꼭 확인하세요. 이미지 주소를 붙여넣으면 바로 들어가요.</p>
-     ${items.map(rowHtml).join("")}
-     <div style="margin:6px 0"><button type="button" class="btn btn-outline btn-sm" id="si-copy-all">📋 모든 챕터의 img 태그 한꺼번에 복사</button></div>`;
+    </div>`
+      )
+      .join("")}`;
+  updatePickSummary();
 
-  const rowOf = (i) => box.querySelector(`.si-row[data-i="${i}"]`);
-  const update = () => {
-    const c = (k) => items.filter((x) => x.ok === k).length;
-    $("#si-summary").innerHTML = `소제목 아래에 들어갈 이미지 ${items.length}개 — ✅ 들어감 <b>${c("ok")}</b> · ⚠ 안 열림 <b>${c("bad")}</b> · 비어 있음 <b>${c("none")}</b>${c("wait") ? " · 확인 중 " + c("wait") : ""}`;
-  };
-  // 한 챕터의 사진·상태를 지금 데이터대로 다시 그린다
-  const paint = (i) => {
-    const it = items[i];
-    const row = rowOf(i);
-    const thumb = row.querySelector(".si-thumb");
-    const state = row.querySelector(".si-state");
-    post.sectionImages[i] = buildImgTag(it.src, it.alt);
-    if (!it.src) {
-      thumb.innerHTML = `<div class="si-empty">비어 있음</div>`;
-      state.textContent = "⚠ 이미지가 아직 없어요 — 위 검색 링크에서 찾아 주소를 붙여넣어 주세요";
-      it.ok = "none";
-      update();
-      return;
-    }
-    it.ok = "wait";
-    state.textContent = "확인 중...";
-    thumb.innerHTML = `<img class="si-img" alt="${esc(it.alt)}" referrerpolicy="no-referrer">`;
-    const img = thumb.querySelector("img");
-    img.addEventListener("load", () => {
-      it.ok = "ok";
-      state.innerHTML = it.path
-        ? "✅ 이미지가 들어갔어요 · 임시저장하면 이 소제목 아래에 올라가요"
-        : it.uploading ? "✅ 이미지가 들어갔어요 · 글에 올릴 파일로 저장하는 중..." : "✅ img 태그에는 들어갔어요 · <b>글에 바로 올리려면 이미지를 복사(우클릭 → 이미지 복사)해서 여기에 붙여넣어 주세요</b>";
-      update();
-    });
-    img.addEventListener("error", () => { it.ok = "bad"; img.style.display = "none"; thumb.insertAdjacentHTML("beforeend", `<div class="si-empty">안 열려요</div>`); state.innerHTML = "⚠ 이 주소는 이미지가 안 열려요 — 이미지 위에서 우클릭 → '이미지 주소 복사'로 다시 붙여넣어 주세요"; update(); });
-    img.src = it.src;
-    update();
-  };
-  const apply = (i, value) => {
-    const url = extractImageUrl(value);
-    const row = rowOf(i);
-    if (!url) { row.querySelector(".si-state").innerHTML = `<span class="error">이미지 주소(http…)를 붙여넣어 주세요</span>`; return; }
-    items[i].src = url;
-    items[i].path = "";
-    post.chapterImagePaths[i] = null;
-    items[i].uploading = true;
-    row.querySelector(".si-input").value = url;
-    paint(i);
-    // 글에 올릴 수 있게, 서버가 그 주소의 이미지를 이 컴퓨터에 저장해 둔다 (사이트가 막으면 태그에만 쓸 수 있다)
-    upload({ url }).then((r) => {
-      items[i].uploading = false;
-      if (items[i].src !== url) return; // 그 사이 다른 이미지로 바뀜
-      if (r.ok) { items[i].path = r.path; post.chapterImagePaths[i] = r.path; noteImageAdded(); }
-      else if (items[i].ok !== "bad") row.querySelector(".si-state").innerHTML = `✅ img 태그에는 들어갔어요 · <span class="error">글에 바로 올리지는 못해요: ${esc(r.error)}</span>`;
-      if (r.ok) paint(i);
-    });
-  };
-  // 복사한 이미지·끌어놓은 파일 → 서버에 저장 → 그 파일로 미리보기 (이 이미지는 글에도 바로 올라간다)
-  const applyFile = async (i, file) => {
-    const row = rowOf(i);
-    if (!file || !/^image\/(png|jpe?g|webp|gif)$/i.test(file.type)) { row.querySelector(".si-state").innerHTML = `<span class="error">PNG·JPG·WEBP·GIF 이미지만 쓸 수 있어요</span>`; return; }
-    row.querySelector(".si-state").textContent = "이미지를 저장하는 중...";
-    const dataUrl = await new Promise((res) => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.readAsDataURL(file); });
-    const r = await upload({ dataUrl });
-    if (!r.ok) { row.querySelector(".si-state").innerHTML = `<span class="error">${esc(r.error)}</span>`; return; }
-    items[i].src = location.origin + r.previewUrl; // 태그에는 이 프로그램이 저장한 주소를 쓴다 (블로그에는 업로드한 사진이 올라가요)
-    items[i].path = r.path;
-    post.chapterImagePaths[i] = r.path;
-    row.querySelector(".si-input").value = file.name ? `(붙여넣은 이미지) ${file.name}` : "(붙여넣은 이미지)";
-    paint(i);
-    noteImageAdded();
-  };
-  box.querySelectorAll(".si-input").forEach((input) => {
-    const i = Number(input.closest(".si-row").dataset.i);
-    input.value = items[i].src;
-    input.addEventListener("paste", (e) => { // 붙여넣는 순간 바로 적용 (엔터를 누르지 않아도)
-      const cd = e.clipboardData || window.clipboardData;
-      const file = [...(cd.files || [])].find((f) => f.type.startsWith("image/")) || [...(cd.items || [])].map((it) => (it.kind === "file" ? it.getAsFile() : null)).find((f) => f && f.type.startsWith("image/"));
-      e.preventDefault();
-      if (file) applyFile(i, file); // 복사한 이미지 자체를 붙여넣은 경우
-      else apply(i, cd.getData("text")); // 이미지 주소·<img> 태그를 붙여넣은 경우
-    });
-    input.addEventListener("keydown", (e) => { if (e.key === "Enter") apply(i, input.value); });
-    input.addEventListener("change", () => { if (input.value.trim() !== items[i].src) apply(i, input.value); });
-  });
-  box.querySelectorAll(".si-row").forEach((row) => {
-    const i = Number(row.dataset.i);
-    row.addEventListener("dragover", (e) => { e.preventDefault(); row.classList.add("drag"); });
-    row.addEventListener("dragleave", () => row.classList.remove("drag"));
-    row.addEventListener("drop", (e) => { // 파일(또는 브라우저에서 끌어온 이미지)을 놓으면 바로 적용
-      e.preventDefault();
-      row.classList.remove("drag");
-      const f = [...(e.dataTransfer.files || [])].find((x) => x.type.startsWith("image/"));
-      if (f) return applyFile(i, f);
-      const dropped = e.dataTransfer.getData("text/uri-list") || e.dataTransfer.getData("text/plain");
-      if (dropped) apply(i, dropped);
-    });
-    row.querySelector(".si-file").addEventListener("change", (e) => { const f = e.target.files[0]; e.target.value = ""; if (f) applyFile(i, f); });
-  });
-  box.querySelectorAll(".si-copy").forEach((btn) => {
-    const i = Number(btn.closest(".si-row").dataset.i);
-    btn.addEventListener("click", () => copyText(btn, post.sectionImages[i]));
-  });
-  $("#si-copy-all").addEventListener("click", (e) => copyText(e.currentTarget, items.map((it, i) => `<!-- ${i + 1}. ${it.heading} -->\n${post.sectionImages[i]}`).join("\n")));
-  items.forEach((_, i) => paint(i));
+  box.querySelectorAll(".si-link").forEach((btn) => btn.addEventListener("click", () => startPickFor(Number(btn.closest(".si-row").dataset.i), btn.dataset.engine)));
+  box.querySelectorAll(".si-thumb").forEach((th) => th.addEventListener("click", () => copyPicked(Number(th.closest(".si-row").dataset.i))));
 }
-const upload = (body) => fetch("/api/images/upload", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then((r) => r.json()).catch((e) => ({ error: e.message }));
-// 이미 글을 임시저장한 뒤에 이미지를 넣었다면, 같은 글에 덮어쓰는 방식으로 다시 저장하게 안내한다
-function noteImageAdded() {
-  if (!window.__draftSaved) return;
-  const cb = $("#continue-draft-checkbox");
-  if (cb) cb.checked = true;
-  $("#save-status").textContent = "🖼️ 이미지를 넣었어요 — [네이버에 임시저장]을 다시 누르면 같은 글에 이미지까지 넣어서 덮어써요. (이어서 수정 체크됨)";
+
+const pickRow = (i) => document.querySelector(`.si-row[data-i="${i}"]`);
+const pickState = (i, html) => { const r = pickRow(i); if (r) r.querySelector(".si-state").innerHTML = html; };
+function updatePickSummary() {
+  const el = $("#si-summary");
+  if (!el) return;
+  const got = pickItems.filter((x) => x.file).length;
+  el.innerHTML = `소제목 아래에 넣을 이미지 — 고른 챕터 <b>${got}</b> / ${pickItems.length}`;
 }
-async function copyText(btn, text) {
-  try { await navigator.clipboard.writeText(text); } catch { return; }
-  const old = btn.textContent;
-  btn.textContent = "복사됨 ✓";
-  setTimeout(() => (btn.textContent = old), 1500);
+function paintThumb(i) {
+  const it = pickItems[i];
+  const th = pickRow(i).querySelector(".si-thumb");
+  th.innerHTML = it.file ? `<img class="si-img" src="${esc(it.previewUrl)}" alt="${esc(it.note || it.heading)}" title="누르면 이 이미지가 복사돼요" style="cursor:pointer">` : `<div class="si-empty">아직 없음</div>`;
+  th.style.cursor = it.file ? "pointer" : "default";
+}
+
+async function startPickFor(i, engine) {
+  pickState(i, "⏳ 크롬에 이미지 검색을 여는 중이에요...");
+  const r = await fetch("/api/images/pick", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ chapter: i, query: pickItems[i].ko, engine }) })
+    .then((x) => x.json())
+    .catch((e) => ({ error: e.message }));
+  if (r.error) return pickState(i, `<span class="error">⚠ ${esc(r.error)}</span>`);
+  clearInterval(pickPoll);
+  pickPoll = setInterval(pollPick, 1000);
+  pollPick();
+}
+
+async function pollPick() {
+  const st = await fetch("/api/images/pick/status").then((r) => r.json()).catch(() => null);
+  if (!st || st.status === "idle" || st.chapter === undefined) return;
+  const i = st.chapter;
+  const it = pickItems[i];
+  if (!it || !pickRow(i)) return clearInterval(pickPoll);
+  // 지금 고르는 챕터가 아닌 칸은 "고른 이미지가 있으면 안내", 없으면 비움
+  pickItems.forEach((x, k) => { if (k !== i && !x.file) pickState(k, ""); else if (k !== i) pickState(k, "✅ 복사했던 이미지예요 · 누르면 다시 복사돼요"); });
+  if (st.file && pickSeen[i] !== st.seq) { // 새로 복사된 이미지
+    pickSeen[i] = st.seq;
+    Object.assign(it, { file: st.file, previewUrl: st.previewUrl, quality: st.quality });
+    paintThumb(i);
+    updatePickSummary();
+  }
+  const how = "네이버 글쓰기 창에서 넣을 자리를 누르고 <b>Ctrl+V</b>";
+  if (it.copiedAt && Date.now() - it.copiedAt < 5000) return; // 방금 앱에서 이미지를 눌러 다시 복사했으면 그 안내를 잠깐 유지
+  if (st.status === "opening") pickState(i, "⏳ 크롬에 이미지 검색을 여는 중이에요...");
+  else if (st.status === "waiting") pickState(i, st.file ? `✅ 복사됐어요 (${esc(st.quality)}) · ${how} · 다른 이미지를 클릭하면 바꿔서 복사돼요${st.error ? `<br><span class="error">⚠ ${esc(st.error)}</span>` : ""}` : `🟢 크롬에서 이미지 검색이 열렸어요. 마음에 드는 이미지를 <b>클릭</b>하면 자동으로 복사돼요${st.error ? `<br><span class="error">⚠ ${esc(st.error)}</span>` : ""}`);
+  else if (st.status === "working") pickState(i, "⏳ 이미지를 복사하는 중이에요...");
+  else if (st.status === "copied") pickState(i, `✅ 복사됐어요 (${esc(st.quality)}) · ${how} · 다른 이미지를 클릭하면 바꿔서 복사돼요`);
+  else if (st.status === "closed" || st.status === "error") {
+    pickState(i, st.file ? `✅ 복사했던 이미지예요 · 누르면 다시 복사돼요` : st.status === "error" ? `<span class="error">⚠ ${esc(st.error)}</span>` : "크롬의 이미지 검색 창이 닫혔어요. 다시 하려면 검색 버튼을 눌러주세요.");
+    clearInterval(pickPoll);
+  }
+}
+
+// 앱에 보이는 이미지를 누르면 그 이미지가 복사된다 → 글쓰기 창에서 Ctrl+V만 하면 된다
+async function copyPicked(i) {
+  const it = pickItems[i];
+  if (!it || !it.file) return;
+  try {
+    const blob = await fetch(it.previewUrl).then((r) => r.blob());
+    await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+  } catch {
+    const r = await fetch("/api/images/copy", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ file: it.file }) }).then((x) => x.json()).catch((e) => ({ error: e.message }));
+    if (r.error) return pickState(i, `<span class="error">⚠ ${esc(r.error)}</span>`);
+  }
+  it.copiedAt = Date.now();
+  pickState(i, "✅ 이 이미지를 복사했어요 · 네이버 글쓰기 창에서 넣을 자리를 누르고 <b>Ctrl+V</b>");
 }
 
 function loadPost(post) {
