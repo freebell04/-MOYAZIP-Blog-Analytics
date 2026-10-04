@@ -52,7 +52,15 @@
       <h2><span class="step-num">2</span>선택한 글감으로 글 생성</h2>
       <p class="hint">체크한 글감을 평소 쓰는 AI에게 넘겨서, 대화하면서 초안을 써요 (표절 없이).</p>
     </div>
-    <p class="hint"><b>AI와 대화하면서 쓰기</b> — 평소 쓰는 AI를 고르세요. 로그인용 크롬에 그 AI 채팅이 열리고 요청문이 자동으로 들어가요. 방향을 고르고 다듬은 뒤 "완성"이라고 하면 블로그 글쓰기 창이 자동으로 열려요. (각 AI는 그 크롬에서 처음 한 번만 로그인)</p>
+    <div id="ai-card" class="ai-card">
+      <div class="ai-card-head">
+        <span class="ai-card-icon">🤖</span>
+        <div>
+          <h3>AI와 대화하면서 글쓰기</h3>
+          <p class="hint" style="margin:2px 0 0">평소 쓰는 AI를 고르면 → 크롬에 AI 채팅이 열리고 요청문이 자동으로 들어가요 → 방향을 고르고 다듬은 뒤 <b>"완성"</b>이라고 하면 블로그 글쓰기 창이 자동으로 열려요.</p>
+        </div>
+      </div>
+      <p class="ai-card-tip">⚡ 그 AI가 <b>이미 크롬에 열려 있으면</b> 로그인 없이 바로 이어서 써요. (처음 한 번만 로그인)</p>
     <div class="handoff-row" style="display:flex; gap:8px; flex-wrap:wrap;">
       <button class="btn btn-outline handoff-btn" data-ai="claude">🤖 Claude</button>
       <button class="btn btn-outline handoff-btn" data-ai="chatgpt">💬 ChatGPT</button>
@@ -69,6 +77,7 @@
       <textarea id="paste-result" rows="5" placeholder='{"title": "...", "introLines": [...], "sections": [...] }' style="width:100%; font-size:12px;"></textarea>
       <button id="paste-result-btn" class="btn btn-primary">결과 넣고 블로그 글쓰기 창 열기</button>
       <div id="paste-status" class="status-line"></div>
+    </div>
     </div>
 
     <div id="format-box" style="border:1px solid var(--line, #e5e7eb); border-radius:12px; padding:12px 14px; margin-bottom:14px;">

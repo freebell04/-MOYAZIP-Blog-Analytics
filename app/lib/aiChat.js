@@ -31,6 +31,11 @@ const SITES = {
   },
 };
 
+// 이 주소로 가 있으면 로그인(또는 가입) 화면이라는 뜻 — 입력창을 10초 기다리지 않고 바로 "로그인 필요"로 알린다
+const LOGIN_URL = /\/(login|log-in|signin|sign-in|auth|logout)|accounts\.google\.com|auth\.openai\.com|magic-link/i;
+// 새 대화 화면의 경로 (이미 열려 있는 탭이 여기에 있으면 새 탭을 또 열지 않고 그 탭을 이어서 쓴다)
+const NEW_CHAT_PATH = { chatgpt: "", gemini: "/app", claude: "/new" };
+
 const LOGIN_WAIT_MS = 10 * 60 * 1000; // 로그인 기다리는 최대 시간
 const CHAT_WAIT_MS = 60 * 60 * 1000; // 대화하며 "완성"까지 기다리는 최대 시간
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -109,6 +114,31 @@ async function pressSend(client, site, sel) {
   return left < 20;
 }
 
+/**
+ * 이미 열려 있는 이 AI의 "새 대화" 탭을 찾는다. 입력창이 보이고 비어 있으면 로그인된 상태 + 바로 쓸 수 있는 탭이라
+ * 새 탭을 열지 않고 그대로 이어 쓴다. (이미 대화가 진행 중인 탭은 건드리지 않는다)
+ */
+async function findReusableTab(ai, site) {
+  try {
+    const list = await (await fetch(`${session.CDP_URL}/json/list`)).json();
+    const host = new URL(site.url).hostname;
+    const port = new URL(session.CDP_URL).port || "9222";
+    for (const t of list.filter((x) => x.type === "page" && x.url).slice(0, 12)) {
+      let u;
+      try { u = new URL(t.url); } catch { continue; }
+      if (u.hostname !== host) continue;
+      if (u.pathname.replace(/\/$/, "") !== NEW_CHAT_PATH[ai]) continue; // 대화 중이거나 다른 화면
+      const client = await within(connectPage(`ws://localhost:${port}/devtools/page/${t.id}`), 2500).catch(() => null);
+      if (!client || !client.eval) continue;
+      const sel = await Promise.race([client.eval(firstMatch(site.input)).catch(() => null), sleep(2000).then(() => null)]);
+      const empty = sel ? await client.eval(`((document.querySelector(${JSON.stringify(sel)}) || {}).innerText || "").trim().length < 3`).catch(() => false) : false;
+      if (sel && empty) return { id: t.id, client };
+      client.close && client.close();
+    }
+  } catch {}
+  return null;
+}
+
 /** AI 채팅 탭을 열고 요청문을 보낸 뒤, 결과 JSON이 나올 때까지 지켜본다 (바로 반환 — 진행은 getState()). */
 async function start(ai, prompt, kind = "post") {
   const site = SITES[ai];
@@ -119,18 +149,29 @@ async function start(ai, prompt, kind = "post") {
   (async () => {
     try {
       await session.ensureDebugChrome();
-      const version = await (await fetch(`${session.CDP_URL}/json/version`)).json();
-      const browserWs = await connectPage(version.webSocketDebuggerUrl);
-      // 빈 탭을 만든 뒤 붙고 나서 이동한다 (URL로 바로 만들면 붙은 연결이 처음 about:blank 화면에 묶여 있는 경우가 있다)
-      const { targetId } = await browserWs.send("Target.createTarget", { url: "about:blank", newWindow: false });
-      browserWs.close();
+      // 1순위(가장 빠름): 이미 열려 있는 새 대화 탭 = 이미 로그인돼 있다는 뜻 → 로그인 확인 없이 그대로 쓴다
+      const reuse = await findReusableTab(ai, site);
+      let targetId, client;
+      if (reuse) {
+        targetId = reuse.id;
+        client = reuse.client;
+        s.reused = true;
+        s.note = `이미 열려 있던 ${site.name} 탭(로그인 상태)을 이어서 썼어요.`;
+      } else {
+        // 2순위: 같은 크롬에 새 탭을 연다 (이 크롬에서 한 번이라도 로그인했다면 쿠키로 바로 로그인된 상태)
+        const version = await (await fetch(`${session.CDP_URL}/json/version`)).json();
+        const browserWs = await connectPage(version.webSocketDebuggerUrl);
+        // 빈 탭을 만든 뒤 붙고 나서 이동한다 (URL로 바로 만들면 붙은 연결이 처음 about:blank 화면에 묶여 있는 경우가 있다)
+        ({ targetId } = await browserWs.send("Target.createTarget", { url: "about:blank", newWindow: false }));
+        browserWs.close();
+        const port = new URL(session.CDP_URL).port || "9222";
+        client = await connectPage(`ws://localhost:${port}/devtools/page/${targetId}`);
+        // 응답(로드 완료)을 오래 기다리지 않는다 — 아래에서 입력창이 생길 때까지 어차피 확인하며 기다린다
+        await within(client.send("Page.navigate", { url: site.url }), 3000);
+      }
       s.targetId = targetId;
-      session.notifyChrome(`${site.name} 채팅 창`);
-      const port = new URL(session.CDP_URL).port || "9222";
-      const client = await connectPage(`ws://localhost:${port}/devtools/page/${targetId}`);
       s.client = client;
-      // 응답(로드 완료)을 오래 기다리지 않는다 — 아래에서 입력창이 생길 때까지 어차피 확인하며 기다린다
-      await within(client.send("Page.navigate", { url: site.url }), 3000);
+      session.notifyChrome(`${site.name} 채팅 창`);
       client.send("Page.bringToFront").catch(() => {}); // 기다리지 않는다 (창 상태에 따라 응답이 안 오기도 함)
 
       // 입력창이 생길 때까지 기다린다 (로그인이 안 돼 있으면 사용자가 로그인할 때까지)
@@ -142,7 +183,13 @@ async function start(ai, prompt, kind = "post") {
         if (Date.now() > loginDeadline) return void Object.assign(s, { status: "timeout", error: "로그인을 기다리다 시간이 지났어요." });
         sel = await client.eval(firstMatch(site.input)).catch(() => null);
         if (!sel) {
-          if (i === 20) s.status = "needLogin"; // 10초 넘게 입력창이 없으면 로그인 화면일 가능성이 크다
+          // 주소가 로그인 화면이면 바로 알린다 (아니면 10초 넘게 입력창이 없을 때 로그인 화면으로 본다)
+          let onLogin = false;
+          if (i >= 3 && i % 2 === 1 && s.status !== "needLogin") onLogin = LOGIN_URL.test(String(await client.eval("location.href").catch(() => "")));
+          if (onLogin || i === 20) {
+            if (s.status !== "needLogin") session.notifyChrome(`${site.name} 로그인 화면 — 로그인하면 요청문이 자동으로 들어가요`);
+            s.status = "needLogin";
+          }
           await sleep(500);
         }
       }
@@ -187,4 +234,4 @@ function markTaken() {
   if (state.status === "done") state.status = "taken";
 }
 
-module.exports = { start, getState, markTaken, SITES };
+module.exports = { start, getState, markTaken, SITES, findReusableTab };

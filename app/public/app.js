@@ -465,6 +465,60 @@ $("#paste-result-btn").addEventListener("click", () => {
 });
 
 // 완성된 글(JSON)을 3단계 미리보기에 넣고, 바로 네이버 글쓰기 창을 열어 채운다 (기존 임시저장 흐름 재사용)
+// ---- 소제목(챕터)별 이미지: AI가 준 img 태그를 미리 보여주고, 링크가 실제로 열리는지 표시한다 ----
+function parseImgTag(html) {
+  const get = (name) => (String(html || "").match(new RegExp(name + `\s*=\s*["']([^"']*)["']`, "i")) || [])[1] || "";
+  return { src: get("src").trim(), alt: get("alt").trim() };
+}
+function renderSectionImages(post) {
+  const box = $("#image-candidates");
+  box.classList.remove("empty-state");
+  const imgs = Array.isArray(post.sectionImages) ? post.sectionImages : [];
+  const tags = Array.isArray(post.sectionImageTags) ? post.sectionImageTags : [];
+  if (!imgs.length) {
+    box.classList.add("empty-state");
+    box.textContent = "이 글에는 챕터별 이미지 정보가 없어요. (요청문을 최신으로 보내면 AI가 소제목 아래 이미지를 같이 줘요) 이미지는 네이버 에디터에서 직접 넣어주세요.";
+    return;
+  }
+  const rows = imgs.map((html, i) => {
+    const { src, alt } = parseImgTag(html);
+    const tag = String(tags[i] || "").trim();
+    const heading = ((post.sectionHeadingLines || [])[i] || []).join(" ").trim() || `${i + 1}번 챕터`;
+    const find = tag ? ` · <a href="https://unsplash.com/s/photos/${encodeURIComponent(tag)}" target="_blank" rel="noopener">이 태그로 직접 찾기 ↗</a>` : "";
+    return `<div class="si-row" data-i="${i}">
+      <div class="si-head">${i + 1}. ${esc(heading)}</div>
+      <div class="si-body">
+        ${src ? `<img class="si-img" src="${esc(src)}" alt="${esc(alt)}" referrerpolicy="no-referrer">` : `<div class="si-empty">링크 없음</div>`}
+        <div class="si-info">
+          <div class="si-alt">${esc(alt) || '<span class="muted">(설명 없음)</span>'}</div>
+          <div class="si-tag">${tag ? "검색 태그: <b>" + esc(tag) + "</b>" : ""}${find}</div>
+          <div><button type="button" class="btn btn-outline btn-sm si-copy" data-html="${esc(html)}">📋 img 태그 복사</button> <span class="si-state">${src ? "확인 중..." : "⚠ 링크가 없어요 — 위 태그로 찾아보세요"}</span></div>
+        </div>
+      </div>
+    </div>`;
+  });
+  box.innerHTML = `<p class="hint" id="si-summary" style="margin:0 0 8px">소제목 아래에 들어갈 이미지예요. 링크가 열리는지 확인하고 있어요...</p>${rows.join("")}`;
+  const update = () => {
+    const states = [...box.querySelectorAll(".si-row")].map((r) => (r.querySelector(".si-img") ? (r.querySelector(".si-img").dataset.ok || "wait") : "none"));
+    const n = (k) => states.filter((x) => x === k).length;
+    $("#si-summary").innerHTML = `소제목 아래에 들어갈 이미지 ${states.length}개 — ✅ 열림 <b>${n("ok")}</b> · ⚠ 안 열림 <b>${n("bad")}</b> · 링크 없음 <b>${n("none")}</b>${n("wait") ? " · 확인 중 " + n("wait") : ""}`;
+  };
+  box.querySelectorAll(".si-img").forEach((img) => {
+    const state = img.closest(".si-row").querySelector(".si-state");
+    img.addEventListener("load", () => { img.dataset.ok = "ok"; state.textContent = "✅ 링크 확인됨"; update(); });
+    img.addEventListener("error", () => { img.dataset.ok = "bad"; img.style.display = "none"; state.innerHTML = "⚠ 링크가 안 열려요 — 태그로 직접 찾아보세요"; update(); });
+  });
+  update();
+}
+document.addEventListener("click", async (e) => {
+  const b = e.target.closest(".si-copy");
+  if (!b) return;
+  try { await navigator.clipboard.writeText(b.dataset.html); } catch { return; }
+  const old = b.textContent;
+  b.textContent = "복사됨 ✓";
+  setTimeout(() => (b.textContent = old), 1500);
+});
+
 function loadPost(post) {
   // 내 형식을 저장해 쓰는 경우엔 모야ZIP 전용 네이버 템플릿을 적용하지 않는다
   if (formatInfo) $("#use-template-checkbox").checked = !!formatInfo.useTemplate;
@@ -474,7 +528,7 @@ function loadPost(post) {
   selectedImagePaths = {};
   $("#post-title").value = post.title;
   renderPostPreview(post);
-  $("#image-candidates").textContent = "AI 대화로 만든 글은 이미지를 네이버 에디터에서 직접 넣어주세요.";
+  renderSectionImages(post);
   $("#step-preview").hidden = false;
   setActiveStep(3);
   $("#paste-status").textContent = `✅ 불러왔어요 (섹션 ${post.sections.length}개). 네이버 블로그 글쓰기 창을 여는 중이에요... (크롬 창을 확인하세요)`;

@@ -179,21 +179,27 @@ function meaningfulStyleGuide(text) {
   return body.length >= 20 ? text.trim() : "";
 }
 
-// 최종 JSON 끝에 추천 이미지(img 태그)와 키워드 태그를 함께 받는다
-const IMG_EXAMPLE =
-  '<img src="https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?auto=format&fit=crop&w=800&q=80" alt="이미지 설명" style="max-width:100%; border-radius:12px; margin: 15px 0;">';
+// 최종 JSON에 "각 소제목(챕터) 바로 아래에 들어갈 이미지"와 블로그 키워드 태그를 함께 받는다.
+// 이미지는 AI가 태그로 검색해서 실제 링크를 넣어주고, 프로그램은 그 링크가 열리는지 화면에서 보여준다.
+const IMG_STYLE = 'style="max-width:100%; border-radius:12px; margin: 15px 0;"';
+const IMG_EXAMPLE = `<img src="https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?auto=format&fit=crop&w=800&q=80" alt="이미지 설명" ${IMG_STYLE}>`;
 const IMAGE_TAG_RULES = [
-  "최종 JSON 마지막에 추천 이미지(images)와 키워드 태그(tags)도 꼭 넣어줘:",
-  "- images: 글 주제와 글 형식을 함께 고려해서 사람들이 좋아할 만한 이미지를 3~5개 추천해줘. 각 항목은 아래 형식의 img 태그 문자열이고, src에는 실제로 열리는 이미지 링크(예: Unsplash)를 꼭 함께 적고, alt에는 이미지 설명을 넣어줘.",
+  "이미지도 JSON에 같이 넣어줘. 각 소제목(챕터) 바로 아래에 들어갈 이미지를 sections 순서대로 하나씩, sectionImages 배열에 넣어줘 (개수는 sections와 같게).",
+  "- 각 이미지는 그 챕터의 내용과 글 주제, 글 형식을 함께 고려해서, 사람들이 좋아할 만한 사진으로 골라줘.",
+  "- 먼저 챕터마다 영어 검색 태그(2~3단어)를 정하고, sectionImageTags에 같은 순서로 적어줘. 그 태그로 이미지를 검색해서 실제로 있는 무료 사진을 골라줘.",
+  "- sectionImages의 각 항목은 아래 형식의 img 태그 문자열이야. src에는 실제로 열리는 이미지 링크(예: Unsplash 사진 주소)를, alt에는 어떤 이미지인지 한국어로 짧게 설명해줘.",
   `  ${IMG_EXAMPLE}`,
-  "- 실제로 있는 이미지 링크인지 확실하지 않으면 src는 비워두고 alt에 어떤 이미지를 찾으면 좋은지만 적어줘 (없는 링크를 지어내지 말 것)",
-  "- JSON 문자열 안이니 img 태그의 큰따옴표(\")는 \\\"로 이스케이프해줘 (그래야 프로그램이 읽을 수 있어)",
-  "- tags: 이 글에 달 키워드 태그 5~10개 (# 없이 단어만)",
+  "- 위 예시의 사진 주소는 형식을 보여주는 예시일 뿐이야. 그대로 쓰지 말고, 그 챕터에 어울리는 다른 사진을 골라줘 (챕터마다 서로 다른 사진).",
+  "- 실제로 열리는 링크인지 확실하지 않으면 src는 비워두고(src=\"\") alt에만 설명을 적어줘. 없는 링크를 지어내지 말아줘. (비운 칸은 sectionImageTags 태그로 내가 직접 찾을 거야)",
+  "- JSON 문자열 안이니 img 태그의 큰따옴표(\")는 \\\"로 이스케이프해줘 (그래야 프로그램이 읽을 수 있어).",
+  "- tags: 이 글에 달 블로그 키워드 태그 5~10개 (# 없이 단어만).",
 ];
 function withExtras(schemaStr) {
   try {
     const o = JSON.parse(schemaStr);
-    o.images = [IMG_EXAMPLE.replace("이미지 설명", "이미지 설명1"), IMG_EXAMPLE.replace("이미지 설명", "이미지 설명2")];
+    const n = Array.isArray(o.sections) ? o.sections.length : 3;
+    o.sectionImages = Array.from({ length: n }, (_, i) => `<img src="" alt="${i + 1}번 소제목 아래에 들어갈 이미지 설명" ${IMG_STYLE}>`);
+    o.sectionImageTags = Array.from({ length: n }, (_, i) => `${i + 1}번 챕터 영어 검색 태그, 예: korean food, cafe interior`);
     o.tags = ["키워드1", "키워드2", "키워드3"];
     return JSON.stringify(o);
   } catch {
