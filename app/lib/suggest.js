@@ -7,6 +7,7 @@
 const path = require("path");
 const fs = require("fs");
 const { askClaude, extractJson } = require("./claude");
+const { keywordsOf } = require("./trends");
 const neighbors = require("./neighbors");
 
 const SUGGEST_PATH = path.join(__dirname, "..", "data", "neighbors-suggest.json");
@@ -14,7 +15,7 @@ const BATCH_SIZE = 8;
 // buildPrompt()의 규칙(이모지 금지, 핵심 내용 파악 등)을 바꿀 때마다 올린다.
 // 예전 버전으로 만들어둔 결과는 업데이트해도 파일에 남아 재사용되므로, 여기서 버전이 다르면
 // "없는 것"으로 취급해 다시 만들게 한다 (사용자가 일일이 [다시 만들기]를 누를 필요 없이).
-const PROMPT_VERSION = 4;
+const PROMPT_VERSION = 5;
 
 function readRaw() {
   try {
@@ -47,21 +48,36 @@ async function fetchPostText(blogId, logNo) {
   const html = await res.text();
   const i = html.indexOf("se-main-container");
   const body = (i >= 0 ? html.slice(i) : html).split(/<div class="(?:post_footer|se_tag|comment)/)[0];
-  return body
+  const text = body
     .replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>/g, "")
-    .replace(/<[^>]+>/g, " ")
+    .replace(/<(br|\/p|\/div|\/h\d|\/li|\/tr)[^>]*>/gi, "\n") // 문단 구분은 줄바꿈으로 남긴다 (글의 흐름을 알아보게)
+    .replace(/<[^>]+>/g, " ");
+  return clipPost(
+    decode(text)
+      .replace(/^se-main-container">/, "")
+      // 본문 끝에 눈에 안 보이는 공유용 메타데이터({"title":...})가 글자로 같이 딸려 나오는 경우가 있어 잘라낸다
+      .split(/\{"title":/)[0]
+      .split("\n")
+      .map((l) => l.replace(/[ \t]+/g, " ").trim())
+      .filter(Boolean)
+      .join("\n")
+  );
+}
+
+const decode = (t) =>
+  String(t)
     .replace(/&nbsp;|&#x200B;|​/g, " ")
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
     .replace(/&quot;|&#0?34;/g, '"')
-    .replace(/&#0?39;/g, "'")
-    .replace(/&amp;/g, "&")
-    .replace(/^se-main-container">/, "")
-    // 본문 끝에 눈에 안 보이는 공유용 메타데이터({"title":...})가 글자로 같이 딸려 나오는 경우가 있어 잘라낸다
-    .split(/\{"title":/)[0]
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, 2400); // 짧은 글은 거의 전체가, 긴 글은 앞부분 위주로 들어간다
+    .replace(/&#x([0-9a-f]+);/gi, (m, h) => String.fromCodePoint(parseInt(h, 16)))
+    .replace(/&#(\d+);/g, (m, d) => String.fromCodePoint(+d))
+    .replace(/&amp;/g, "&");
+
+/** 너무 긴 글은 앞부분(주제·구체적 내용)과 끝부분(결론·마무리)을 남기고 가운데를 줄인다 */
+function clipPost(t, max = 4500) {
+  if (t.length <= max) return t;
+  return t.slice(0, 3200) + "\n(… 중간 생략 …)\n" + t.slice(-1200);
 }
 
 // 키 규칙 (프론트와 동일): visit:<blogId>:<logNo>  /  reply:<logNo>:<blogId>:<댓글시각>
@@ -103,17 +119,47 @@ async function generate(keys, { force = false } = {}) {
         // 답글도 "내 글에 뭐라고 썼었는지"를 알아야 댓글이 전하려던 말에 제대로 반응할 수 있다
         if (it.kind === "reply") it.myText = await fetchPostText(require("./config").blogId(), it.u.logNo).catch(() => "");
       }
-      for (let b = 0; b < items.length; b += BATCH_SIZE) {
-        const batch = items.slice(b, b + BATCH_SIZE);
-        state.progress = `추천 문구 만드는 중 (${Math.min(b + BATCH_SIZE, items.length)}/${items.length}명)... 1분 정도 걸려요`;
-        const result = extractJson(await askClaude(buildPrompt(batch, cache.myComments || []), { timeoutMs: 240000 }));
-        const all = readRaw();
-        for (const it of batch) {
-          const list = result[it.key];
-          if (Array.isArray(list) && list.length) all[it.key] = { v: PROMPT_VERSION, list: list.map(String).slice(0, 3) };
+      const batches = [];
+      for (let b = 0; b < items.length; b += BATCH_SIZE) batches.push(items.slice(b, b + BATCH_SIZE));
+      let doneBatches = 0;
+      // 배치를 동시에(최대 3개) 만든다: Claude를 한 번 부르는 데 오래 걸려서, 순서대로 하면 사람 수가 많을수록 오래 걸린다
+      let nextBatch = 0;
+      const worker = async () => {
+        while (nextBatch < batches.length) {
+          const batch = batches[nextBatch++];
+          state.progress = `추천 문구 만드는 중 (${doneBatches}/${batches.length}묶음 끝)... 1분 정도 걸려요`;
+          const result = extractJson(await askClaude(buildPrompt(batch, cache.myComments || []), { timeoutMs: 240000 }));
+          // 검사: 본문의 구체적인 내용이 안 들어갔거나 뻔한 문장이면 버리고, 하나도 못 건진 글만 한 번 더 만든다
+          const lists = {};
+          const retry = [];
+          for (const it of batch) {
+            const good = filterGood(result[it.key], it);
+            if (good.length) lists[it.key] = good;
+            else retry.push(it);
+          }
+          if (retry.length) {
+            state.progress = `더 구체적으로 다시 만드는 중 (${retry.length}명)...`;
+            try {
+              const again = extractJson(await askClaude(buildPrompt(retry, cache.myComments || [], true), { timeoutMs: 240000 }));
+              for (const it of retry) {
+                const good = filterGood(again[it.key], it);
+                // 그래도 기준에 못 미치면, 첫 결과 중 뻔한 인사만 뺀 것이라도 남긴다 (빈 칸보다는 낫다)
+                lists[it.key] = good.length ? good : bestEffort(result[it.key], again[it.key]);
+              }
+            } catch {
+              for (const it of retry) lists[it.key] = bestEffort(result[it.key]);
+            }
+          }
+          const all = readRaw();
+          for (const it of batch) {
+            const list = lists[it.key];
+            if (Array.isArray(list) && list.length) all[it.key] = { v: PROMPT_VERSION, list: list.map(String).slice(0, 2) };
+          }
+          writeRaw(all);
+          doneBatches++;
         }
-        writeRaw(all);
-      }
+      };
+      await Promise.all(Array.from({ length: Math.min(3, batches.length) }, worker));
       state = { running: false, progress: "완료", error: null };
     } catch (e) {
       const msg = /credit balance/i.test(e.message)
@@ -131,49 +177,95 @@ const stripEmoji = (s) =>
     .replace(/\s+/g, " ")
     .trim();
 
-function buildPrompt(batch, myComments) {
+// 어디에나 붙는 뻔한 문장 (이런 말이 들어간 댓글은 쓰지 않는다)
+const BANNED = /가볼게요|가보겠습니다|잘 보고 (갑니다|가요|갈게요)|잘 읽고 (갑니다|가요|갈게요)|구경 잘|유익한 (정보|글)|좋은 (정보|글) (감사|잘)|기대(할게요|하겠습니다|됩니다|돼요)|응원(합니다|할게요|해요)|또 놀러|자주 올게요|공감하고 갑니다|놀러 왔어요/;
+
+// 어느 글에나 나오는 흔한 말 (구체적인 내용이 아니라서 "구체적인 단어"로 세지 않는다)
+const COMMON = new Set(
+  ("안녕하세 안녕하세요 안녕하십니까 제가 저는 저의 저도 올해 오늘 어제 이번 지난 요즘 최근 그리고 하지만 그래서 그러나 때문 정말 진짜 너무 매우 아주 사실 생각 경우 우리 여러분 감사 입니다 합니다 있습니다 했습니다 같아요 같습니다 " +
+    "이렇게 그렇게 저렇게 어떻게 이런 그런 저런 이것 그것 무엇 누구 어디 언제 하나 먼저 다음 마지막 처음 이상 이하 정도 부분 내용 이야기 소개 설명 정리 방법 시간 하루 일상 기록 포스팅 블로그 이웃 공감 댓글 사진 링크 클릭 확인 참고 참여 진행 시작 마무리 " +
+    "누구나 인생 사용하다 무엇인지 사람 사람들 모두 함께 같이 다시 계속 항상 가장 조금 많이 많은 좋은 다른 새로운 대한 위한 통해 관련 대해 에서 으로").split(/\s+/)
+);
+const isJunk = (w) => COMMON.has(w) || /^x?\d{1,3}$/i.test(w) || /^(quot|amp|nbsp|lt|gt)$/i.test(w) || /^[a-z]$/i.test(w);
+
+/** 본문에만 있는 구체적인 단어들 (제목에 이미 있는 말, 인사·흔한 말, 글 첫머리 인사에만 나오는 말은 뺀다) */
+function bodySpecifics(it) {
+  const body = it.kind === "visit" ? it.text : it.myText;
+  const title = it.kind === "visit" ? it.p.latestPost.title : it.u.title;
+  const titleSet = new Set(keywordsOf(title || ""));
+  const head = String(body || "").slice(0, 40); // 첫머리는 인사인 경우가 많다
+  const rest = String(body || "").slice(40);
+  const words = [...new Set(keywordsOf(rest))].filter((w) => !titleSet.has(w) && !isJunk(w) && (w.length >= 3 || (w.length >= 2 && /[A-Za-z0-9]/.test(w))) && !(head.includes(w) && !rest.includes(w)));
+  return { body: body || "", words };
+}
+
+/** 이 댓글이 쓸 만한가: 뻔한 인사가 없고, 본문에 나온 구체적인 단어를 2개 이상 담았는가 (본문을 못 읽었거나 짧은 글은 인사말 검사만) */
+function isGood(comment, it) {
+  const c = String(comment || "").trim();
+  if (c.length < 20 || BANNED.test(c)) return false;
+  const { body, words } = bodySpecifics(it);
+  if (body.length < 300) return true;
+  return words.filter((w) => c.includes(w)).length >= 2;
+}
+const filterGood = (list, it) => (Array.isArray(list) ? list.map(String).filter((c) => isGood(c, it)) : []).slice(0, 2);
+const leastBad = (list) => (Array.isArray(list) ? list.map(String).filter((c) => c.trim().length >= 20 && !BANNED.test(c)) : []);
+// 기준에 못 미친 경우의 마지막 수단: 인사 문구가 없는 것을 먼저, 그것도 없으면 받은 결과라도 남긴다 (화면이 비는 것보다 낫다)
+const bestEffort = (...lists) => {
+  const all = lists.flatMap((l) => (Array.isArray(l) ? l.map(String).filter((c) => c.trim().length >= 10) : []));
+  const clean = all.filter((c) => !BANNED.test(c));
+  return (clean.length ? clean : all).slice(0, 2);
+};
+
+function buildPrompt(batch, myComments, stricter = false) {
   const tone = myComments.length
     ? `아래는 이 블로거가 실제로 쓴 댓글/답글이야(이모지는 다 지웠어). 말투(어미, 문장 길이, "ㅎㅎ"/"ㅠㅠ" 같은 습관)만 참고하고 이모지는 절대 넣지 마:\n` +
       myComments.slice(0, 12).map((t) => `- ${stripEmoji(t)}`).filter((t) => t !== "-").join("\n")
     : `말투는 친근한 존댓말.`;
 
   const blocks = batch.map((it) => {
+    const hint = stricter ? `\n(꼭 넣을 만한 본문 속 구체적인 단어: ${bodySpecifics(it).words.slice(0, 8).join(", ") || "본문에서 직접 골라"})` : "";
     if (it.kind === "visit") {
       return (
         `[${it.key}] (이웃 글에 남길 댓글)\n` +
         `이웃 닉네임: ${it.p.nickname}\n글 제목: ${it.p.latestPost.title}\n` +
-        `글 본문: ${it.text || "(본문을 못 읽음 — 제목만 참고)"}`
+        `글 본문:\n${it.text || "(본문을 못 읽음 — 제목만 참고)"}${hint}`
       );
     }
     return (
       `[${it.key}] (내 글에 달린 댓글에 다는 답글)\n` +
       `댓글 단 사람: ${it.u.nickname}\n내 글 제목: ${it.u.title}\n` +
-      `내가 그 글에 쓴 내용: ${it.myText || "(본문을 못 읽음 — 제목만 참고)"}\n` +
+      `내가 그 글에 쓴 내용:\n${it.myText || "(본문을 못 읽음 — 제목만 참고)"}\n` +
       (it.u.rootText ? `원댓글: ${it.u.rootText || "(스티커)"}\n` : "") +
-      `상대가 마지막으로 남긴 말: ${it.u.text.trim() || "(스티커/이미지만 남김)"}`
+      `상대가 마지막으로 남긴 말: ${it.u.text.trim() || "(스티커/이미지만 남김)"}${hint}`
     );
   });
 
   return (
     `네이버 블로그 "${require("./config").blogName()}" 운영자가 이웃과 소통할 때 쓸 댓글 예시를 만들어줘. 실제로 올리는 건 본인이 직접 고쳐서 쓴다.\n\n` +
     `${tone}\n\n` +
-    `작업 순서 (반드시 이 순서로 생각해줘):\n` +
-    `1. 먼저 "글 본문"(또는 "내가 그 글에 쓴 내용")을 읽고, 이 글이 진짜 하고 싶은 말이 뭔지 한 문장으로 정리해봐. ` +
-    `단순히 소재(예: "여행 갔다옴", "AI 도구 소개")가 아니라, 그 글의 핵심 주장·결론·깨달음·팁이 뭔지를 파악해.\n` +
-    `2. 댓글/답글은 그 핵심 내용에 반응하는 내용으로 써. 글에 나온 지명·제품명 같은 표면적 단어만 언급하고 끝내지 마.\n\n` +
-    `규칙:\n` +
-    `- 항목마다 예시 2개, 각 1~2문장, 60자 안팎.\n` +
-    `- 이모지·이모티콘·특수 장식 기호(💕, 😊, 🙏, ㅋㅋ 이모지, ".ᐟ.ᐟ" 같은 것) 절대 쓰지 마. 순수 텍스트만.\n` +
-    `- "좋은 글 잘 보고 갑니다", "정리가 깔끔하네요", "유익한 정보 감사해요", "다음 글도 기대할게요", "다음 편도 기대할게요" 같은 ` +
-    `어디에나 붙는 뻔한 인사·클로징 문장 금지. 문장 끝을 그런 식으로 얼버무리지 말고, 마지막까지 그 글의 핵심 내용 얘기로 채워.\n` +
-    `- 그 글에서만 나올 수 있는 구체적인 반응이어야 해 (예: 글쓴이의 결론에 동의/반박하거나, 그 팁을 실제로 써볼 계획을 말하거나, 왜 그 깨달음이 와닿았는지).\n` +
-    `- 최소 1개는 글쓴이가 답하기 쉽게, 글 내용과 관련된 짧은 되물음이나 내 경험을 걸고 의견을 구하는 식으로 끝내줘 ` +
-    `(예: 그 방법을 자기도 겪었는지 묻거나, 자기 경우엔 어땠는지 되묻는 식). 형식적인 물음("다음엔 어떠신가요?" 같은) 말고, 그 글 내용이 아니면 나올 수 없는 질문이어야 해.\n` +
-    `- 과한 칭찬, 광고·홍보 멘트, 내 블로그 홍보 금지.\n` +
-    `- 답글은 상대가 남긴 말에 자연스럽게 반응하되, 내 글의 핵심 내용과 연결해서 답하고, 두 예시의 느낌을 다르게.\n\n` +
+    (stricter ? `★ 지난번 답은 본문의 구체적인 내용이 거의 안 들어간 일반적인 문장이었어. 이번에는 아래 "구체적인 단어"를 문장 속에 자연스럽게 최소 2개 이상 넣어서, 그 글을 실제로 읽은 사람만 쓸 수 있는 댓글로 써줘.\n\n` : "") +
+    `작업 순서 (반드시 이 순서로 생각해줘, 단 생각한 내용은 출력하지 말고 최종 댓글만 출력):\n` +
+    `1. "글 본문"(또는 "내가 그 글에 쓴 내용")을 끝까지 읽고, 글쓴이가 진짜 하고 싶은 말(핵심 주장·결론·깨달음·팁)을 한 문장으로 정리해.\n` +
+    `2. 본문에 실제로 나온 구체적인 디테일을 3~5개 뽑아둬: 고유명사(지명·가게·제품·이름), 숫자(가격·시간·횟수), 방법·순서, 글쓴이가 겪은 일, 인상적인 표현이나 결론.\n` +
+    `3. 그중 1~2개를 골라 댓글 속에서 직접 짚어. 본문에 없는 내용은 절대 지어내지 마.\n\n` +
+    `댓글 형식 (이웃 글에 남기는 댓글):\n` +
+    `- 항목마다 예시 2개, 각 2~3문장, 90~140자.\n` +
+    `- 구조: (글의 내용을 한두 줄로 요약하듯 짚으면서, 본문에 나온 구체적인 디테일을 말한다) + (그에 대한 내 감상: 왜 와닿았는지, 내 경험과 어떻게 이어지는지) + (선택) 그 글 내용에서만 나올 수 있는 짧은 질문.\n` +
+    `- 두 예시는 구조를 다르게: 예시1은 "요약하며 짚기 → 감상", 예시2는 "감상 → 구체적인 디테일 인용 → 짧은 질문".\n` +
+    `- 그냥 소재만 언급하는 문장(예: "제주 여행 잘 봤어요", "AI 도구 소개 좋네요")은 안 돼. 제목에 있는 말만 되풀이하는 것도 안 돼.\n\n` +
+    `금지 (이런 문장은 쓰지 마):\n` +
+    `- "가볼게요", "가보고 싶어요"로 끝나는 문장, "잘 보고 갑니다", "유익한 정보 감사해요", "기대할게요", "응원합니다", "정리가 깔끔하네요" 같이 어느 글에나 붙는 인사.\n` +
+    `- 이모지·이모티콘·특수 장식 기호(💕, 😊, 🙏, ".ᐟ.ᐟ" 같은 것). 순수 텍스트만.\n` +
+    `- 과한 칭찬, 광고·홍보 멘트, 내 블로그 홍보.\n\n` +
+    `형식 예시 (가상의 글이야. 형식과 구체성의 정도만 참고하고 내용은 절대 따라 쓰지 마):\n` +
+    `  가상의 글 요지: 제주 우도에서 땅콩아이스크림을 줄 서서 먹었는데 생각보다 고소했고, 배 시간이 빠듯해서 전기자전거로 한 바퀴 돌았다는 글\n` +
+    `  나쁜 예: "우도 여행 잘 봤어요. 저도 꼭 가볼게요~!"  (소재만 언급하고 끝, 뻔한 인사)\n` +
+    `  좋은 예1: "배 시간에 쫓겨서 전기자전거로 우도를 한 바퀴 돌았다는 대목이 눈에 선했어요. 줄 서서 먹은 땅콩아이스크림이 생각보다 고소했다니, 읽는데 저도 괜히 먹고 싶어졌어요."\n` +
+    `  좋은 예2: "땅콩아이스크림이 기대 이상이었다는 게 의외라 반가웠어요. 저는 우도에서 시간이 모자라 반도 못 봤는데, 전기자전거로 도는 코스는 한 바퀴에 얼마나 걸리던가요?"\n\n` +
+    `답글 형식 (내 글에 달린 댓글에 다는 답글): 항목마다 예시 2개, 각 1~2문장, 70자 안팎. 상대가 남긴 말에 자연스럽게 반응하되 내 글의 핵심 내용과 연결해서 답하고, 두 예시의 느낌을 다르게. 금지 사항은 위와 같아.\n\n` +
     blocks.join("\n\n") +
-    `\n\n대괄호 안의 키를 그대로 써서 다음 JSON 형식으로만 답해 (핵심 내용 분석은 출력하지 말고 최종 댓글만):\n{"<키>": ["예시1", "예시2"], ...}`
+    `\n\n대괄호 안의 키를 그대로 써서 다음 JSON 형식으로만 답해 (분석·메모는 출력하지 말고 최종 댓글만):\n{"<키>": ["예시1", "예시2"], ...}`
   );
 }
 
-module.exports = { generate, getState, readSuggestions };
+module.exports = { generate, getState, readSuggestions, _test: { buildPrompt, fetchPostText, isGood, filterGood, bodySpecifics, BANNED } };
