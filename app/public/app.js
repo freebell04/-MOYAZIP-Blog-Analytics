@@ -1,3 +1,21 @@
+// --- 자동화가 도는 동안 화면 전체를 막는 "로딩 중" 팝업 (다른 버튼을 눌러 꼬이는 것을 막는다) ---
+let busyCount = 0;
+function busyOn(msg, title) {
+  busyCount++;
+  const o = document.getElementById("busy-overlay");
+  if (!o) return;
+  document.getElementById("busy-title").textContent = title || "자동으로 진행 중이에요";
+  document.getElementById("busy-msg").textContent = msg || "끝날 때까지 다른 곳을 누르지 말고 기다려주세요.";
+  o.style.display = "flex";
+}
+function busyOff() {
+  busyCount = Math.max(0, busyCount - 1);
+  const o = document.getElementById("busy-overlay");
+  if (o && !busyCount) o.style.display = "none";
+}
+const setAiButtons = (disabled) => document.querySelectorAll(".handoff-btn, .format-analyze-btn, #open-editor-btn").forEach((b) => (b.disabled = disabled));
+let savedDraftOnce = false; // 이 글을 이미 임시저장했으면, 다시 저장할 땐 새 글 대신 그 글에 이어서 덮어쓴다
+
 const $ = (sel) => document.querySelector(sel);
 
 let selectedItems = [];
@@ -195,10 +213,12 @@ $("#search-btn").addEventListener("click", () => {
 });
 
 $("#open-editor-btn").addEventListener("click", async () => {
-  $("#open-editor-btn").disabled = true;
+  setAiButtons(true);
+  busyOn("블로그 글쓰기 창을 여는 중이에요. 잠시만 기다려주세요.", "블로그 에디터를 여는 중이에요");
   $("#open-editor-status").textContent = "블로그 → 글쓰기 → 템플릿 적용 중입니다... (크롬 창을 확인하세요)";
-  const r = await fetch("/api/open-editor", { method: "POST" }).then((r) => r.json());
-  $("#open-editor-btn").disabled = false;
+  const r = await fetch("/api/open-editor", { method: "POST" }).then((r) => r.json()).catch((e) => ({ error: e.message }));
+  busyOff();
+  setAiButtons(false);
   $("#open-editor-status").textContent = r.error
     ? "오류: " + r.error
     : "완료! 크롬 창에서 템플릿이 적용된 에디터를 확인하고 직접 타이핑해주세요.";
@@ -266,6 +286,8 @@ function setActiveStep(n) {
 $("#save-draft-btn").addEventListener("click", async () => {
   if (!currentPost) return alert("먼저 글을 생성해주세요.");
   $("#save-draft-btn").disabled = true;
+  setAiButtons(true);
+  busyOn("네이버 블로그 글쓰기 창에 본문을 입력하는 중이에요 (1~2분). 크롬 창이 열려 있어도 건드리지 말고 기다려주세요.", "블로그에 글을 쓰는 중이에요");
   $("#save-status").textContent = "네이버 블로그에 본문 임시저장 중입니다... (1~2분 소요)";
   const r = await fetch("/api/save-draft", {
     method: "POST",
@@ -277,10 +299,13 @@ $("#save-draft-btn").addEventListener("click", async () => {
       sections: currentPost.sections,
       imagePaths: Object.values(selectedImagePaths),
       useTemplate: $("#use-template-checkbox").checked,
-      continueDraft: $("#continue-draft-checkbox").checked,
+      continueDraft: savedDraftOnce,
     }),
-  }).then((r) => r.json());
+  }).then((r) => r.json()).catch((e) => ({ error: e.message }));
 
+  busyOff();
+  setAiButtons(false);
+  if (!r.error) savedDraftOnce = true;
   $("#save-draft-btn").disabled = false;
   $("#save-status").textContent = r.error
     ? "오류: " + r.error
@@ -293,8 +318,12 @@ $("#save-draft-btn").addEventListener("click", async () => {
 
 $("#finalize-btn").addEventListener("click", async () => {
   $("#finalize-btn").disabled = true;
+  setAiButtons(true);
+  busyOn("임시글을 열어 목차·요약을 채우는 중이에요 (1~2분). 끝날 때까지 기다려주세요.", "목차와 요약을 채우는 중이에요");
   $("#finalize-status").textContent = "지금 임시글을 열어서 목차·요약을 채우는 중입니다... (1~2분 소요)";
-  const r = await fetch("/api/finalize-toc", { method: "POST" }).then((r) => r.json());
+  const r = await fetch("/api/finalize-toc", { method: "POST" }).then((r) => r.json()).catch((e) => ({ error: e.message }));
+  busyOff();
+  setAiButtons(false);
   $("#finalize-btn").disabled = false;
   $("#finalize-status").textContent = r.error ? "오류: " + r.error : "목차·요약까지 완료! 네이버 블로그에서 최종 확인 후 발행해주세요.";
 });
@@ -333,6 +362,7 @@ const AI_STATUS_TEXT = {
 const FORMAT_CHATTING = (n) =>
   `✅ ${n}에 내 최근 글을 보내 분석을 맡겼어요. 크롬 탭에서 분석이 끝나고 JSON이 나오면 자동으로 저장돼요. (결과가 마음에 안 들면 탭에서 고쳐달라고 하세요)`;
 let aiPollTimer = null;
+let aiBusy = false;
 
 // --- 내 블로그 글 형식 ---
 let formatInfo = null;
@@ -391,9 +421,17 @@ async function pollAiChat() {
   const st = await fetch("/api/ai-chat/status").then((r) => r.json()).catch(() => null);
   if (!st || st.status === "idle" || st.status === "taken") return;
   const isFormat = st.kind === "format";
+  const running = ["opening", "needLogin", "sending", "chatting"].includes(st.status);
+  setAiButtons(running); // 진행 중에는 다른 AI 버튼을 눌러 꼬이지 않게 잠근다
+  const quick = ["opening", "sending"].includes(st.status); // 크롬이 열리고 요청문이 들어가는 짧은 동안만 화면을 막는다
+  if (quick && !aiBusy) { aiBusy = true; busyOn(st.name + " 창을 열고 요청문을 넣는 중이에요. 잠시만 기다려주세요.", "AI 창을 여는 중이에요"); }
+  if (!quick && aiBusy) { aiBusy = false; busyOff(); }
+  if (!running && ["error", "timeout", "closed"].includes(st.status)) $("#handoff-prompt-box").hidden = false; // 자동이 안 됐을 때만 수동 방법을 보여준다
   const line = isFormat ? $("#format-status") : $("#handoff-status");
   if (st.status === "done") {
     clearInterval(aiPollTimer);
+    if (aiBusy) { aiBusy = false; busyOff(); }
+    setAiButtons(false);
     await fetch("/api/ai-chat/taken", { method: "POST" }).catch(() => {});
     if (isFormat) {
       const r = await fetch("/api/format", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(st.result) })
@@ -409,19 +447,21 @@ async function pollAiChat() {
   }
   if (st.status === "error") {
     clearInterval(aiPollTimer);
+    if (aiBusy) { aiBusy = false; busyOff(); }
+    setAiButtons(false);
     line.textContent = "오류: " + st.error + (isFormat ? "" : " — 아래 요청문을 복사해서 직접 붙여넣어도 돼요.");
     return;
   }
   const f = isFormat && st.status === "chatting" ? FORMAT_CHATTING : AI_STATUS_TEXT[st.status];
   if (f) line.textContent = f(st.name) + (st.note ? " " + st.note : "");
-  if (["closed", "timeout"].includes(st.status)) clearInterval(aiPollTimer);
+  if (["closed", "timeout"].includes(st.status)) { clearInterval(aiPollTimer); if (aiBusy) { aiBusy = false; busyOff(); } setAiButtons(false); }
 }
 
 document.querySelectorAll(".handoff-btn").forEach((btn) => {
   btn.addEventListener("click", async () => {
     if (!selectedItems.length) return alert("글감을 하나 이상 선택해주세요.");
     const ai = btn.dataset.ai;
-    document.querySelectorAll(".handoff-btn").forEach((b) => (b.disabled = true));
+    setAiButtons(true);
     $("#handoff-status").textContent = "글감 본문을 모으는 중이에요...";
     const r = await fetch("/api/ai-chat", {
       method: "POST",
@@ -430,14 +470,14 @@ document.querySelectorAll(".handoff-btn").forEach((btn) => {
     })
       .then((r) => r.json())
       .catch((e) => ({ error: e.message }));
-    document.querySelectorAll(".handoff-btn").forEach((b) => (b.disabled = false));
     if (r.error) {
+      setAiButtons(false);
       $("#handoff-status").textContent = "오류: " + r.error;
       return;
     }
-    // 자동 입력이 막히는 경우를 대비해 요청문과 [결과 붙여넣기]도 같이 보여준다
+    // 요청문은 미리 넣어 두고, 자동이 안 됐을 때만 수동 입력칸을 보여준다 (평소에는 헷갈리지 않게 숨김)
     $("#handoff-prompt").value = r.prompt;
-    $("#handoff-prompt-box").hidden = false;
+    $("#handoff-prompt-box").hidden = true;
     clearInterval(aiPollTimer);
     aiPollTimer = setInterval(pollAiChat, 2000);
     pollAiChat();
@@ -599,7 +639,7 @@ async function pollPick() {
   if (st.status === "opening") pickState(i, "⏳ 크롬에 이미지 검색을 여는 중이에요...");
   else if (st.status === "waiting") {
     const err = st.error ? `<br><span class="error">⚠ ${esc(st.error)}</span>` : "";
-    if (st.file) pickState(i, `✅ 복사됐어요 (${esc(st.quality)}) · ${how} · 다른 이미지를 클릭하면 바꿔서 복사돼요${err}`);
+    if (st.file) pickState(i, `✅ 복사됐어요 (${esc(st.quality)}) · ${how} · 다른 이미지로 바꾸려면 크롬의 초록 줄을 누른 뒤 클릭하세요${err}`);
     else if (st.armed) pickState(i, `🟢 준비됐어요! 크롬의 이미지 검색에서 마음에 드는 이미지를 <b>클릭</b>하면 자동으로 복사돼요 (크롬 위쪽에 초록 안내줄이 보여요)${err}`);
     else {
       pickWait[i] = pickWait[i] || Date.now();
@@ -608,7 +648,7 @@ async function pollPick() {
     }
   }
   else if (st.status === "working") pickState(i, "⏳ 이미지를 복사하는 중이에요...");
-  else if (st.status === "copied") pickState(i, `✅ 복사됐어요 (${esc(st.quality)}) · ${how} · 다른 이미지를 클릭하면 바꿔서 복사돼요`);
+  else if (st.status === "copied") pickState(i, `✅ 복사됐어요 (${esc(st.quality)}) · ${how} · 다른 이미지로 바꾸려면 크롬의 초록 줄을 누른 뒤 클릭하세요`);
   else if (st.status === "closed" || st.status === "error") {
     pickState(i, st.file ? `✅ 복사했던 이미지예요 · 누르면 다시 복사돼요` : st.status === "error" ? `<span class="error">⚠ ${esc(st.error)}</span>` : "크롬의 이미지 검색 창이 닫혔어요. 다시 하려면 검색 버튼을 눌러주세요.");
     clearInterval(pickPoll);
@@ -631,6 +671,7 @@ async function copyPicked(i) {
 }
 
 function loadPost(post) {
+  savedDraftOnce = false; // 새 글이면 새로 저장한다
   // 내 형식을 저장해 쓰는 경우엔 모야ZIP 전용 네이버 템플릿을 적용하지 않는다
   if (formatInfo) $("#use-template-checkbox").checked = !!formatInfo.useTemplate;
   post.introLines = post.introLines || [];

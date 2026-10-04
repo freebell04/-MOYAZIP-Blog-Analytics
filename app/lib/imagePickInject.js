@@ -46,6 +46,7 @@
     return null;
   };
   const handler = (e) => {
+    if (window.__nbhLocked) return; // 한 장 복사한 뒤에는 (네이버가 클릭으로 다음 이미지로 넘겨도) 더 복사하지 않는다
     try {
       const f = findImage(e);
       if (!f || !f.src) return;
@@ -57,6 +58,19 @@
   const paint = (bar) => {
     bar.textContent = window.__nbhMsg;
     bar.style.background = window.__nbhOk === false ? "#e03131" : "#03c75a";
+  };
+  // 잠금: 한 장을 복사하면 잠겨서 이후 클릭은 무시된다. 초록 줄을 누르면 풀려서 다른 이미지로 바꿔 고를 수 있다
+  window.__nbhLock = (on) => {
+    window.__nbhLocked = !!on;
+    const bar = document.getElementById("__nbh_bar");
+    if (!bar) return;
+    bar.style.pointerEvents = on ? "auto" : "none";
+    bar.style.cursor = on ? "pointer" : "";
+    bar.title = on ? "눌러서 잠금 해제 (다른 이미지로 바꾸고 싶을 때)" : "";
+    if (on && !bar.__nbhUnlock) {
+      bar.__nbhUnlock = () => { if (window.__nbhLocked) { window.__nbhLock(false); window.__nbhToast("🟩 잠금을 풀었어요 — 바꿀 이미지를 클릭하세요"); } };
+      bar.addEventListener("click", bar.__nbhUnlock);
+    }
   };
   window.__nbhToast = (text, ok) => {
     window.__nbhMsg = text;

@@ -148,6 +148,19 @@ async function handlePick(s, click) {
   Object.assign(s, { status: "copied", file, previewUrl: `/images/${file}`, quality: got.quality, width: w, height: h, seq: (s.seq || 0) + 1, count: (s.count || 0) + 1 });
 }
 
+/** 이미지를 복사할 때마다 붙여넣을 블로그 글쓰기 창을 앞으로 가져온다. 글을 자동으로 입력하는 중에는 건드리지 않는다. */
+async function bringEditorToFront() {
+  try {
+    const be = require("./blogEditor");
+    if (be.isBusy && be.isBusy()) return;
+    const list = await (await fetch(`${session.CDP_URL}/json/list`)).json();
+    const t = list.find((x) => x.type === "page" && /postwrite|PostWriteForm|Redirect=Write/i.test(x.url));
+    if (!t) return;
+    await fetch(`${session.CDP_URL}/json/activate/${t.id}`);
+    session.notifyChrome("블로그 글쓰기 창 — 넣을 자리를 누르고 Ctrl+V");
+  } catch {}
+}
+
 /**
  * 크롬에 새 탭을 열어 검색 결과를 보여주고, 클릭을 지켜본다 (바로 반환 — 진행은 getState()).
  * @param {{chapter:number, query:string, engine?:string, openUrl?:string}} opts   openUrl은 시험용으로만 쓴다
@@ -194,7 +207,8 @@ async function startPick({ chapter, query, engine = "naver", openUrl }) {
           const last = clicks[clicks.length - 1]; // 여러 번 눌렀으면 마지막 것
           try {
             await handlePick(s, last);
-            await client.eval(`window.__nbhToast(${JSON.stringify("✅ 이미지를 복사했어요 (" + s.quality + ") → 네이버 글쓰기 창에서 넣을 자리를 누르고 Ctrl+V · 다른 이미지를 클릭하면 바꿔서 복사돼요")})`).catch(() => {});
+            await client.eval(`window.__nbhLock(true); window.__nbhToast(${JSON.stringify("✅ 복사했어요 (" + s.quality + ") → 블로그 글쓰기 창에서 넣을 자리를 누르고 Ctrl+V · 다른 이미지로 바꾸려면 이 줄을 눌러 잠금을 풀어주세요")})`).catch(() => {});
+            bringEditorToFront(); // 붙여넣을 블로그 글쓰기 창을 바로 앞으로 (자동 입력 중이면 건드리지 않음)
           } catch (e) {
             s.status = "waiting";
             s.error = e.message;

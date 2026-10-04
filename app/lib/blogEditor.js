@@ -966,4 +966,16 @@ async function openTemplateEditor() {
   return { success: true };
 }
 
-module.exports = { saveDraftToNaver, finalizeTocAndSummary, openTemplateEditor, _test: { composeStyledBlocks, writeStyledBody, verifyStyledBody } };
+// 자동 입력이 진행되는 동안에는 다른 기능(이미지 복사 후 창 앞으로 가져오기 등)이 크롬 창을 건드리지 않게 표시한다
+let busyDepth = 0;
+const guarded = (fn) => async (...a) => {
+  busyDepth++;
+  try {
+    return await fn(...a);
+  } finally {
+    busyDepth--;
+  }
+};
+const isBusy = () => busyDepth > 0;
+
+module.exports = { saveDraftToNaver: guarded(saveDraftToNaver), finalizeTocAndSummary: guarded(finalizeTocAndSummary), openTemplateEditor: guarded(openTemplateEditor), isBusy, _test: { composeStyledBlocks, writeStyledBody, verifyStyledBody } };
