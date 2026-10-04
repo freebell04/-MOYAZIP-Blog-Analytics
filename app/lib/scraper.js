@@ -1,5 +1,6 @@
 // 네이버 통합검색에서 뉴스/블로그 결과를 Playwright로 직접 크롤링
-const { chromium } = require("playwright");
+// Playwright는 크고(불러오는 데 0.2초) 켤 때는 필요 없어서, 처음 쓰는 순간에 불러온다
+const chromium = new Proxy({}, { get: (_, k) => { const c = require("playwright").chromium; const v = c[k]; return typeof v === "function" ? v.bind(c) : v; } });
 
 /**
  * @param {string} keyword
@@ -109,14 +110,113 @@ const enc = encodeURIComponent;
 const blogTabUrl = (q, start, latest) =>
   `https://search.naver.com/search.naver?ssc=tab.blog.all&sm=tab_opt&query=${enc(q)}&start=${start}` + (latest ? "&nso=so%3Add%2Cp%3Aall" : "");
 
-async function pageCards(page, url) {
+const FAST_UA = { "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36", "accept-language": "ko-KR,ko;q=0.9" };
+const htmlDecode = (s) =>
+  String(s || "")
+    .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#0?39;|&apos;/g, "'").replace(/&nbsp;/g, " ")
+    .replace(/&#x([0-9a-f]+);/gi, (m, h) => String.fromCodePoint(parseInt(h, 16))).replace(/&#(\d+);/g, (m, d) => String.fromCodePoint(+d));
+const htmlText = (s) => htmlDecode(String(s || "").replace(/<[^>]+>/g, "")).replace(/\s+/g, " ").trim();
+
+/** 검색 결과 HTML에서 카드를 읽는다 (브라우저 없이): [{href, title, snippet}] */
+function parseCardsHtml(html) {
+  const out = [];
+  const re = /<a\s[^>]*?href="([^"]+)"[^>]*>\s*<span[^>]*sds-comps-text-type-headline1[^>]*>([\s\S]*?)<\/span>/g;
+  let m;
+  while ((m = re.exec(html))) {
+    const tail = html.slice(re.lastIndex, re.lastIndex + 3000);
+    const sm = tail.match(/<a\s[^>]*(?:fds-ugc-ellipsis\d|sds-comps-text-type-body\d)[^>]*>([\s\S]*?)<\/a>/);
+    out.push({ href: htmlDecode(m[1]), title: htmlText(m[2]), snippet: sm ? htmlText(sm[1]) : "" });
+  }
+  return out;
+}
+
+const cardCache = new Map(); // 주소 → {at, cards}: 같은 화면을 45초 안에 또 읽지 않는다 (Enter를 연달아 눌러도 가볍게)
+
+// 네이버는 짧은 시간에 요청이 많이 몰리면 (일반 요청을) 403으로 막고, 한 번 막히면 8초쯤 지나야 풀린다.
+// 막힌 뒤에 다시 시도해도 소용이 없어서, 아예 막히지 않게 5초에 10개까지만 보내고 넘치면 잠깐 기다린다. (실제로 막히는 한계는 4~5초에 12개쯤)
+const PACE_MAX = 10;
+const PACE_WINDOW_MS = 5000;
+const recentFast = [];
+let blockedUntil = 0;
+async function pace() {
+  for (;;) {
+    const now = Date.now();
+    while (recentFast.length && now - recentFast[0] > PACE_WINDOW_MS) recentFast.shift();
+    if (recentFast.length < PACE_MAX) { recentFast.push(now); return; }
+    await new Promise((res) => setTimeout(res, recentFast[0] + PACE_WINDOW_MS - now + 20));
+  }
+}
+
+/** 일반 요청(fetch)으로 검색 결과를 읽는다 (0.2~0.7초). 그래도 막히면(403) 빈 배열 → 호출한 쪽이 브라우저로 읽는다 */
+async function fastCards(url, retry = true) {
+  const hit = cardCache.get(url);
+  if (hit && Date.now() - hit.at < 45000) return hit.cards;
+  if (Date.now() < blockedUntil) return []; // 방금 막힌 직후엔 시도하지 않고 바로 브라우저로
+  await pace();
   try {
-    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 20000 });
-    await page.waitForTimeout(1200);
-    return await page.evaluate(PARSE_CARDS);
+    const r = await fetch(url, { headers: FAST_UA, signal: AbortSignal.timeout(8000) });
+    if (r.status === 403) { blockedUntil = Date.now() + 8000; return []; }
+    if (r.status === 429 || r.status >= 500) {
+      if (!retry) return [];
+      await new Promise((res) => setTimeout(res, 700));
+      return fastCards(url, false);
+    }
+    if (!r.ok) return [];
+    const cards = parseCardsHtml(await r.text());
+    if (cards.length) cardCache.set(url, { at: Date.now(), cards });
+    return cards;
   } catch {
     return [];
   }
+}
+
+// 빠른 읽기가 안 될 때만 쓰는 브라우저 (처음 필요한 순간에 한 번만 켠다)
+let fallback = null;
+let fallbackChain = Promise.resolve();
+async function browserCards(url) {
+  const run = async () => {
+    fallback ||= (async () => {
+      const browser = await chromium.launch({ headless: true });
+      return { browser, page: await browser.newPage() };
+    })();
+    const { page } = await fallback;
+    try {
+      await page.goto(url, { waitUntil: "domcontentloaded", timeout: 20000 });
+      await page.waitForTimeout(1200);
+      return await page.evaluate(PARSE_CARDS);
+    } catch {
+      return [];
+    }
+  };
+  const p = fallbackChain.then(run, run); // 브라우저는 하나라서 순서대로
+  fallbackChain = p.catch(() => {});
+  return p;
+}
+async function closeFallback() {
+  const f = fallback;
+  fallback = null;
+  if (f) await f.then((x) => x.browser.close()).catch(() => {});
+}
+
+/** 한 검색 화면의 카드들: 빠른 읽기 → 안 되면 브라우저 */
+async function cardsFor(url) {
+  const fast = await fastCards(url);
+  return fast.length ? fast : browserCards(url);
+}
+
+/** 여러 검색 화면을 동시에(최대 3개) 읽어서 {주소: 카드들}로 돌려준다 */
+async function fetchCardsMany(urls) {
+  const unique = [...new Set(urls)];
+  const result = new Map();
+  let next = 0;
+  const worker = async () => {
+    while (next < unique.length) {
+      const u = unique[next++];
+      result.set(u, await cardsFor(u));
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(3, unique.length) }, worker)); // 네이버가 막지 않게 3개씩
+  return result;
 }
 
 /** @returns {Promise<{popular, namu, review, news, round, exhausted}>} */
@@ -155,33 +255,56 @@ async function searchGrouped(keyword, round = 0, exclude = [], hints = {}) {
   const isNamu = (h) => /^https?:\/\/(www\.)?namu\.wiki\//.test(h);
   const isNews = (h) => !/naver\.com|namu\.wiki/.test(h);
 
-  const browser = await chromium.launch({ headless: true });
   try {
-    const page = await browser.newPage();
     const words = keyword.split(/\s+/).filter((w) => w.length >= 2);
 
-    // 인기글: 관련도순 블로그 탭. 다시 찾을 때마다 다음 페이지. 새 글이 모자라면 최신순으로 채운다.
     // (이웃 글 같은 참고 제목이 있으면 거기서 뽑은 단어를 붙인 보강 검색어를 먼저 쓰고, 모자라면 원래 키워드로 채운다)
     const refTitles = Array.isArray(hints.titles) ? hints.titles.slice(0, 8).map(String) : [];
     const rich = refTitles.length ? enrichKeyword(keyword, refTitles) : keyword;
-    let popular = [];
-    if (rich !== keyword) popular = take(await pageCards(page, blogTabUrl(rich, 1 + 10 * round, false)), isBlog);
-    if (popular.length < GROUP_SIZE) popular = popular.concat(take(await pageCards(page, blogTabUrl(keyword, 1 + 10 * round, false)), isBlog, GROUP_SIZE - popular.length));
-    if (popular.length < GROUP_SIZE) popular = popular.concat(take(await pageCards(page, blogTabUrl(keyword, 1 + 10 * round, true)), isBlog, GROUP_SIZE - popular.length));
+    const w = REVIEW_WORDS[round % REVIEW_WORDS.length];
+    const reviewPage = 1 + 10 * Math.floor(round / REVIEW_WORDS.length);
+    const namuQueries = [keyword, ...words.filter((x) => x !== keyword)].slice(0, 3);
+    const namuUrl = (q) => `https://search.naver.com/search.naver?query=${enc(q + " 나무위키")}`;
+    const urls = {
+      popRich: rich !== keyword ? blogTabUrl(rich, 1 + 10 * round, false) : null,
+      popBase: blogTabUrl(keyword, 1 + 10 * round, false),
+      popLatest: blogTabUrl(keyword, 1 + 10 * round, true),
+      review: blogTabUrl(`${rich} ${w}`, reviewPage, false),
+      reviewFallback: blogTabUrl(`${keyword} 리뷰`, 1 + 10 * round, true),
+      news: `https://search.naver.com/search.naver?ssc=tab.news.all&query=${enc(keyword)}&sort=1&start=${1 + 10 * round}`,
+    };
+    // 꼭 필요한 화면만 먼저 동시에 읽고, 글이 모자랄 때만 추가로 읽는다 (많이 읽으면 네이버가 막는다)
+    const pages = new Map();
+    const load = async (list) => {
+      const r = await fetchCardsMany(list.filter((u) => u && !pages.has(u)));
+      for (const [u, c] of r) pages.set(u, c);
+    };
+    const cards = (u) => (u && pages.get(u)) || [];
+    await load([urls.popRich || urls.popBase, urls.popRich ? urls.popBase : null, namuUrl(namuQueries[0]), urls.review, urls.news]);
 
-    // 나무위키: "키워드 나무위키" 검색에서 namu.wiki 문서만. 검색어를 단어별로도 바꿔가며 문서를 더 모은다.
-    const namuQueries = [keyword, ...words.filter((w) => w !== keyword)];
+    // 인기글: 관련도순 블로그 탭. 다시 찾을 때마다 다음 페이지. 새 글이 모자라면 최신순으로 채운다.
+    let popular = [];
+    if (urls.popRich) popular = take(cards(urls.popRich), isBlog);
+    if (popular.length < GROUP_SIZE) popular = popular.concat(take(cards(urls.popBase), isBlog, GROUP_SIZE - popular.length));
+    if (popular.length < GROUP_SIZE) {
+      await load([urls.popLatest]);
+      popular = popular.concat(take(cards(urls.popLatest), isBlog, GROUP_SIZE - popular.length));
+    }
+
+    // 나무위키: "키워드 나무위키" 검색에서 namu.wiki 문서만. 모자라면 검색어를 단어별로 바꿔가며 문서를 더 모은다.
     let namu = [];
     for (const q of namuQueries) {
-      namu = namu.concat(take(await pageCards(page, `https://search.naver.com/search.naver?query=${enc(q + " 나무위키")}`), isNamu));
+      await load([namuUrl(q)]);
+      namu = namu.concat(take(cards(namuUrl(q)), isNamu));
       if (namu.length >= 4) break;
     }
 
     // 후기·리뷰: 후기/리뷰/내돈내산... 단어를 번갈아 붙여 블로그 탭 검색
-    const w = REVIEW_WORDS[round % REVIEW_WORDS.length];
-    const reviewPage = 1 + 10 * Math.floor(round / REVIEW_WORDS.length);
-    let review = take(await pageCards(page, blogTabUrl(`${rich} ${w}`, reviewPage, false)), isBlog);
-    if (review.length < GROUP_SIZE) review = review.concat(take(await pageCards(page, blogTabUrl(`${keyword} 리뷰`, 1 + 10 * round, true)), isBlog, GROUP_SIZE - review.length));
+    let review = take(cards(urls.review), isBlog);
+    if (review.length < GROUP_SIZE) {
+      await load([urls.reviewFallback]);
+      review = review.concat(take(cards(urls.reviewFallback), isBlog, GROUP_SIZE - review.length));
+    }
     // 제목에 후기·리뷰 말이 들어간 글을 위로
     const isReviewy = (x) => /후기|리뷰|내돈내산|사용기|써보|해보/.test(x.title);
     review.sort((a, b) => Number(isReviewy(b)) - Number(isReviewy(a)));
@@ -189,19 +312,55 @@ async function searchGrouped(keyword, round = 0, exclude = [], hints = {}) {
     // 뉴스: 최신순 뉴스 탭
     // (검색 화면 옆의 관련 없는 기사가 섞이므로, 제목·요약에 검색어 단어가 들어간 것만 남긴다)
     const rel = (it) => (words.length ? words : [keyword]).some((k) => (it.title + " " + (it.snippet || "")).includes(k));
-    const newsCards = (await pageCards(page, `https://search.naver.com/search.naver?ssc=tab.news.all&query=${enc(keyword)}&sort=1&start=${1 + 10 * round}`)).filter(rel);
-    const news = take(newsCards, isNews, 5);
+    const news = take(cards(urls.news).filter(rel), isNews, 5);
 
     return { popular, namu, review, news, round, richKeyword: rich, exhausted: !popular.length && !namu.length && !review.length && !news.length, namuSearchUrl: `https://namu.wiki/Search?q=${enc(keyword)}` };
   } finally {
-    await browser.close();
+    await closeFallback();
   }
+}
+
+/** 네이버 블로그는 모바일 주소로, 그 밖의 글은 <article>/<body>에서 본문 글자만 뽑는다 (브라우저 없이) */
+async function fastArticleText(url) {
+  const blog = String(url).match(/blog\.naver\.com\/(?:PostView\.naver\?(?:[^#]*&)?blogId=([\w-]+)&(?:[^#]*&)?logNo=(\d+)|([\w-]+)\/(\d{6,}))/);
+  if (blog) {
+    const id = blog[1] || blog[3];
+    const no = blog[2] || blog[4];
+    const r = await fetch(`https://m.blog.naver.com/PostView.naver?blogId=${id}&logNo=${no}`, { headers: { "user-agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)" }, signal: AbortSignal.timeout(10000) });
+    const html = await r.text();
+    const i = html.indexOf("se-main-container");
+    if (i < 0) return "";
+    const body = html.slice(i).split(/<div class="(?:post_footer|se_tag|comment)/)[0];
+    return htmlDecode(
+      body
+        .replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>/g, "")
+        .replace(/<(br|\/p|\/div|\/h\d|\/li|\/tr)[^>]*>/gi, "\n")
+        .replace(/<[^>]+>/g, "")
+    )
+      .replace(/^se-main-container">/, "")
+      .split("\n")
+      .map((l) => l.replace(/[ \t]+/g, " ").trim())
+      .filter(Boolean)
+      .join("\n");
+  }
+  const r = await fetch(url, { headers: FAST_UA, redirect: "follow", signal: AbortSignal.timeout(10000) });
+  if (!r.ok || !/text\/html/.test(r.headers.get("content-type") || "")) return "";
+  const html = (await r.text()).replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>|<noscript[\s\S]*?<\/noscript>/g, "");
+  const art = html.match(/<article[\s\S]*?<\/article>/i);
+  return htmlDecode((art ? art[0] : html).replace(/<(br|\/p|\/div|\/h\d|\/li)[^>]*>/gi, "\n").replace(/<[^>]+>/g, ""))
+    .split("\n")
+    .map((l) => l.replace(/[ \t]+/g, " ").trim())
+    .filter(Boolean)
+    .join("\n");
 }
 
 /**
  * 후보 글 링크의 본문을 가져온다 (뉴스/블로그 공용, 대략적인 텍스트 추출).
  */
 async function fetchArticleText(url) {
+  // 먼저 일반 요청으로 본문을 읽어본다 (브라우저를 켜지 않아 0.3~1초). 너무 짧거나 못 읽으면 예전처럼 브라우저로 읽는다.
+  const quick = await fastArticleText(url).catch(() => "");
+  if (quick && quick.length >= 200) return quick.slice(0, 4000);
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage();
   try {
@@ -227,4 +386,4 @@ async function fetchArticleText(url) {
   }
 }
 
-module.exports = { searchNaver, searchGrouped, enrichKeyword, fetchArticleText };
+module.exports = { searchNaver, searchGrouped, enrichKeyword, fetchArticleText, parseCardsHtml };

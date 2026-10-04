@@ -28,6 +28,11 @@ function Fail($msg) { Set-Status -1 "" $msg; exit 1 }
 
 function Test-PortOpen($portNum) {
   try {
+    # 윈도우가 이미 알고 있는 "듣는 중인 포트 목록"에서 찾는다 (연결을 시도하며 0.2초씩 기다리지 않아도 된다)
+    foreach ($l in [System.Net.NetworkInformation.IPGlobalProperties]::GetIPGlobalProperties().GetActiveTcpListeners()) { if ($l.Port -eq $portNum) { return $true } }
+    return $false
+  } catch {}
+  try {
     $client = New-Object System.Net.Sockets.TcpClient
     $result = $client.BeginConnect("127.0.0.1", $portNum, $null, $null)
     $ok = $result.AsyncWaitHandle.WaitOne(200)
@@ -43,6 +48,8 @@ function Get-MyServerProcs {
     Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -and $_.CommandLine.ToLower().Contains($r) -and ($_.CommandLine -like "*server.js*" -or $_.CommandLine -like "*serverloop.ps1*") }
 }
 function Stop-MyServer {
+  # 포트가 닫혀 있고, 이 스크립트 말고 다른 powershell도 node도 없으면 끌 게 없다 → 느린 프로세스 조회를 건너뛴다
+  if (-not (Test-PortOpen $port) -and -not (Get-Process -Name node -ErrorAction SilentlyContinue) -and -not (Get-Process -Name powershell -ErrorAction SilentlyContinue | Where-Object { $_.Id -ne $PID })) { return }
   $procs = Get-MyServerProcs
   if ($procs) {
     $procs | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
@@ -155,6 +162,15 @@ function Stage-UpdateInBackground {
 function Update-Shortcut {
   try {
     $lnkPath = Join-Path $root "블로그 도우미 스튜디오.lnk"
+    $stampFile = Join-Path $app "data\.lnk-ok"
+    $lnkItem = Get-Item -LiteralPath $lnkPath -ErrorAction SilentlyContinue
+    $stamp = if ($lnkItem) { $app + "|" + $lnkItem.LastWriteTimeUtc.Ticks } else { "" }
+    if ($stamp -and (Test-Path -LiteralPath $stampFile) -and ((Get-Content -LiteralPath $stampFile -Raw -ErrorAction SilentlyContinue).Trim() -eq $stamp)) {
+      # 이미 이 위치에 맞게 만들어 둔 바로가기: 예전 실행하기.vbs만 정리하고 끝낸다
+      $oldVbs = Join-Path $root "실행하기.vbs"
+      if (Test-Path -LiteralPath $oldVbs) { Remove-Item -LiteralPath $oldVbs -Force -ErrorAction SilentlyContinue }
+      return
+    }
     $vbs = Join-Path $PSScriptRoot "launch.vbs"
     $want = (Join-Path $app "assets\icon.ico") + ",0"
     # 압축에는 바로가기 대신 상대경로로 도는 실행하기.vbs만 들어 있다 → 처음 켤 때 이 PC·이 위치에 맞는 바로가기를 만든다
@@ -174,6 +190,12 @@ function Update-Shortcut {
     }
     $old = Join-Path $root "실행하기.vbs"
     if (Test-Path -LiteralPath $old) { Remove-Item -LiteralPath $old -Force -ErrorAction SilentlyContinue }
+    # 맞춰 둔 바로가기를 기억해서 다음부터는 건너뛴다
+    $after = Get-Item -LiteralPath $lnkPath -ErrorAction SilentlyContinue
+    if ($after) {
+      New-Item -ItemType Directory -Path (Split-Path $stampFile) -Force -ErrorAction SilentlyContinue | Out-Null
+      Set-Content -LiteralPath $stampFile -Value ($app + "|" + $after.LastWriteTimeUtc.Ticks) -Encoding ASCII -ErrorAction SilentlyContinue
+    }
   } catch {}
 }
 Update-Shortcut

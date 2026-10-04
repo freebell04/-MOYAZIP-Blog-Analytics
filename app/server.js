@@ -62,7 +62,7 @@ async function syncMemoToNotion(rec) {
   const saved = await notion.saveReport(report);
   return { action: "created", url: saved.url, title: saved.title };
 }
-const { buildWorkbook } = require("./lib/statsExcel");
+const buildWorkbook = (...a) => require("./lib/statsExcel").buildWorkbook(...a); // 엑셀 라이브러리(0.2초)는 다운로드할 때만 불러온다
 
 const app = express();
 app.disable("x-powered-by");
@@ -289,11 +289,18 @@ const HANDOFF_GUIDE = [
 
 // 체크한 글감의 본문을 모아 handoff.json으로 저장하고 그 내용을 돌려준다
 async function makeHandoff(keyword, selected, context) {
-    const items = [];
-    for (const it of selected) {
-      const text = await fetchArticleText(it.link).catch(() => "");
-      items.push({ title: it.title, link: it.link, snippet: it.snippet || "", text: (text || "").slice(0, 4000) });
-    }
+    // 글감 본문은 동시에(최대 3개씩) 가져온다 (글감 순서는 그대로)
+    const items = new Array(selected.length);
+    let nextItem = 0;
+    const itemWorker = async () => {
+      while (nextItem < selected.length) {
+        const i = nextItem++;
+        const it = selected[i];
+        const text = await fetchArticleText(it.link).catch(() => "");
+        items[i] = { title: it.title, link: it.link, snippet: it.snippet || "", text: (text || "").slice(0, 4000) };
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(3, selected.length) }, itemWorker));
     const styleGuidePath = path.join(__dirname, "style-guide.md");
     const data = {
       guide: HANDOFF_GUIDE,
@@ -460,7 +467,7 @@ app.get("/api/neighbors", (req, res) => {
 
 app.post("/api/neighbors/refresh", (req, res) => {
   const days = Math.min(Math.max(parseInt(req.body.days, 10) || 7, 1), 30);
-  neighbors.refresh({ days }); // 백그라운드 실행, 진행 상황은 GET /api/neighbors의 state로 확인
+  neighbors.refresh({ days, full: !!req.body.full }); // 백그라운드 실행, 진행 상황은 GET /api/neighbors의 state로 확인. full이면 이웃 목록까지 새로 읽음
   res.json({ started: true });
 });
 
@@ -504,7 +511,7 @@ app.get("/api/stats", (req, res) => {
 });
 
 app.post("/api/stats/refresh", (req, res) => {
-  stats.refresh(); // 백그라운드, 진행 상황은 GET /api/stats의 state
+  stats.refresh({ full: !!(req.body && req.body.full) }); // 백그라운드, 진행 상황은 GET /api/stats의 state. full이면 확정된 값까지 전부 다시 가져옴
   res.json({ started: true });
 });
 

@@ -34,97 +34,147 @@ function rowsOf(json, dataId) {
 let state = { running: false, progress: "", error: null, needLogin: false };
 const getState = () => state;
 
-async function refresh() {
+const API_CONCURRENCY = 6; // 통계 API를 동시에 몇 개까지 부를지 (너무 많으면 네이버가 막을 수 있어 6개로 제한)
+const sleepMs = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/** 동시에 최대 n개까지만 실행하는 제한기: limit(() => 작업) */
+function limiter(n) {
+  let active = 0;
+  const queue = [];
+  const next = () => {
+    while (active < n && queue.length) {
+      const { fn, res, rej } = queue.shift();
+      active++;
+      fn().then(res, rej).finally(() => { active--; next(); });
+    }
+  };
+  return (fn) => new Promise((res, rej) => { queue.push({ fn, res, rej }); next(); });
+}
+
+/**
+ * 통계를 새로 가져온다. 속도를 위해
+ *  - 서로 상관없는 호출은 동시에 보낸다 (최대 6개씩)
+ *  - 호출 사이에 일부러 쉬지 않는다 (실패하면 한 번만 다시 시도)
+ *  - 이미 확정된 값은 이전 결과를 그대로 쓴다: 3일 지난 날짜의 공감·댓글·이웃 증감, 같은 주·달이면 지난주/지난달 분석,
+ *    72시간이 지난 글의 초반 공감·댓글. (오늘·최근 3일·진행 중인 글만 새로 가져온다)
+ * full: true 이면 이전 결과를 쓰지 않고 전부 다시 가져온다.
+ */
+async function refresh({ full = false } = {}) {
   if (state.running) return;
+  const t0 = Date.now();
   state = { running: true, progress: "통계 화면 여는 중...", error: null, needLogin: false };
   let browser, page;
   try {
+    const prev = full ? null : readJson(STATS_PATH, null); // 이전 결과 (확정된 값 재사용)
     const ctx = await session.openVisibleContext();
     browser = ctx.browser;
     page = await ctx.context.newPage();
+    const postsP = fetchMyPosts(); // 내 글 목록(RSS)은 통계 화면을 여는 동안 같이 가져온다
+    postsP.catch(() => {});
     await page.goto(`https://blog.stat.naver.com/blog/daily/daily/cv?blogId=${BLOG_ID}`, { waitUntil: "domcontentloaded" });
     if (!/blog\.stat\.naver\.com/.test(page.url())) {
       state = { running: false, progress: "", error: "네이버에 로그인되어 있지 않아요. [네이버 로그인] 후 다시 불러와주세요.", needLogin: true };
       return;
     }
-    const api = async (p) => {
-      state.progress = `통계 가져오는 중: ${p.split("?")[0]}`;
+
+    const limit = limiter(API_CONCURRENCY);
+    const stats = { calls: 0, done: 0, reused: 0 };
+    const rawFetch = (p) => limit(async () => {
+      stats.calls++;
       const json = await page.evaluate(async (u) => (await fetch(u, { credentials: "include" })).json(), `/api/${p}`);
+      state.progress = `통계 가져오는 중... (${++stats.done}개 완료)`;
+      return json;
+    });
+    const api = async (p) => {
+      let json = await rawFetch(p).catch(() => null);
+      if (!json || json.statusCode !== 200) { await sleepMs(400); json = await rawFetch(p).catch(() => null); } // 일시적으로 실패하면 한 번만 다시 시도
       if (!json || json.statusCode !== 200) throw new Error(`통계 API 오류 (${p.split("?")[0]}): ${(json && json.message) || "응답 없음"}`);
-      await new Promise((r) => setTimeout(r, 300));
       return json;
     };
 
     const now = new Date();
     const today = ymd(now);
     const lastWeek = ymd(addDays(mondayOf(now), -7));
-    const thisMonth1 = ymd(new Date(now.getFullYear(), now.getMonth(), 1));
     const lastMonth1 = ymd(new Date(now.getFullYear(), now.getMonth() - 1, 1));
+    const reuseWeek = !!(prev && prev.lastWeek === lastWeek && prev.week && prev.hour && prev.demo); // 같은 주면 지난주 분석은 그대로
+    const reuseMonth = !!(prev && prev.lastMonth === lastMonth1.slice(0, 7) && prev.month); // 같은 달이면 지난달 분석은 그대로
+
+    const periodData = async (dim, start) => {
+      const [ref, qry, top] = await Promise.all([
+        api(`blog/user/referer/total?timeDimension=${dim}&startDate=${start}`),
+        api(`blog/user/referer/search?timeDimension=${dim}&startDate=${start}`),
+        api(`blog/rank/cvContentPc?timeDimension=${dim}&startDate=${start}`),
+      ]);
+      return {
+        start,
+        referers: rowsOf(ref, "refererTotal").filter((r) => r.referrerDomain).map((r) => ({ name: r.referrerDomain, isSearch: r.referrerSearchEngine === "1", cv: r.cv, share: r.cv_p })),
+        queries: rowsOf(qry, "refererSearch").filter((r) => r.searchQuery).map((r) => ({ query: r.searchQuery, cv: r.cv, share: r.cv_p })),
+        topPosts: rowsOf(top, "rankCv").filter((r) => r.title).map((r) => ({ rank: r.rank, title: r.title, cv: r.cv, logNo: String(r.uri || "").split("/").pop(), createDate: r.createDate })),
+      };
+    };
+
+    // 서로 상관없는 호출을 한꺼번에 (월별 조회수: 네이버가 "이번 달 1일" 기준 요청에 500 오류를 내서 오늘 날짜로 요청하고, 실패하면 지난달 1일로 다시)
+    const [d1j, d2j, weeklyCvJ, weeklyUvJ, monthlyJson, week, month, hourJ, demoJ] = await Promise.all([
+      api(`blog/daily/cv?timeDimension=DATE&startDate=${today}`),
+      api(`blog/daily/cv?timeDimension=DATE&startDate=${ymd(addDays(now, -15))}`),
+      api(`blog/visit/cv?timeDimension=WEEK&startDate=${today}`),
+      api(`blog/visit/uv?timeDimension=WEEK&startDate=${today}`),
+      api(`blog/visit/cv?timeDimension=MONTH&startDate=${today}`).catch(() => api(`blog/visit/cv?timeDimension=MONTH&startDate=${lastMonth1}`)),
+      reuseWeek ? prev.week : periodData("WEEK", lastWeek),
+      reuseMonth ? prev.month : periodData("MONTH", lastMonth1),
+      reuseWeek ? null : api(`blog/user/hour?timeDimension=WEEK&startDate=${lastWeek}`),
+      reuseWeek ? null : api(`blog/user/demoCv?timeDimension=WEEK&startDate=${lastWeek}`),
+    ]);
+    if (reuseWeek) stats.reused += 6;
+    if (reuseMonth) stats.reused += 3;
 
     // 일별 조회수: 한 번에 15일씩 → 30일
-    const d1 = rowsOf(await api(`blog/daily/cv?timeDimension=DATE&startDate=${today}`), "cv");
-    const d2 = rowsOf(await api(`blog/daily/cv?timeDimension=DATE&startDate=${ymd(addDays(now, -15))}`), "cv");
     const dailyMap = {};
-    for (const r of [...d1, ...d2]) dailyMap[r.date] = Number(r.cv) || 0;
+    for (const r of [...rowsOf(d1j, "cv"), ...rowsOf(d2j, "cv")]) dailyMap[r.date] = Number(r.cv) || 0;
     const daily = Object.keys(dailyMap).sort().map((date) => ({ date, cv: dailyMap[date], dow: DOW[new Date(date + "T00:00:00").getDay()] }));
 
-    // 날짜별 공감·댓글·이웃 증감 (통계 '일간 현황' 카드와 같은 값, 하루씩 조회)
-    for (const [i, x] of daily.entries()) {
-      state.progress = `날짜별 공감·댓글 가져오는 중 (${i + 1}/${daily.length})`;
-      const json = await page.evaluate(async (u) => (await fetch(u, { credentials: "include" })).json(), `/api/blog/daily/cv?timeDimension=DATE&startDate=${x.date}`);
-      const dash = ((json.result.statDataList.find((s) => s.dataId === "dashboard") || {}).data || {}).value || {};
-      x.like = Number(dash.dailyLike) || 0;
-      x.comment = Number(dash.dailyComment) || 0;
-      x.relation = Number(dash.dailyRelationDelta) || 0;
-      await new Promise((r) => setTimeout(r, 250));
-    }
+    // 날짜별 공감·댓글·이웃 증감 (통계 '일간 현황' 카드와 같은 값, 하루씩 조회). 3일 넘게 지난 날짜는 이전 값을 그대로 쓴다.
+    const prevDaily = Object.fromEntries(((prev && prev.daily) || []).map((x) => [x.date, x]));
+    const stableBefore = ymd(addDays(now, -3));
+    await Promise.all(
+      daily.map(async (x) => {
+        const old = prevDaily[x.date];
+        if (old && x.date < stableBefore && old.like !== undefined && old.comment !== undefined && old.relation !== undefined) {
+          x.like = old.like; x.comment = old.comment; x.relation = old.relation;
+          stats.reused++;
+          return;
+        }
+        const json = await api(`blog/daily/cv?timeDimension=DATE&startDate=${x.date}`);
+        const dash = ((json.result.statDataList.find((s) => s.dataId === "dashboard") || {}).data || {}).value || {};
+        x.like = Number(dash.dailyLike) || 0;
+        x.comment = Number(dash.dailyComment) || 0;
+        x.relation = Number(dash.dailyRelationDelta) || 0;
+      })
+    );
 
-    const weeklyCv = rowsOf(await api(`blog/visit/cv?timeDimension=WEEK&startDate=${today}`), "cv");
-    const weeklyUv = rowsOf(await api(`blog/visit/uv?timeDimension=WEEK&startDate=${today}`), "uv");
-    const uvByWeek = Object.fromEntries(weeklyUv.map((r) => [r.date, r.total]));
-    const weekly = weeklyCv
+    const uvByWeek = Object.fromEntries(rowsOf(weeklyUvJ, "uv").map((r) => [r.date, r.total]));
+    const weekly = rowsOf(weeklyCvJ, "cv")
       .map((r) => ({ week: r.date, cv: r.total, uv: uvByWeek[r.date] ?? null, friend: r.friend, follow: r.follow, etc: r.etc }))
       .sort((a, b) => a.week.localeCompare(b.week));
-
-    // 월별 조회수: 네이버가 "이번 달 1일"을 기준으로 요청하면 500 오류(Internal service Error)를 낸다 (매달 1일에 통계가 안 불러와졌음).
-    // 오늘 날짜로 요청하고, 오늘이 그 달 1일이라 그것마저 실패하면 지난달 1일로 다시 요청한다 (둘 다 완료된 달까지의 같은 데이터).
-    const monthlyJson = await api(`blog/visit/cv?timeDimension=MONTH&startDate=${today}`).catch(() => api(`blog/visit/cv?timeDimension=MONTH&startDate=${lastMonth1}`));
     const monthly = rowsOf(monthlyJson, "cv")
       .map((r) => ({ month: r.date.slice(0, 7), cv: r.total, friend: r.friend, follow: r.follow, etc: r.etc }))
       .filter((r) => r.cv > 0)
       .sort((a, b) => a.month.localeCompare(b.month));
+    const hour = reuseWeek ? prev.hour : rowsOf(hourJ, "hour").map((r) => ({ hour: Number(r.date), cv: r.cv }));
+    const demo = reuseWeek ? prev.demo : rowsOf(demoJ, "demo").map((r) => ({ age: r.age === "total" ? "전체" : AGE[r.age] || r.age, m: r.m, f: r.f }));
 
-    const periodData = async (dim, start) => ({
-      start,
-      referers: rowsOf(await api(`blog/user/referer/total?timeDimension=${dim}&startDate=${start}`), "refererTotal")
-        .filter((r) => r.referrerDomain)
-        .map((r) => ({ name: r.referrerDomain, isSearch: r.referrerSearchEngine === "1", cv: r.cv, share: r.cv_p })),
-      queries: rowsOf(await api(`blog/user/referer/search?timeDimension=${dim}&startDate=${start}`), "refererSearch")
-        .filter((r) => r.searchQuery)
-        .map((r) => ({ query: r.searchQuery, cv: r.cv, share: r.cv_p })),
-      topPosts: rowsOf(await api(`blog/rank/cvContentPc?timeDimension=${dim}&startDate=${start}`), "rankCv")
-        .filter((r) => r.title)
-        .map((r) => ({ rank: r.rank, title: r.title, cv: r.cv, logNo: String(r.uri || "").split("/").pop(), createDate: r.createDate })),
-    });
-    const week = await periodData("WEEK", lastWeek);
-    const month = await periodData("MONTH", lastMonth1);
+    state.progress = "내 글별 성과 확인 중...";
+    const posts = await postsP;
+    const early = await fetchEarlyPerformance(page, posts, now, prev, api, stats);
 
-    const hour = rowsOf(await api(`blog/user/hour?timeDimension=WEEK&startDate=${lastWeek}`), "hour").map((r) => ({ hour: Number(r.date), cv: r.cv }));
-    const demo = rowsOf(await api(`blog/user/demoCv?timeDimension=WEEK&startDate=${lastWeek}`), "demo").map((r) => ({
-      age: r.age === "total" ? "전체" : AGE[r.age] || r.age,
-      m: r.m,
-      f: r.f,
-    }));
-
-    state.progress = "내 글 목록 가져오는 중...";
-    const posts = await fetchMyPosts();
-    const early = await fetchEarlyPerformance(page, posts, now);
-
-    const data = { updatedAt: new Date().toISOString(), today, lastWeek, lastMonth: lastMonth1.slice(0, 7), daily, weekly, monthly, week, month, hour, demo, posts, early };
+    const data = {
+      updatedAt: new Date().toISOString(), today, lastWeek, lastMonth: lastMonth1.slice(0, 7), daily, weekly, monthly, week, month, hour, demo, posts, early,
+      refresh: { ms: Date.now() - t0, apiCalls: stats.calls, reused: stats.reused, full: !!full },
+    };
     data.analysis = analyze(data);
     fs.writeFileSync(STATS_PATH, JSON.stringify(data, null, 2));
     saveHistory(data);
-    state = { running: false, progress: "완료", error: null, needLogin: false };
+    state = { running: false, progress: "완료", error: null, needLogin: false, ms: Date.now() - t0 };
   } catch (e) {
     state = { running: false, progress: "", error: e.message, needLogin: false };
   } finally {
@@ -152,53 +202,71 @@ const EARLY_DAYS = 3; // "발행 후 3일" = 발행일(D0) ~ D+2, 공감·댓글
 /**
  * 최근 30일 안에 발행한 글(최대 10개)의 초반 성과: 발행 후 3일 조회수(일별) · 공감 · 댓글 + 지금까지 누적.
  * 조회수는 통계 API(게시글별), 공감·댓글 시각은 이웃 소통에서 쓰는 API로 센다.
+ * 글별 조회는 동시에 보내고, 발행 72시간이 지나 값이 확정된 글의 공감·댓글은 이전 결과를 그대로 쓴다.
  */
-async function fetchEarlyPerformance(page, posts, now) {
+async function fetchEarlyPerformance(page, posts, now, prev, api, stats) {
   const neighbors = require("./neighbors");
   const targets = posts.filter((p) => new Date(p.time) >= addDays(now, -30)).slice(0, 10);
-  const out = [];
-  for (const [i, p] of targets.entries()) {
-    state.progress = `글별 초반 성과 (${i + 1}/${targets.length}) 조회수: ${p.title.slice(0, 20)}`;
-    const d0 = new Date(p.date + "T00:00:00");
-    const end = addDays(d0, EARLY_DAYS);
-    const endStr = ymd(end > now ? now : end);
-    const json = await page.evaluate(async (u) => (await fetch(u, { credentials: "include" })).json(), `/api/blog/article/cv?timeDimension=DATE&startDate=${endStr}&contentId=${p.logNo}`);
-    const byDate = Object.fromEntries(rowsOf(json, "cv").map((r) => [r.date, Number(r.cv) || 0]));
-    // summary는 조회한 날 하루치라서, 누적은 dashboard(cvTotal 등)를 쓴다
-    const dash = ((json.result.statDataList.find((s) => s.dataId === "dashboard") || {}).data || {}).value || {};
-    const days = Array.from({ length: EARLY_DAYS + 1 }, (_, k) => {
-      const dd = addDays(d0, k);
-      return dd > now ? null : byDate[ymd(dd)] ?? 0;
-    });
-    out.push({
-      logNo: p.logNo,
-      title: p.title,
-      link: p.link,
-      date: p.date,
-      time: p.time,
-      days, // [D0, D+1, D+2, D+3] 조회수 (아직 안 온 날은 null)
-      complete: now - new Date(p.time) >= EARLY_DAYS * 86400000,
-      totalCv: Number(dash.cvTotal) || 0,
-      totalLike: Number(dash.likeTotal) || 0,
-      totalComment: Number(dash.commentTotal) || 0,
-    });
-    await new Promise((r) => setTimeout(r, 300));
-  }
+  const prevMap = Object.fromEntries(((prev && prev.early && prev.early.posts) || []).map((e) => [e.logNo, e]));
 
-  // 공감·댓글이 발행 후 72시간 안에 몇 개 달렸는지 (m.blog 페이지에서 공감 목록 조회)
-  if (out.length) {
+  // 1) 글별 조회수·누적 (통계 화면에서, 전부 동시에)
+  const out = await Promise.all(
+    targets.map(async (p) => {
+      const d0 = new Date(p.date + "T00:00:00");
+      const end = addDays(d0, EARLY_DAYS);
+      const endStr = ymd(end > now ? now : end);
+      const json = await api(`blog/article/cv?timeDimension=DATE&startDate=${endStr}&contentId=${p.logNo}`);
+      const byDate = Object.fromEntries(rowsOf(json, "cv").map((r) => [r.date, Number(r.cv) || 0]));
+      // summary는 조회한 날 하루치라서, 누적은 dashboard(cvTotal 등)를 쓴다
+      const dash = ((json.result.statDataList.find((s) => s.dataId === "dashboard") || {}).data || {}).value || {};
+      const days = Array.from({ length: EARLY_DAYS + 1 }, (_, k) => {
+        const dd = addDays(d0, k);
+        return dd > now ? null : byDate[ymd(dd)] ?? 0;
+      });
+      return {
+        logNo: p.logNo,
+        title: p.title,
+        link: p.link,
+        date: p.date,
+        time: p.time,
+        days, // [D0, D+1, D+2, D+3] 조회수 (아직 안 온 날은 null)
+        complete: now - new Date(p.time) >= EARLY_DAYS * 86400000,
+        totalCv: Number(dash.cvTotal) || 0,
+        totalLike: Number(dash.likeTotal) || 0,
+        totalComment: Number(dash.commentTotal) || 0,
+      };
+    })
+  );
+
+  // 2) 공감·댓글이 발행 후 72시간 안에 몇 개 달렸는지: 확정된 글은 이전 값을 쓰고, 나머지만 (m.blog 페이지에서 공감 목록 조회) 새로 센다
+  const need = [];
+  for (const e of out) {
+    const old = prevMap[e.logNo];
+    if (old && old.complete && e.complete && old.earlyLike !== undefined && old.earlyComment !== undefined) {
+      e.earlyLike = old.earlyLike;
+      e.earlyComment = old.earlyComment;
+      if (stats) stats.reused++;
+    } else need.push(e);
+  }
+  if (need.length) {
+    state.progress = `글별 공감·댓글 확인 중... (${need.length}개)`;
     await page.goto(`https://m.blog.naver.com/${BLOG_ID}`, { waitUntil: "domcontentloaded" });
     const blogNo = await neighbors.fetchBlogNo(BLOG_ID, out[0].logNo);
-    for (const [i, e] of out.entries()) {
-      state.progress = `글별 초반 성과 (${i + 1}/${out.length}) 공감·댓글: ${e.title.slice(0, 20)}`;
-      const start = new Date(e.time).getTime();
-      const within = (d) => d && new Date(d).getTime() - start <= EARLY_DAYS * 86400000;
-      const likes = await neighbors.fetchSympathies(page, e.logNo).catch(() => []);
-      const comments = (await neighbors.fetchComments(blogNo, e.logNo).catch(() => [])).filter((c) => c.blogId !== BLOG_ID);
-      e.earlyLike = likes.filter((u) => within(u.date)).length;
-      e.earlyComment = comments.filter((c) => within(c.date)).length;
-      await new Promise((r) => setTimeout(r, 500));
-    }
+    let next = 0;
+    const worker = async () => {
+      while (next < need.length) {
+        const e = need[next++];
+        const start = new Date(e.time).getTime();
+        const within = (d) => d && new Date(d).getTime() - start <= EARLY_DAYS * 86400000;
+        const [likes, comments] = await Promise.all([
+          neighbors.fetchSympathies(page, e.logNo).catch(() => []),
+          neighbors.fetchComments(blogNo, e.logNo).catch(() => []),
+        ]);
+        e.earlyLike = likes.filter((u) => within(u.date)).length;
+        e.earlyComment = comments.filter((c) => c.blogId !== BLOG_ID).filter((c) => within(c.date)).length;
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(4, need.length) }, worker)); // 동시에 4개 글씩
   }
   for (const e of out) {
     const d = e.days.slice(0, EARLY_DAYS).map((v) => v || 0);

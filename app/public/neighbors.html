@@ -4,6 +4,10 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>이웃 소통</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700&display=swap" media="print" onload="this.media='all'">
+<noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700&display=swap"></noscript>
 <link rel="stylesheet" href="style.css" />
 <script src="file-open-guard.js"></script>
 <script src="survey-popup.js" defer></script>
@@ -143,6 +147,7 @@
       <option value="14">최근 14일</option>
     </select>
     <button id="refresh-btn" class="btn btn-primary">새로 불러오기</button>
+    <a href="#" id="full-btn" class="muted" style="font-size:12px;margin-left:6px" title="이웃 목록(누가 이웃인지)까지 새로 읽어요. 보통은 방금 읽어 둔 목록을 써서 더 빨라요">이웃 목록까지 전부</a>
     <div id="status" class="status-line" style="margin:0"></div>
   </div>
   <div id="checklist" class="checklist"></div>
@@ -304,17 +309,28 @@ async function load() {
   const busy = r.state.running || (r.suggestState && r.suggestState.running) || watching;
   if (busy && !pollTimer) pollTimer = setInterval(load, 1500);
   if (!busy && pollTimer) { clearInterval(pollTimer); pollTimer = null; }
-  // 마지막 업데이트가 6시간 넘게 지났으면 열 때 자동으로 새로 불러오기
-  if (!autoRefreshTried && !r.state.running && !r.state.error && (!r.data || Date.now() - ts(r.data.updatedAt) > 6 * 3600000)) {
-    autoRefreshTried = true;
-    startRefresh();
-  }
+  S.state = r.state;
+  maybeAutoRefresh();
 }
 
-async function startRefresh() {
+// 실시간에 가깝게: 마지막 업데이트가 3분 넘게 지났으면 (열 때 · 창으로 돌아올 때 · 열어두는 동안 주기적으로) 조용히 새로 가져온다
+const STALE_MS = 3 * 60000;
+function maybeAutoRefresh() {
+  const st = S.state || {};
+  if (st.running || st.error || st.needLogin) return; // 로그인 문제 등은 자동으로 다시 시도하지 않는다
+  if (document.visibilityState !== "visible") return;
+  const stale = !S.data || Date.now() - ts(S.data.updatedAt) > STALE_MS;
+  if (stale && Date.now() - lastAutoAt > STALE_MS) { lastAutoAt = Date.now(); startRefresh(); }
+}
+let lastAutoAt = 0;
+setInterval(() => { if (S.state) renderStatus(S.state); maybeAutoRefresh(); }, 30000); // "N분 전" 표시도 계속 갱신
+document.addEventListener("visibilitychange", maybeAutoRefresh);
+window.addEventListener("focus", maybeAutoRefresh);
+
+async function startRefresh(full = false) {
   await fetch("/api/neighbors/refresh", {
     method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ days: $("#days").value }),
+    body: JSON.stringify({ days: $("#days").value, full: full === true }),
   });
   load();
 }
@@ -327,7 +343,7 @@ function renderStatus(s) {
   else if (s.error) el.innerHTML = `<span class="error">⚠ ${esc(s.error)}</span>`;
   else if (S.suggestState.running) el.textContent = "💡 " + S.suggestState.progress;
   else if (S.suggestState.error) el.innerHTML = `<span class="error">⚠ 추천 문구 만들기 실패: ${esc(S.suggestState.error)}</span>`;
-  else if (S.data) el.textContent = `업데이트 ${ago(S.data.updatedAt)} · 최근 ${S.data.days}일 동안 받은 공감·댓글 기준`;
+  else if (S.data) el.textContent = `업데이트 ${ago(S.data.updatedAt)}${S.data.refreshMs ? ` (${(S.data.refreshMs / 1000).toFixed(1)}초 걸림)` : ""} · 최근 ${S.data.days}일 동안 받은 공감·댓글 기준`;
   else el.textContent = "아직 불러온 데이터가 없어요.";
 }
 
@@ -747,7 +763,8 @@ document.addEventListener("change", (e) => {
   if (e.target.dataset.done) markVisited(e.target.dataset.done, e.target.checked);
 });
 $("#nb-search").addEventListener("input", (e) => { S.nbSearch = e.target.value; renderNeighbors(); });
-$("#refresh-btn").addEventListener("click", startRefresh);
+$("#refresh-btn").addEventListener("click", () => startRefresh());
+$("#full-btn").addEventListener("click", (e) => { e.preventDefault(); startRefresh(true); });
 $("#login-btn").addEventListener("click", async () => {
   $("#login-btn").disabled = true;
   $("#status").textContent = "크롬 창에서 네이버에 로그인해주세요... (로그인되면 자동으로 불러와요)";

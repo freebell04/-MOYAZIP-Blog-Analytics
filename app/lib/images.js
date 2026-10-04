@@ -2,7 +2,8 @@
 const fs = require("fs");
 const path = require("path");
 const https = require("https");
-const { chromium } = require("playwright");
+// Playwright는 크고(불러오는 데 0.2초) 켤 때는 필요 없어서, 처음 쓰는 순간에 불러온다
+const chromium = new Proxy({}, { get: (_, k) => { const c = require("playwright").chromium; const v = c[k]; return typeof v === "function" ? v.bind(c) : v; } });
 const { askClaude, extractJson } = require("./claude");
 
 const IMG_DIR = path.join(__dirname, "..", "data", "images");

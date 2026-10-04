@@ -14,6 +14,7 @@ const DATA_DIR = path.join(__dirname, "..", "data");
 const CACHE_PATH = path.join(DATA_DIR, "neighbors.json");
 const VISITED_PATH = path.join(DATA_DIR, "neighbors-visited.json");
 const SEEN_PATH = path.join(DATA_DIR, "neighbors-seen.json");
+const BUDDY_FRESH_MS = 15 * 60 * 1000; // 이웃 목록을 다시 읽지 않고 쓰는 시간 (15분)
 const BASELINE_NEW_COUNT = 5; // 첫 실행 때 "나를 추가한" 목록 맨 위(최근 추가순) 몇 명을 새 친구로 볼지
 
 /**
@@ -35,9 +36,22 @@ function updateSeen(neighbors, addedMeOrder) {
   fs.writeFileSync(SEEN_PATH, JSON.stringify(next, null, 2));
   for (const n of neighbors) n.firstSeen = next[n.blogId] === "baseline" ? null : next[n.blogId];
 }
-const REQUEST_GAP_MS = 800; // 네이버에 부담 안 주도록 요청 사이 간격
+const REQUEST_GAP_MS = 150; // 같은 목록의 다음 페이지를 넘길 때만 쓰는 짧은 간격 (글마다 쉬던 간격은 없앴다)
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+/** 일시적인 실패(순간적인 네트워크 오류·네이버의 일시 제한)는 잠깐 쉬었다가 다시 시도한다 (최대 3번) */
+async function withRetry(fn, tries = 3) {
+  let lastErr;
+  for (let i = 0; i < tries; i++) {
+    try {
+      return await fn();
+    } catch (e) {
+      lastErr = e;
+      await sleep(400 * (i + 1));
+    }
+  }
+  throw lastErr;
+}
 
 function readJson(p, fallback) {
   try {
@@ -177,7 +191,8 @@ async function fetchSympathies(page, logNo) {
  */
 async function fetchBuddyList(page, listType) {
   const qs = listType ? `&listType=${listType}` : "";
-  await page.goto(`https://m.blog.naver.com/BuddyList.naver?blogId=${BLOG_ID}${qs}`, { waitUntil: "networkidle" });
+  await page.goto(`https://m.blog.naver.com/BuddyList.naver?blogId=${BLOG_ID}${qs}`, { waitUntil: "domcontentloaded" });
+  await page.waitForSelector('[class^="buddy_item"]', { timeout: 8000 }).catch(() => {}); // 첫 항목이 보이면 바로 시작 (네트워크가 잠잠해질 때까지 기다리지 않는다)
   await page.bringToFront().catch(() => {}); // 뒤에 있는 탭이면 무한스크롤이 안 불러와지는 경우가 있음
   // 화면 위의 "46명" 숫자만큼 불러올 때까지 스크롤 (숫자를 못 읽으면 개수가 3번 연속 그대로일 때 멈춤)
   const expected = await page
@@ -186,17 +201,21 @@ async function fetchBuddyList(page, listType) {
       return m ? Number(m[1]) : 0;
     })
     .catch(() => 0);
-  let prev = -1;
+  const countItems = () => page.$$eval('[class^="buddy_item"]', (els) => els.length);
   let stable = 0;
   for (let i = 0; i < 60; i++) {
-    const n = await page.$$eval('[class^="buddy_item"]', (els) => els.length);
+    const n = await countItems();
     if (expected && n >= expected) break;
-    stable = n === prev ? stable + 1 : 0;
-    if (stable >= 3) break;
-    prev = n;
+    if (stable >= 3) break; // 스크롤해도 개수가 3번 연속 그대로면 끝까지 온 것
     await page.evaluate(() => window.scrollTo(0, document.scrollingElement.scrollHeight));
     await page.mouse.wheel(0, 3000);
-    await page.waitForTimeout(800);
+    // 고정으로 0.8초 기다리지 않고, 항목이 늘어나는 순간 바로 다음으로 (최대 1.2초)
+    let grew = false;
+    for (let w = 0; w < 12; w++) {
+      await page.waitForTimeout(100);
+      if ((await countItems()) > n) { grew = true; break; }
+    }
+    stable = grew ? 0 : stable + 1;
   }
   return page.$$eval('[class^="buddy_item"]', (els) =>
     els
@@ -218,10 +237,10 @@ async function fetchBuddyList(page, listType) {
 }
 
 /**
- * 이웃의 글 목록을 병렬(동시 4개)로 가져온다.
+ * 이웃의 글 목록을 병렬(동시 10개)로 가져온다.
  * result[id] = { latest, recent } — recent는 최근 30일 글 최대 10개
  */
-async function fetchLatestPosts(blogIds, onProgress) {
+async function fetchLatestPosts(blogIds, onProgress = () => {}) {
   const result = {};
   let i = 0;
   let done = 0;
@@ -239,10 +258,9 @@ async function fetchLatestPosts(blogIds, onProgress) {
         result[id] = { latest: null, recent: [] };
       }
       onProgress(++done, blogIds.length);
-      await sleep(200);
     }
   };
-  await Promise.all(Array.from({ length: 4 }, worker));
+  await Promise.all(Array.from({ length: Math.min(10, Math.max(1, blogIds.length)) }, worker)); // 동시에 10개씩
   return result;
 }
 
@@ -257,15 +275,26 @@ function getRefreshState() {
  * (옛날 글에 오늘 달린 공감도 잡히도록, 기간은 글 작성일이 아니라 공감/댓글 시점 기준)
  * 오래 걸리므로 백그라운드로 돌리고 진행 상황은 getRefreshState()로 본다.
  */
-async function refresh({ days = 7, postDays = 30, maxPosts = 15 } = {}) {
+async function refresh({ days = 7, postDays = 30, maxPosts = 15, full = false } = {}) {
   if (refreshState.running) return;
+  const t0 = Date.now();
   refreshState = { running: true, progress: "로그인 확인 중...", error: null, needLogin: false };
 
-  let browser, page;
+  let browser, page, buddyPage;
   try {
+    // 이웃 목록(누가 이웃인지)은 자주 안 바뀌니, 15분 안에 읽은 게 있으면 다시 읽지 않고 그대로 쓴다. (full이면 항상 새로 읽음)
+    const cache = full ? null : getCached();
+    const listFresh = !!(cache && Array.isArray(cache.neighbors) && cache.neighbors.length && cache.buddyUpdatedAt && Date.now() - new Date(cache.buddyUpdatedAt).getTime() < BUDDY_FRESH_MS);
+
     const ctx = await session.openVisibleContext();
     browser = ctx.browser;
     page = await ctx.context.newPage();
+    // 내 글 목록(RSS)과 이웃들의 최신 글(RSS)은 로그인 화면을 여는 동안 미리 가져오기 시작한다
+    const allPostsP = fetchRss(BLOG_ID);
+    allPostsP.catch(() => {});
+    const cachedIds = cache && Array.isArray(cache.neighbors) ? cache.neighbors.map((n) => n.blogId) : [];
+    const prefetchP = fetchLatestPosts(cachedIds);
+    prefetchP.catch(() => {});
 
     await page.goto(`https://m.blog.naver.com/${BLOG_ID}`, { waitUntil: "domcontentloaded" });
     const me = await pageFetchJson(page, "/api/current-user").catch(() => null);
@@ -275,36 +304,56 @@ async function refresh({ days = 7, postDays = 30, maxPosts = 15 } = {}) {
       return;
     }
 
+    // 이웃 목록 읽기(스크롤)는 별도 탭에서, 글별 공감·댓글 확인과 동시에 진행한다
+    let buddyP = null;
+    if (!listFresh) {
+      buddyP = (async () => {
+        buddyPage = await ctx.context.newPage();
+        const myAdded = await fetchBuddyList(buddyPage, "");
+        const addedMe = await fetchBuddyList(buddyPage, "addedList");
+        return { myAdded, addedMe };
+      })().then((r) => ({ ok: true, ...r }), (e) => ({ ok: false, e }));
+    }
+
     refreshState.progress = "내 글 목록 가져오는 중...";
     const since = Date.now() - days * 24 * 3600 * 1000;
     const inRange = (d) => !d || new Date(d).getTime() >= since;
     const postSince = Date.now() - Math.max(days, postDays) * 24 * 3600 * 1000;
-    const allPosts = await fetchRss(BLOG_ID);
+    const allPosts = await allPostsP;
     const posts = allPosts.filter((p) => new Date(p.date).getTime() >= postSince).slice(0, maxPosts);
     if (!posts.length) throw new Error(`최근 ${postDays}일 동안 쓴 글이 없습니다.`);
     const blogNo = await fetchBlogNo(BLOG_ID, posts[0].logNo);
 
+    // 글별 공감·댓글: 글 4개씩 동시에, 한 글 안에서도 공감과 댓글을 동시에 가져온다
+    const fetched = new Array(posts.length);
+    let nextPost = 0;
+    let donePosts = 0;
+    const postWorker = async () => {
+      while (nextPost < posts.length) {
+        const idx = nextPost++;
+        const [likes, comments] = await Promise.all([withRetry(() => fetchSympathies(page, posts[idx].logNo)), withRetry(() => fetchComments(blogNo, posts[idx].logNo))]);
+        fetched[idx] = { likes, comments };
+        refreshState.progress = `공감·댓글 확인 중 (${++donePosts}/${posts.length})`;
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(4, posts.length) }, postWorker));
+
+    // 결과는 예전과 똑같은 순서(글 → 공감 → 댓글)로 모은다
     const people = {}; // blogId -> person (최근 N일 안에 공감/댓글 준 사람)
     const person = (blogId, nickname) =>
       (people[blogId] ||= { blogId, nickname, profileImage: "", likes: [], comments: [] });
     const postStats = [];
     const myComments = []; // 추천 댓글 만들 때 참고할 내 말투 샘플
     const unanswered = [];
-
     for (const [i, post] of posts.entries()) {
-      refreshState.progress = `공감·댓글 확인 중 (${i + 1}/${posts.length}) ${post.title}`;
       const postRef = { logNo: post.logNo, title: post.title };
-
-      const likes = await fetchSympathies(page, post.logNo);
+      const { likes, comments } = fetched[i];
       for (const u of likes) {
         if (!inRange(u.date)) continue;
         const p = person(u.blogId, u.nickname);
         p.profileImage ||= u.profileImage;
         p.likes.push({ ...postRef, date: u.date });
       }
-      await sleep(REQUEST_GAP_MS);
-
-      const comments = await fetchComments(blogNo, post.logNo);
       for (const c of comments) {
         if (c.blogId === BLOG_ID) {
           if (c.text.trim()) myComments.push({ text: c.text, date: c.date });
@@ -325,28 +374,40 @@ async function refresh({ days = 7, postDays = 30, maxPosts = 15 } = {}) {
         commentCount: comments.filter((c) => c.blogId !== BLOG_ID).length,
         unansweredCount: open.length,
       });
-      await sleep(REQUEST_GAP_MS);
     }
-
-    refreshState.progress = "이웃 목록 가져오는 중 (내가 추가한)...";
-    const myAdded = await fetchBuddyList(page, "");
-    refreshState.progress = "이웃 목록 가져오는 중 (나를 추가한)...";
-    const addedMe = await fetchBuddyList(page, "addedList");
-    await page.close().catch(() => {});
 
     // 이웃 목록(내가 추가 ∪ 나를 추가 ∪ 최근 소통한 사람)으로 합친다
     const neighbors = {};
     const nb = (blogId) => (neighbors[blogId] ||= { blogId, iAdded: false, addedMe: false, mutual: false });
-    for (const b of myAdded) Object.assign(nb(b.blogId), { nickname: b.nickname, blogName: b.blogName, profileImage: b.profileImage, iAdded: true, mutual: b.button === "서로이웃" });
-    for (const [i, b] of addedMe.entries()) {
-      const n = nb(b.blogId);
-      n.addedMe = true;
-      n.addedMeOrder = i; // 0 = 가장 최근에 나를 추가한 사람
-      if (b.button === "서로이웃") n.mutual = true;
-      if (b.button === "서로이웃" || b.button === "이웃") n.iAdded = true;
-      n.nickname ||= b.nickname;
-      n.blogName ||= b.blogName;
-      n.profileImage ||= b.profileImage;
+    let addedMeIds;
+    let buddyUpdatedAt;
+    if (listFresh) {
+      // 최근에 읽어 둔 이웃 목록을 그대로 쓴다 (이웃 관계 표시만 가져오고, 글·공감 수는 아래에서 새로 계산)
+      refreshState.progress = "이웃 목록은 방금 읽어 둔 걸 써요";
+      for (const c of cache.neighbors.filter((x) => x.iAdded || x.addedMe || x.mutual)) {
+        const n = nb(c.blogId);
+        for (const k of ["nickname", "blogName", "profileImage", "iAdded", "addedMe", "mutual", "addedMeOrder"]) if (c[k] !== undefined) n[k] = c[k];
+      }
+      addedMeIds = Object.values(neighbors).filter((n) => n.addedMe).sort((x, y) => (x.addedMeOrder ?? 1e9) - (y.addedMeOrder ?? 1e9)).map((n) => n.blogId);
+      buddyUpdatedAt = cache.buddyUpdatedAt;
+    } else {
+      refreshState.progress = "이웃 목록 가져오는 중...";
+      const r = await buddyP;
+      if (!r.ok) throw r.e;
+      const { myAdded, addedMe } = r;
+      for (const b of myAdded) Object.assign(nb(b.blogId), { nickname: b.nickname, blogName: b.blogName, profileImage: b.profileImage, iAdded: true, mutual: b.button === "서로이웃" });
+      for (const [i, b] of addedMe.entries()) {
+        const n = nb(b.blogId);
+        n.addedMe = true;
+        n.addedMeOrder = i; // 0 = 가장 최근에 나를 추가한 사람
+        if (b.button === "서로이웃") n.mutual = true;
+        if (b.button === "서로이웃" || b.button === "이웃") n.iAdded = true;
+        n.nickname ||= b.nickname;
+        n.blogName ||= b.blogName;
+        n.profileImage ||= b.profileImage;
+      }
+      addedMeIds = addedMe.map((b) => b.blogId);
+      buddyUpdatedAt = new Date().toISOString();
     }
     for (const p of Object.values(people)) {
       const n = nb(p.blogId);
@@ -361,19 +422,25 @@ async function refresh({ days = 7, postDays = 30, maxPosts = 15 } = {}) {
       if (p) p.relation = n.mutual ? "mutual" : n.iAdded ? "iAdded" : n.addedMe ? "addedMe" : "none";
     }
 
-    // 최신 글: 이웃 목록 전체 (내가 추가 + 나를 추가 + 최근 소통한 사람) — 답방 목록에 모두 보여주기 위해
+    // 최신 글: 이웃 목록 전체 (내가 추가 + 나를 추가 + 최근 소통한 사람). 미리 가져온 것을 쓰고, 처음 보는 사람만 새로 가져온다
+    refreshState.progress = "이웃 최신 글 확인 중...";
     const ids = Object.keys(neighbors);
-    const latest = await fetchLatestPosts(ids, (d, t) => (refreshState.progress = `이웃 최신 글 확인 중 (${d}/${t})`));
+    const latest = await prefetchP.catch(() => ({}));
+    const missing = ids.filter((id) => !latest[id]);
+    if (missing.length) Object.assign(latest, await fetchLatestPosts(missing));
     for (const id of ids) {
-      neighbors[id].latestPost = latest[id].latest;
-      neighbors[id].recentPosts = latest[id].recent;
-      if (people[id]) people[id].latestPost = latest[id].latest;
+      const l = latest[id] || { latest: null, recent: [] };
+      neighbors[id].latestPost = l.latest;
+      neighbors[id].recentPosts = l.recent;
+      if (people[id]) people[id].latestPost = l.latest;
     }
 
-    updateSeen(Object.values(neighbors), addedMe.map((b) => b.blogId));
+    updateSeen(Object.values(neighbors), addedMeIds);
 
-    const cache = {
+    const cacheOut = {
       updatedAt: new Date().toISOString(),
+      buddyUpdatedAt, // 이웃 목록(누가 이웃인지)을 마지막으로 읽은 시각
+      refreshMs: Date.now() - t0,
       days,
       lastPostDate: allPosts[0] ? allPosts[0].date : null,
       posts: postStats,
@@ -382,12 +449,13 @@ async function refresh({ days = 7, postDays = 30, maxPosts = 15 } = {}) {
       unanswered: unanswered.sort((a, b) => new Date(b.date) - new Date(a.date)),
       myComments: myComments.sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 20).map((c) => c.text),
     };
-    fs.writeFileSync(CACHE_PATH, JSON.stringify(cache, null, 2));
-    refreshState = { running: false, progress: "완료", error: null, needLogin: false };
+    fs.writeFileSync(CACHE_PATH, JSON.stringify(cacheOut, null, 2));
+    refreshState = { running: false, progress: "완료", error: null, needLogin: false, ms: Date.now() - t0 };
   } catch (e) {
     refreshState = { running: false, progress: "", error: e.message, needLogin: false };
   } finally {
     if (page) await page.close().catch(() => {}); // 사용자 크롬에 탭이 남지 않게
+    if (buddyPage) await buddyPage.close().catch(() => {});
     if (browser) await browser.close().catch(() => {});
   }
 }

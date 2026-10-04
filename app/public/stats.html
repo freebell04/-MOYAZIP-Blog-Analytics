@@ -4,6 +4,10 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>성과 통계</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700&display=swap" media="print" onload="this.media='all'">
+<noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700&display=swap"></noscript>
 <link rel="stylesheet" href="style.css" />
 <script src="file-open-guard.js"></script>
 <script src="survey-popup.js" defer></script>
@@ -179,6 +183,7 @@
 <section class="card">
   <div class="toolbar">
     <button id="refresh-btn" class="btn btn-primary">통계 새로 불러오기</button>
+    <a href="#" id="full-refresh" class="muted" style="font-size:12px;margin-left:6px" title="이미 확정된 값까지 전부 다시 가져와요 (조금 더 걸려요)">전부 다시</a>
     <a id="excel-btn" class="btn btn-outline" href="/api/stats/excel">📥 엑셀 다운로드</a>
     <button id="notion-week" class="btn btn-outline" data-n="week">📝 노션에 주간 기록</button>
     <button id="notion-month" class="btn btn-outline" data-n="month">📝 노션에 월간 기록</button>
@@ -212,9 +217,27 @@ async function load() {
   const busy = r.state.running;
   if (busy && !pollTimer) pollTimer = setInterval(load, 1500);
   if (!busy && pollTimer) { clearInterval(pollTimer); pollTimer = null; }
-  // 오늘 처음 열었으면 자동으로 불러오기
-  if (!busy && !r.state.error && (!r.data || r.data.today !== todayStr()) && !load.auto) { load.auto = true; refresh(); }
+  S.state = r.state;
+  maybeAutoRefresh();
 }
+
+// 최신 통계 유지: 마지막 업데이트가 10분 넘게 지났으면 (열 때 · 창으로 돌아올 때 · 열어두는 동안 주기적으로) 조용히 새로 가져온다
+const STALE_MS = 10 * 60000;
+let lastAuto = 0;
+function maybeAutoRefresh() {
+  const st = S.state || {};
+  if (st.running || st.error || st.needLogin) return; // 로그인 문제 등은 자동으로 다시 시도하지 않는다
+  if (document.visibilityState !== "visible") return;
+  const stale = !S.data || S.data.today !== todayStr() || Date.now() - new Date(S.data.updatedAt).getTime() > STALE_MS;
+  if (stale && Date.now() - lastAuto > STALE_MS) { lastAuto = Date.now(); refresh(); }
+}
+setInterval(() => { renderStatus(S.state || {}); maybeAutoRefresh(); }, 30000); // "N분 전" 표시도 계속 갱신
+document.addEventListener("visibilitychange", maybeAutoRefresh);
+window.addEventListener("focus", maybeAutoRefresh);
+const agoText = (iso) => {
+  const m = (Date.now() - new Date(iso).getTime()) / 60000;
+  return m < 1 ? "방금" : m < 60 ? `${Math.floor(m)}분 전` : m < 1440 ? `${Math.floor(m / 60)}시간 전` : `${Math.floor(m / 1440)}일 전`;
+};
 const todayStr = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
 
 function renderStatus(st) {
@@ -224,12 +247,15 @@ function renderStatus(st) {
   $("#excel-btn").style.opacity = S.data ? "" : ".5";
   if (st.running) el.textContent = "⏳ " + st.progress;
   else if (st.error) el.innerHTML = `<span class="error">⚠ ${esc(st.error)}</span>`;
-  else if (S.data) el.textContent = `${new Date(S.data.updatedAt).toLocaleString("ko-KR")} 기준`;
+  else if (S.data) {
+    const took = S.data.refresh && S.data.refresh.ms ? ` · ${(S.data.refresh.ms / 1000).toFixed(1)}초 걸림` : "";
+    el.textContent = `${new Date(S.data.updatedAt).toLocaleString("ko-KR")} 기준 (${agoText(S.data.updatedAt)})${took}`;
+  }
   else el.textContent = "아직 불러온 통계가 없어요.";
 }
 
-async function refresh() {
-  await fetch("/api/stats/refresh", { method: "POST" });
+async function refresh(full = false) {
+  await fetch("/api/stats/refresh", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ full: full === true }) });
   load();
 }
 
@@ -769,7 +795,8 @@ document.addEventListener("click", async (e) => {
     key === "refPeriod" ? renderRefs() : renderQueries();
   }
 });
-$("#refresh-btn").addEventListener("click", refresh);
+$("#refresh-btn").addEventListener("click", () => refresh());
+$("#full-refresh").addEventListener("click", (e) => { e.preventDefault(); refresh(true); });
 // ---------------- 노션 기록 ----------------
 let N = { config: null, log: {}, open: false, busy: false };
 
