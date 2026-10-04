@@ -287,3 +287,14 @@ textarea { resize: vertical; margin-top: 4px; }
 .si-alt { font-weight: 600; }
 .si-tag { color: #475569; margin-bottom: 6px; }
 .si-state { font-size: 12.5px; color: #475569; margin-left: 6px; }
+
+/* 챕터별 이미지: 검색 링크·붙여넣기 */
+.si-thumb { width: 180px; flex: none; }
+.si-links { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 8px; }
+.si-link { font-size: 12.5px; border: 1px solid #d0d7de; border-radius: 999px; padding: 4px 10px; color: #334155; text-decoration: none; background: #fff; }
+.si-link:hover { background: #f1f5f9; }
+.si-link.free { border-color: #86e0ad; color: #047857; background: #f0fbf5; }
+.si-paste { margin: 2px 0 4px; }
+.si-input { width: 100%; padding: 9px 11px; border: 1px solid #cbd5e1; border-radius: 10px; font-size: 13px; }
+.si-input:focus { outline: 2px solid #86e0ad; border-color: #86e0ad; }
+.si-state { min-height: 18px; margin: 2px 0 6px; }

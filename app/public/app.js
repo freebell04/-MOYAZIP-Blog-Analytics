@@ -465,59 +465,137 @@ $("#paste-result-btn").addEventListener("click", () => {
 });
 
 // 완성된 글(JSON)을 3단계 미리보기에 넣고, 바로 네이버 글쓰기 창을 열어 채운다 (기존 임시저장 흐름 재사용)
-// ---- 소제목(챕터)별 이미지: AI가 준 img 태그를 미리 보여주고, 링크가 실제로 열리는지 표시한다 ----
+// ---- 소제목(챕터)별 이미지 ----
+// AI가 준 img 태그·검색 키워드를 챕터마다 보여주고, 이미지 검색 링크를 붙여준다.
+// 사용자가 이미지 주소를 붙여넣으면 그 자리에서 바로 사진이 들어가고 img 태그가 만들어진다.
+const IMG_STYLE = "max-width:100%; border-radius:12px; margin: 15px 0;";
+const SEARCH_LINKS = (ko, en) => {
+  const k = encodeURIComponent(ko || en || "");
+  const e = encodeURIComponent((en || ko || "").trim());
+  const dash = encodeURIComponent((en || ko || "").trim().replace(/[\s,]+/g, "-"));
+  return [
+    { label: "🔍 네이버 이미지", url: `https://search.naver.com/search.naver?where=image&query=${k}`, free: false },
+    { label: "🔍 구글 이미지", url: `https://www.google.com/search?tbm=isch&q=${k}`, free: false },
+    { label: "🆓 Unsplash", url: `https://unsplash.com/s/photos/${dash}`, free: true },
+    { label: "🆓 Pexels", url: `https://www.pexels.com/search/${e}/`, free: true },
+    { label: "🆓 Pixabay", url: `https://pixabay.com/images/search/${e}/`, free: true },
+  ];
+};
 function parseImgTag(html) {
-  const get = (name) => (String(html || "").match(new RegExp(name + `\s*=\s*["']([^"']*)["']`, "i")) || [])[1] || "";
+  const get = (name) => (String(html || "").match(new RegExp(name + `\\s*=\\s*["']([^"']*)["']`, "i")) || [])[1] || "";
   return { src: get("src").trim(), alt: get("alt").trim() };
 }
+const buildImgTag = (src, alt) => `<img src="${String(src).replace(/"/g, "&quot;")}" alt="${String(alt || "").replace(/"/g, "&quot;")}" style="${IMG_STYLE}">`;
+/** 붙여넣은 것에서 이미지 주소만 뽑는다: 그냥 주소, <img ...> 태그, 따옴표가 붙은 주소 모두 허용 */
+function extractImageUrl(text) {
+  const t = String(text || "").trim();
+  const fromTag = (t.match(/src\s*=\s*["']([^"']+)["']/i) || [])[1];
+  const u = (fromTag || t).replace(/^["'<(]+|["'>)]+$/g, "").trim();
+  return /^https?:\/\/\S+$/i.test(u) ? u : "";
+}
+
 function renderSectionImages(post) {
   const box = $("#image-candidates");
   box.classList.remove("empty-state");
   const imgs = Array.isArray(post.sectionImages) ? post.sectionImages : [];
   const tags = Array.isArray(post.sectionImageTags) ? post.sectionImageTags : [];
-  if (!imgs.length) {
+  const kws = Array.isArray(post.sectionImageKeywords) ? post.sectionImageKeywords : [];
+  const n = (post.sections || []).length || imgs.length;
+  if (!n) {
     box.classList.add("empty-state");
-    box.textContent = "이 글에는 챕터별 이미지 정보가 없어요. (요청문을 최신으로 보내면 AI가 소제목 아래 이미지를 같이 줘요) 이미지는 네이버 에디터에서 직접 넣어주세요.";
+    box.textContent = "이 글에는 챕터가 없어요.";
     return;
   }
-  const rows = imgs.map((html, i) => {
-    const { src, alt } = parseImgTag(html);
-    const tag = String(tags[i] || "").trim();
+  const topic = (post.tags && post.tags[0]) || $("#keyword").value.trim() || "";
+  // 챕터별 데이터: src/alt(AI가 줬으면), 한국어 검색어, 영어 태그
+  const items = Array.from({ length: n }, (_, i) => {
+    const { src, alt } = parseImgTag(imgs[i] || "");
     const heading = ((post.sectionHeadingLines || [])[i] || []).join(" ").trim() || `${i + 1}번 챕터`;
-    const find = tag ? ` · <a href="https://unsplash.com/s/photos/${encodeURIComponent(tag)}" target="_blank" rel="noopener">이 태그로 직접 찾기 ↗</a>` : "";
-    return `<div class="si-row" data-i="${i}">
-      <div class="si-head">${i + 1}. ${esc(heading)}</div>
+    const tag = String(tags[i] || "").trim();
+    const ko = String(kws[i] || "").trim() || [topic, heading].filter(Boolean).join(" ").slice(0, 40); // AI가 안 줬으면 주제 키워드 + 챕터 제목
+    return { src, alt: alt || heading, heading, tag, ko, ok: src ? "wait" : "none" };
+  });
+  post.sectionImages = items.map((it) => buildImgTag(it.src, it.alt)); // 글 데이터에도 최신 태그를 유지한다
+
+  const rowHtml = (it, i) => `<div class="si-row" data-i="${i}">
+      <div class="si-head">${i + 1}. ${esc(it.heading)}</div>
       <div class="si-body">
-        ${src ? `<img class="si-img" src="${esc(src)}" alt="${esc(alt)}" referrerpolicy="no-referrer">` : `<div class="si-empty">링크 없음</div>`}
+        <div class="si-thumb"></div>
         <div class="si-info">
-          <div class="si-alt">${esc(alt) || '<span class="muted">(설명 없음)</span>'}</div>
-          <div class="si-tag">${tag ? "검색 태그: <b>" + esc(tag) + "</b>" : ""}${find}</div>
-          <div><button type="button" class="btn btn-outline btn-sm si-copy" data-html="${esc(html)}">📋 img 태그 복사</button> <span class="si-state">${src ? "확인 중..." : "⚠ 링크가 없어요 — 위 태그로 찾아보세요"}</span></div>
+          <div class="si-alt">${esc(it.alt)}</div>
+          <div class="si-tag">검색어: <b>${esc(it.ko)}</b>${it.tag ? ` · 영어 태그: <b>${esc(it.tag)}</b>` : ""}</div>
+          <div class="si-links">${SEARCH_LINKS(it.ko, it.tag).map((l) => `<a href="${esc(l.url)}" target="_blank" rel="noopener" class="si-link${l.free ? " free" : ""}" title="${l.free ? "무료로 쓸 수 있는 사진 사이트" : "저작권을 꼭 확인하세요"}">${l.label}</a>`).join("")}</div>
+          <div class="si-paste"><input class="si-input" type="text" placeholder="마음에 드는 이미지를 찾으면 → 우클릭 '이미지 주소 복사' → 여기에 붙여넣기" autocomplete="off" /></div>
+          <div class="si-state"></div>
+          <div><button type="button" class="btn btn-outline btn-sm si-copy">📋 img 태그 복사</button></div>
         </div>
       </div>
     </div>`;
-  });
-  box.innerHTML = `<p class="hint" id="si-summary" style="margin:0 0 8px">소제목 아래에 들어갈 이미지예요. 링크가 열리는지 확인하고 있어요...</p>${rows.join("")}`;
+  box.innerHTML =
+    `<p class="hint" id="si-summary" style="margin:0 0 6px"></p>
+     <p class="hint" style="margin:0 0 10px">🆓 표시는 무료로 써도 되는 사진 사이트예요. 네이버·구글 이미지는 저작권을 꼭 확인하세요. 이미지 주소를 붙여넣으면 바로 들어가요.</p>
+     ${items.map(rowHtml).join("")}
+     <div style="margin:6px 0"><button type="button" class="btn btn-outline btn-sm" id="si-copy-all">📋 모든 챕터의 img 태그 한꺼번에 복사</button></div>`;
+
+  const rowOf = (i) => box.querySelector(`.si-row[data-i="${i}"]`);
   const update = () => {
-    const states = [...box.querySelectorAll(".si-row")].map((r) => (r.querySelector(".si-img") ? (r.querySelector(".si-img").dataset.ok || "wait") : "none"));
-    const n = (k) => states.filter((x) => x === k).length;
-    $("#si-summary").innerHTML = `소제목 아래에 들어갈 이미지 ${states.length}개 — ✅ 열림 <b>${n("ok")}</b> · ⚠ 안 열림 <b>${n("bad")}</b> · 링크 없음 <b>${n("none")}</b>${n("wait") ? " · 확인 중 " + n("wait") : ""}`;
+    const c = (k) => items.filter((x) => x.ok === k).length;
+    $("#si-summary").innerHTML = `소제목 아래에 들어갈 이미지 ${items.length}개 — ✅ 들어감 <b>${c("ok")}</b> · ⚠ 안 열림 <b>${c("bad")}</b> · 비어 있음 <b>${c("none")}</b>${c("wait") ? " · 확인 중 " + c("wait") : ""}`;
   };
-  box.querySelectorAll(".si-img").forEach((img) => {
-    const state = img.closest(".si-row").querySelector(".si-state");
-    img.addEventListener("load", () => { img.dataset.ok = "ok"; state.textContent = "✅ 링크 확인됨"; update(); });
-    img.addEventListener("error", () => { img.dataset.ok = "bad"; img.style.display = "none"; state.innerHTML = "⚠ 링크가 안 열려요 — 태그로 직접 찾아보세요"; update(); });
+  // 한 챕터의 사진·상태를 지금 데이터대로 다시 그린다
+  const paint = (i) => {
+    const it = items[i];
+    const row = rowOf(i);
+    const thumb = row.querySelector(".si-thumb");
+    const state = row.querySelector(".si-state");
+    post.sectionImages[i] = buildImgTag(it.src, it.alt);
+    if (!it.src) {
+      thumb.innerHTML = `<div class="si-empty">비어 있음</div>`;
+      state.textContent = "⚠ 이미지가 아직 없어요 — 위 검색 링크에서 찾아 주소를 붙여넣어 주세요";
+      it.ok = "none";
+      update();
+      return;
+    }
+    it.ok = "wait";
+    state.textContent = "확인 중...";
+    thumb.innerHTML = `<img class="si-img" alt="${esc(it.alt)}" referrerpolicy="no-referrer">`;
+    const img = thumb.querySelector("img");
+    img.addEventListener("load", () => { it.ok = "ok"; state.textContent = "✅ 이미지가 들어갔어요"; update(); });
+    img.addEventListener("error", () => { it.ok = "bad"; img.style.display = "none"; thumb.insertAdjacentHTML("beforeend", `<div class="si-empty">안 열려요</div>`); state.innerHTML = "⚠ 이 주소는 이미지가 안 열려요 — 이미지 위에서 우클릭 → '이미지 주소 복사'로 다시 붙여넣어 주세요"; update(); });
+    img.src = it.src;
+    update();
+  };
+  const apply = (i, value) => {
+    const url = extractImageUrl(value);
+    const row = rowOf(i);
+    if (!url) { row.querySelector(".si-state").innerHTML = `<span class="error">이미지 주소(http…)를 붙여넣어 주세요</span>`; return; }
+    items[i].src = url;
+    row.querySelector(".si-input").value = url;
+    paint(i);
+  };
+  box.querySelectorAll(".si-input").forEach((input) => {
+    const i = Number(input.closest(".si-row").dataset.i);
+    input.value = items[i].src;
+    input.addEventListener("paste", (e) => { // 붙여넣는 순간 바로 적용 (엔터를 누르지 않아도)
+      e.preventDefault();
+      apply(i, (e.clipboardData || window.clipboardData).getData("text"));
+    });
+    input.addEventListener("keydown", (e) => { if (e.key === "Enter") apply(i, input.value); });
+    input.addEventListener("change", () => { if (input.value.trim() !== items[i].src) apply(i, input.value); });
   });
-  update();
+  box.querySelectorAll(".si-copy").forEach((btn) => {
+    const i = Number(btn.closest(".si-row").dataset.i);
+    btn.addEventListener("click", () => copyText(btn, post.sectionImages[i]));
+  });
+  $("#si-copy-all").addEventListener("click", (e) => copyText(e.currentTarget, items.map((it, i) => `<!-- ${i + 1}. ${it.heading} -->\n${post.sectionImages[i]}`).join("\n")));
+  items.forEach((_, i) => paint(i));
 }
-document.addEventListener("click", async (e) => {
-  const b = e.target.closest(".si-copy");
-  if (!b) return;
-  try { await navigator.clipboard.writeText(b.dataset.html); } catch { return; }
-  const old = b.textContent;
-  b.textContent = "복사됨 ✓";
-  setTimeout(() => (b.textContent = old), 1500);
-});
+async function copyText(btn, text) {
+  try { await navigator.clipboard.writeText(text); } catch { return; }
+  const old = btn.textContent;
+  btn.textContent = "복사됨 ✓";
+  setTimeout(() => (btn.textContent = old), 1500);
+}
 
 function loadPost(post) {
   // 내 형식을 저장해 쓰는 경우엔 모야ZIP 전용 네이버 템플릿을 적용하지 않는다
