@@ -139,6 +139,22 @@ function notifyChrome(reason) {
 }
 const getChromeNotice = () => chromeNotice;
 
+/**
+ * 이 프로그램 전용 크롬 프로필을 쥐고 있는데 디버그 포트(9222)는 안 열린 크롬을 정리한다.
+ * (창을 닫아도 크롬이 백그라운드에 남아 있으면, 새로 띄운 크롬이 그 크롬에 합쳐지면서 포트가 열리지 않아
+ *  "됐다 안 됐다" 하고 로그인 창도 안 뜨는 증상이 생긴다.) 사용자의 평소 크롬(다른 프로필)은 건드리지 않는다.
+ */
+function killStaleProfileChrome() {
+  try {
+    const marker = CHROME_PROFILE_DIR.replace(/'/g, "''");
+    require("child_process").execFileSync(
+      "powershell.exe",
+      ["-NoProfile", "-Command", `Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" | Where-Object { $_.CommandLine -and $_.CommandLine.Contains('${marker}') } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }`],
+      { timeout: 15000, windowsHide: true, stdio: "ignore" }
+    );
+  } catch {}
+}
+
 async function ensureDebugChrome() {
   if (await isCdpUp()) {
     await closeHungTabs();
@@ -148,20 +164,25 @@ async function ensureDebugChrome() {
   const chromePath = findChromePath();
   if (!chromePath) throw new Error("크롬 실행 파일을 찾을 수 없습니다 (C:\\Program Files\\Google\\Chrome\\...).");
 
-  const child = spawn(chromePath, [`--remote-debugging-port=${CDP_PORT}`, `--user-data-dir=${CHROME_PROFILE_DIR}`], {
-    detached: true,
-    stdio: "ignore",
-  });
-  child.unref();
-  notifyChrome("크롬이 새로 열렸어요");
-
-  // 포트가 뜰 때까지 최대 10초 대기
-  for (let i = 0; i < 20; i++) {
-    await sleep(500);
-    if (await isCdpUp()) return { alreadyRunning: false };
+  for (let attempt = 0; attempt < 2; attempt++) {
+    if (attempt === 1) {
+      killStaleProfileChrome(); // 첫 시도에 포트가 안 열렸으면, 백그라운드에 남은 크롬을 정리하고 한 번 더
+      await sleep(1200);
+    }
+    const child = spawn(chromePath, [`--remote-debugging-port=${CDP_PORT}`, `--user-data-dir=${CHROME_PROFILE_DIR}`], {
+      detached: true,
+      stdio: "ignore",
+    });
+    child.unref();
+    notifyChrome("크롬이 새로 열렸어요");
+    // 포트가 뜰 때까지 최대 8초 대기
+    for (let i = 0; i < 16; i++) {
+      await sleep(500);
+      if (await isCdpUp()) return { alreadyRunning: false };
+    }
   }
 
-  throw new Error("크롬을 띄웠지만 디버그 포트(9222)가 열리지 않았습니다. 잠시 후 다시 시도해주세요.");
+  throw new Error("크롬을 띄웠지만 디버그 포트(9222)가 열리지 않았습니다. 열려 있는 크롬 창을 모두 닫고 다시 시도해주세요.");
 }
 
 /**
@@ -226,7 +247,14 @@ async function startLoginWatch() {
   let context = browser.contexts()[0];
   if (!context) context = await browser.newContext();
 
-  // 항상 새 탭을 열어서 사용자 눈에 보이게 하고, 맨 앞으로 띄운다
+  // 이미 로그인돼 있으면 탭을 열지 않고 바로 끝낸다 (화면이 불필요하게 뜨거나 연결이 꼬이는 일이 없게)
+  if (await isReallyLoggedIn(context)) {
+    await saveNaverSession(context);
+    await browser.close().catch(() => {});
+    return { alreadyLoggedIn: true };
+  }
+
+  // 로그인이 필요하면 새 탭을 열어서 사용자 눈에 보이게 하고, 맨 앞으로 띄운다
   const page = await context.newPage();
   await page.goto("https://www.naver.com", { waitUntil: "domcontentloaded" }).catch(() => {});
   await page.bringToFront().catch(() => {});
@@ -243,7 +271,7 @@ async function startLoginWatch() {
   // "로그인 상태 유지"만 미리 체크해둔다 (크롬을 껐다 켜도 로그인이 남게). 아이디·비밀번호는 건드리지 않고 사용자가 직접 입력한다
   await page.waitForSelector("#loginStay", { timeout: 4000 }).catch(() => {});
   await page.evaluate(() => { const k = document.querySelector("#loginStay"); if (k && !k.checked) k.click(); }).catch(() => {});
-  notifyChrome("네이버 로그인 화면");
+  notifyChrome("네이버 로그인 화면 — 크롬 맨 앞 탭 '네이버 로그인'에서 로그인해주세요");
 
   watchState = { watching: true, error: null };
   // 완료를 기다리지 않고 백그라운드로 계속 확인 (browser는 CDP 연결이라 닫아도 실제 크롬은 안 닫힘,

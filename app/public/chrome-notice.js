@@ -23,6 +23,7 @@
       '<div style="font-weight:700;font-size:15px;color:#9a3412;margin-bottom:3px">크롬 화면이 열렸어요</div>' +
       '<div style="font-size:13.5px;color:#7c2d12;line-height:1.6">윈도우 <b>탭 창(작업 표시줄)</b>에서 <b>주황빛</b>을 확인해주세요.' +
       (reason ? '<div style="margin-top:2px;color:#c2410c;font-size:12.5px">열린 창: ' + esc(reason) + "</div>" : "") +
+      (/로그인/.test(reason || "") ? '<div style="margin-top:6px;padding:6px 8px;background:#ffedd5;border-radius:8px;color:#9a3412;font-size:12.5px;line-height:1.5">🔑 <b>로그인이 필요해요.</b> 작업 표시줄의 <b>크롬 아이콘(주황색)</b>을 눌러 맨 앞에 열린 탭에서 로그인하면, 여기서 자동으로 이어져요.</div>' : "") +
       "</div></div>" +
       '<button id="cn-close" aria-label="닫기" style="border:0;background:transparent;font-size:20px;line-height:1;cursor:pointer;color:#9a3412;padding:0 2px">×</button>';
     // (인라인 display:flex 때문에 hidden 속성이 안 먹으므로 display로 직접 숨긴다)
@@ -32,7 +33,7 @@
     box.title = "눌러서 닫기";
     box.onclick = hide; // × 버튼이든 카드 어디든 누르면 닫힌다
     clearTimeout(hideTimer);
-    hideTimer = setTimeout(hide, 25000); // 25초 뒤 저절로 닫힘 (다시 열리면 또 뜬다)
+    hideTimer = setTimeout(hide, /로그인/.test(reason || "") ? 90000 : 25000); // 로그인 안내는 90초, 그 밖엔 25초 뒤 저절로 닫힘 (다시 열리면 또 뜬다)
   }
 
   async function poll() {
