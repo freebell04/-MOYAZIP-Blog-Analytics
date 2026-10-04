@@ -417,6 +417,20 @@ $("#format-reset-btn").addEventListener("click", async () => {
   loadFormat();
 });
 
+document.addEventListener("click", async (e) => {
+  if (e.target.id === "ai-popup-go") {
+    const r = await fetch("/api/ai-chat/focus", { method: "POST" }).then((x) => x.json()).catch(() => ({}));
+    if (r.error) $("#handoff-status").textContent = "오류: " + r.error;
+  } else if (e.target.id === "ai-popup-stop") {
+    await fetch("/api/ai-chat/stop", { method: "POST" }).catch(() => {});
+    clearInterval(aiPollTimer);
+    $("#ai-popup").style.display = "none";
+    if (aiBusy) { aiBusy = false; busyOff(); }
+    setAiButtons(false);
+    $("#handoff-status").textContent = "대화 지켜보기를 멈췄어요. 다시 하려면 AI 버튼을 눌러주세요.";
+  }
+});
+
 async function pollAiChat() {
   const st = await fetch("/api/ai-chat/status").then((r) => r.json()).catch(() => null);
   if (!st || st.status === "idle" || st.status === "taken") return;
@@ -426,6 +440,12 @@ async function pollAiChat() {
   const quick = ["opening", "sending"].includes(st.status); // 크롬이 열리고 요청문이 들어가는 짧은 동안만 화면을 막는다
   if (quick && !aiBusy) { aiBusy = true; busyOn(st.name + " 창을 열고 요청문을 넣는 중이에요. 잠시만 기다려주세요.", "AI 창을 여는 중이에요"); }
   if (!quick && aiBusy) { aiBusy = false; busyOff(); }
+  // 대화 중에는 "AI에서 대화 나눠보세요" 안내 창을 띄우고, 완성(결과 도착)·오류·종료 때 자동으로 닫는다
+  const pop = $("#ai-popup");
+  if (pop) {
+    if (st.status === "chatting") { $("#ai-popup-title").textContent = isFormat ? `${st.name}에서 분석 결과를 기다리는 중이에요` : `${st.name}에서 대화 나눠보세요`; pop.style.display = "block"; }
+    else pop.style.display = "none";
+  }
   if (!running && ["error", "timeout", "closed"].includes(st.status)) $("#handoff-prompt-box").hidden = false; // 자동이 안 됐을 때만 수동 방법을 보여준다
   const line = isFormat ? $("#format-status") : $("#handoff-status");
   if (st.status === "done") {

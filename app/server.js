@@ -345,6 +345,18 @@ app.post("/api/ai-chat", async (req, res) => {
   }
 });
 app.get("/api/ai-chat/status", (req, res) => res.json(aiChat.getState()));
+app.post("/api/ai-chat/focus", async (req, res) => {
+  try {
+    await aiChat.focus();
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+app.post("/api/ai-chat/stop", (req, res) => {
+  aiChat.stop();
+  res.json({ ok: true });
+});
 
 // --- 내 블로그 글 형식: 최근 글로 AI에게 분석받아 저장하고, 초안 요청문에 반영 ---
 app.get("/api/format", (req, res) => res.json(blogFormat.describe()));

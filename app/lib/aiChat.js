@@ -234,4 +234,17 @@ function markTaken() {
   if (state.status === "done") state.status = "taken";
 }
 
-module.exports = { start, getState, markTaken, SITES, findReusableTab };
+/** 대화 중인 AI 탭을 앞으로 가져온다 */
+async function focus() {
+  if (!state.targetId) throw new Error("열려 있는 AI 대화가 없어요.");
+  await fetch(`${session.CDP_URL}/json/activate/${state.targetId}`);
+  session.notifyChrome(`${state.name} 채팅 창`);
+}
+
+/** 지켜보기를 멈춘다 (탭은 그대로 둠) */
+function stop() {
+  if (state.client) state.client.close();
+  state = { status: "idle" };
+}
+
+module.exports = { start, getState, markTaken, focus, stop, SITES, findReusableTab };
