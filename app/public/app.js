@@ -154,7 +154,7 @@ async function runSearch(keyword, round) {
   const r = await fetch("/api/search", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ keyword, round, exclude, ctx: searchCtx ? { titles: [searchCtx.title, ...(searchCtx.refs || []).map((x) => x.title)] } : undefined }),
+    body: JSON.stringify({ keyword, round, exclude, ctx: searchCtx && !searchCtx.resolved ? { titles: [searchCtx.title, ...(searchCtx.refs || []).map((x) => x.title)] } : undefined }),
   })
     .then((r) => r.json())
     .catch((e) => ({ error: e.message }));
@@ -482,13 +482,26 @@ function loadPost(post) {
   $("#save-draft-btn").click();
 }
 
+document.addEventListener("click", (e) => {
+  const b = e.target.closest(".chip-q");
+  if (!b || !searchCtx) return;
+  const q = b.dataset.q;
+  $("#keyword").value = q;
+  searchCtx = { ...searchCtx, keyword: q };
+  renderCtxBox();
+  runSearch(q, 0);
+});
+
 function renderCtxBox() {
   const box = $("#ctx-box");
   if (!searchCtx) { box.hidden = true; box.innerHTML = ""; return; }
   const qs = (searchCtx.questions || []).map((q) => `<li>${esc(q)}</li>`).join("");
   box.hidden = false;
   box.innerHTML = `<b>💡 이 주제로 쓸 글: ${esc(searchCtx.title)}</b>
-    <p class="hint" style="margin:4px 0">이웃 글 제목에서 뽑은 단어를 붙여 더 구체적으로 찾고 있어요: <b id="ctx-rich">${esc(searchCtx.keyword)}</b></p>
+    ${searchCtx.resolved
+      ? `<p class="hint" style="margin:4px 0">🔎 이 주제가 잘 나오는 검색어로 찾았어요: <b id="ctx-rich">${esc(searchCtx.keyword)}</b>${searchCtx.why ? ` <span class="muted">· ${esc(searchCtx.why)}</span>` : ""}</p>
+         ${(searchCtx.candidates || []).filter((q) => q !== searchCtx.keyword).length ? `<p style="margin:2px 0 6px"><small class="muted">다른 검색어로 찾기: </small>${(searchCtx.candidates || []).filter((q) => q !== searchCtx.keyword).slice(0, 5).map((q) => `<button type="button" class="chip-q" data-q="${esc(q)}">${esc(q)}</button>`).join(" ")}</p>` : ""}`
+      : `<p class="hint" style="margin:4px 0">이웃 글 제목에서 뽑은 단어를 붙여 더 구체적으로 찾고 있어요: <b id="ctx-rich">${esc(searchCtx.keyword)}</b></p>`}
     ${qs ? `<p style="margin:6px 0 2px"><b>이 글에서 답해주면 좋은 질문</b></p><ul>${qs}</ul>` : ""}
     <p class="hint" style="margin:4px 0 0">이 방향과 질문은 AI에게 글을 부탁할 때 요청문에 같이 들어가요.</p>`;
 }

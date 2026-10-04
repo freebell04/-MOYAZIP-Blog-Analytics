@@ -622,12 +622,23 @@ async function loadTrends() {
   const write = (i) => `<a class="btn btn-primary" style="font-size:13px;padding:6px 12px" data-ctx="${esc(ctxOf(i))}" href="/?keyword=${encodeURIComponent(i.keyword)}">✍️ 이 주제로 글감 찾기</a>`;
   $("#trends-ideas").innerHTML = t.ideas.length
     ? t.ideas
-        .map(
-          (i) => `<div class="tr-card"><h4>${esc(i.title)}</h4><p>${esc(i.reason)}</p>
-      ${(i.questions || []).length ? `<p style="margin:0 0 4px"><b>사람들이 궁금해할 질문</b></p><ul class="ex" style="color:var(--ink)">${i.questions.map((q) => `<li>${esc(q)}</li>`).join("")}</ul>` : ""}
-      ${i.examples && i.examples.length ? `<ul class="ex">${i.examples.map((e) => `<li><a href="${esc(e.link)}" target="_blank" rel="noopener">${esc(e.nick)} · ${esc(e.title)}</a></li>`).join("")}</ul>` : ""}
-      ${i.keyword ? write(i) : ""}</div>`
-        )
+        .map((i) => {
+          const sents = String(i.reason || "").split(/(?<=[요다)])\.\s+/).map((x) => x.trim()).filter(Boolean);
+          const evidence = sents.length > 1 ? sents.slice(0, -1) : sents;
+          const why = sents.length > 1 ? sents[sents.length - 1] : "";
+          const qs = (i.questions || []).map((q) => `<li>${esc(q)}</li>`).join("");
+          const ex = (i.examples || []).map((e) => `<li><a href="${esc(e.link)}" target="_blank" rel="noopener">${esc(e.nick)} · ${esc(e.title)}</a></li>`).join("");
+          return `<div class="tr-card"><div style="font-size:11.5px;font-weight:700;color:var(--green-dark)">✍️ 이런 주제로 써보세요</div>
+      <h4 style="margin:2px 0 8px">${esc(i.title)}</h4>
+      <div style="background:#f6fbf8;border:1px solid #d5efe0;border-radius:10px;padding:9px 12px;margin-bottom:8px">
+        <div style="font-size:11.5px;font-weight:700;color:#475569;margin-bottom:3px">📊 근거</div>
+        <ul style="margin:0;padding-left:18px;line-height:1.6">${evidence.map((t) => `<li>${esc(t)}</li>`).join("")}</ul>
+        ${why ? `<p style="margin:6px 0 0;color:#475569">💡 ${esc(why)}</p>` : ""}
+      </div>
+      ${qs ? `<details style="margin:6px 0"><summary style="cursor:pointer;font-weight:600;color:#475569">💬 사람들이 궁금해할 질문 (${(i.questions || []).length})</summary><ul class="ex" style="color:var(--ink)">${qs}</ul></details>` : ""}
+      ${ex ? `<details style="margin:6px 0"><summary style="cursor:pointer;font-weight:600;color:#475569">👥 참고한 이웃 글 (${(i.examples || []).length})</summary><ul class="ex">${ex}</ul></details>` : ""}
+      ${i.keyword ? write(i) : ""}</div>`;
+        })
         .join("")
     : '<p class="hint">아직 여러 이웃이 같이 쓰는 주제가 없어요. 이웃 글이 더 쌓이면 다시 확인해보세요.</p>';
   const chip = (label, n, kw, mine) => `<a class="chip${mine ? " mine" : ""}" href="/?keyword=${encodeURIComponent(kw)}" title="이 키워드로 글감 찾기">${esc(label)}<b>${n}명</b></a>`;
@@ -641,9 +652,22 @@ function setTab(tab) {
   render();
 }
 
-document.addEventListener("click", (e) => {
+// '이 주제로 글감 찾기': 바로 이동하지 않고, 이 주제가 잘 나오는 검색어를 먼저 찾은 뒤 글감 찾기 화면으로 넘어간다
+document.addEventListener("click", async (e) => {
   const w = e.target.closest("[data-ctx]");
-  if (w) { try { localStorage.setItem("nbh.ctx", w.dataset.ctx); } catch {} } // 글감 찾기 화면이 이어받는다
+  if (!w) return;
+  e.preventDefault();
+  if (w.dataset.busy) return;
+  w.dataset.busy = "1";
+  w.textContent = "🔎 이 주제가 잘 나오는 검색어 찾는 중...";
+  let ctx = {};
+  try { ctx = JSON.parse(w.dataset.ctx); } catch {}
+  const r = await fetch("/api/topic-query", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ keyword: ctx.keyword, title: ctx.title, refs: ctx.refs }) }).then((x) => x.json()).catch(() => null);
+  if (r && r.query) { ctx.topic = ctx.keyword; ctx.keyword = r.query; ctx.candidates = (r.candidates || []).map((c) => c.q); ctx.why = r.reason; ctx.resolved = true; }
+  try { localStorage.setItem("nbh.ctx", JSON.stringify(ctx)); } catch {}
+  location.href = "/?keyword=" + encodeURIComponent(ctx.keyword || "");
+});
+document.addEventListener("click", (e) => {
   const tab = e.target.closest(".tab");
   if (tab) return setTab(tab.dataset.tab);
 

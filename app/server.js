@@ -96,6 +96,17 @@ app.post("/api/license", (req, res) => {
 });
 // --- 크롬 창이 열렸을 때 화면에 띄우는 안내용 신호 ---
 app.get("/api/chrome-notice", (req, res) => res.json(require("./lib/session").getChromeNotice()));
+// --- 추천 주제가 잘 나오는 검색어 찾기 (이 주제로 글감 찾기 버튼이 누르기 직전에 부른다) ---
+app.post("/api/topic-query", async (req, res) => {
+  try {
+    const b = req.body || {};
+    if (!b.keyword) return res.status(400).json({ error: "keyword가 필요해요." });
+    const { bestQuery } = require("./lib/topicQuery");
+    res.json(await bestQuery({ keyword: String(b.keyword).slice(0, 80), title: String(b.title || "").slice(0, 200), refs: Array.isArray(b.refs) ? b.refs.slice(0, 8) : [] }));
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
 // --- 체험 후기 설문 안내 (3일째·7일째·마지막 날) ---
 const survey = require("./lib/survey");
 const surveyStatus = () => survey.pending(license.status(), process.env.NBH_SURVEY_TODAY || license.today());
