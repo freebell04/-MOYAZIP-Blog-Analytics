@@ -117,7 +117,12 @@ async function generate(keys, { force = false } = {}) {
         state.progress = `글 읽는 중 (${i + 1}/${items.length})`;
         if (it.kind === "visit") it.text = await fetchPostText(it.p.blogId, it.p.latestPost.logNo).catch(() => "");
         // 답글도 "내 글에 뭐라고 썼었는지"를 알아야 댓글이 전하려던 말에 제대로 반응할 수 있다
-        if (it.kind === "reply") it.myText = await fetchPostText(require("./config").blogId(), it.u.logNo).catch(() => "");
+        if (it.kind === "reply") {
+          it.myText = await fetchPostText(require("./config").blogId(), it.u.logNo).catch(() => "");
+          // 질문·어려움을 말한 댓글이면 프로그램이 미리 찾아둔 답변 근거를 같이 넘긴다
+          const h = require("./helpAnswer").readHelp()[require("./helpAnswer").helpKey(it.u)];
+          if (h) it.help = h;
+        }
       }
       const batches = [];
       for (let b = 0; b < items.length; b += BATCH_SIZE) batches.push(items.slice(b, b + BATCH_SIZE));
@@ -236,7 +241,12 @@ function buildPrompt(batch, myComments, stricter = false) {
       `댓글 단 사람: ${it.u.nickname}\n내 글 제목: ${it.u.title}\n` +
       `내가 그 글에 쓴 내용:\n${it.myText || "(본문을 못 읽음 — 제목만 참고)"}\n` +
       (it.u.rootText ? `원댓글: ${it.u.rootText || "(스티커)"}\n` : "") +
-      `상대가 마지막으로 남긴 말: ${it.u.text.trim() || "(스티커/이미지만 남김)"}${hint}`
+      `상대가 마지막으로 남긴 말: ${it.u.text.trim() || "(스티커/이미지만 남김)"}` +
+      (it.help
+        ? `
+★ 이 댓글은 질문/어려움이야. 아래 "찾아둔 근거"에 있는 방법·숫자로 질문에 직접 답해줘 (근거에 없는 내용은 지어내지 마). 근거: ${it.help.facts.map((f) => f.text).join(" / ") || "(못 찾음 — 어디서 막혔는지 되묻기)"}`
+        : "") +
+      hint
     );
   });
 
@@ -287,4 +297,4 @@ function buildPrompt(batch, myComments, stricter = false) {
   );
 }
 
-module.exports = { generate, getState, readSuggestions, _test: { buildPrompt, fetchPostText, isGood, filterGood, bodySpecifics, BANNED } };
+module.exports = { generate, getState, readSuggestions, fetchPostTextOf: fetchPostText, _test: { buildPrompt, fetchPostText, isGood, filterGood, bodySpecifics, BANNED } };

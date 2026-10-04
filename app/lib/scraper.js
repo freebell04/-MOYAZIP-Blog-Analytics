@@ -386,4 +386,4 @@ async function fetchArticleText(url) {
   }
 }
 
-module.exports = { searchNaver, searchGrouped, enrichKeyword, fetchArticleText, parseCardsHtml };
+module.exports = { searchNaver, searchGrouped, enrichKeyword, fetchArticleText, parseCardsHtml, fastCards, blogTabUrl, fastArticleText };

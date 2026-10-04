@@ -257,7 +257,7 @@
 const $ = (s) => document.querySelector(s);
 const BLOG = "https://blog.naver.com/";
 let S = {
-  data: null, visited: {}, blogId: "", suggestions: {}, suggestState: {}, liked: {}, likeWatch: {},
+  data: null, visited: {}, blogId: "", suggestions: {}, suggestState: {}, help: {}, helpState: {}, liked: {}, likeWatch: {},
   tab: "visit", visitCat: "realtime", visitFilter: "todo", visitSort: "score",
   nbFilter: "all", nbSearch: "", nbSort: "activity", nbDir: -1,
 };
@@ -296,17 +296,36 @@ const isDone = (p) => p.latestPost ? S.visited[p.blogId] === p.latestPost.logNo 
 const isFresh = (post) => post && Date.now() - ts(post.date) < 24 * 3600000;
 
 // ---------- data ----------
+let helpAsked = null;
+const helpKey = (c) => `help:${c.logNo}:${c.blogId}:${c.date}`;
+
+/** 질문 댓글에 프로그램이 찾아 만든 답변 (있을 때만) */
+function helpBlock(c) {
+  const h = S.help[helpKey(c)];
+  if (!h) return "";
+  const src = (h.sources || []).slice(0, 2).map((s) => `<a href="${esc(s.link)}" target="_blank" rel="noopener">${esc(s.title.slice(0, 28))}</a>`).join(" · ");
+  return `<div class="sugg">
+    <div class="sugg-head">❓ 질문 답변 ${h.found ? '<span class="ai-tag">찾아봄</span>' : ''}<small>${h.found ? `'${esc(h.query)}'로 찾은 내용${src ? " · 참고: " + src : " (내 글 기준)"}` : "근거를 못 찾아서 되묻는 답이에요"}</small></div>
+    ${h.list.map((t) => `<div class="sugg-item"><span>${esc(t)}</span><button class="copy-btn" data-copy="${esc(t)}">복사</button></div>`).join("")}
+  </div>`;
+}
+
 async function load() {
   const r = await fetch("/api/neighbors").then((r) => r.json());
   if (r.data && !r.data.unanswered) r.data = null; // 예전 형식 캐시는 버리고 새로 불러온다
-  Object.assign(S, { data: r.data, visited: r.visited, blogId: r.blogId, suggestions: r.suggestions || {}, suggestState: r.suggestState || {}, liked: r.liked || {}, likeWatch: r.likeWatch || {} });
+  Object.assign(S, { data: r.data, visited: r.visited, blogId: r.blogId, suggestions: r.suggestions || {}, suggestState: r.suggestState || {}, help: r.help || {}, helpState: r.helpState || {}, liked: r.liked || {}, likeWatch: r.likeWatch || {} });
   if (r.data && !r.state.running) $("#days").value = String(r.data.days);
   renderStatus(r.state);
   // 폴링 때마다 다시 그리면 펼쳐둔 "자세히"가 접히므로, 내용이 바뀌었을 때만 그린다
-  const sig = JSON.stringify([r.data && r.data.updatedAt, r.visited, r.suggestions, r.liked, r.likeWatch, r.suggestState && r.suggestState.running]);
+  const sig = JSON.stringify([r.data && r.data.updatedAt, r.visited, r.suggestions, r.help, r.helpState && r.helpState.running, r.liked, r.likeWatch, r.suggestState && r.suggestState.running]);
   if (sig !== lastRenderSig) { lastRenderSig = sig; render(); }
   const watching = Object.values(r.likeWatch || {}).some((w) => w.status === "opening" || w.status === "watching");
-  const busy = r.state.running || (r.suggestState && r.suggestState.running) || watching;
+  // 질문 댓글이 있으면 프로그램이 알아서 답을 찾아둔다 (같은 데이터로는 한 번만 요청)
+  if (r.data && !r.state.running && r.helpTodo > 0 && !(r.helpState && r.helpState.running) && helpAsked !== r.data.updatedAt) {
+    helpAsked = r.data.updatedAt;
+    fetch("/api/neighbors/help", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }).catch(() => {});
+  }
+  const busy = r.state.running || (r.suggestState && r.suggestState.running) || (r.helpState && r.helpState.running) || r.helpTodo > 0 && helpAsked === (r.data && r.data.updatedAt) && !(r.helpState && r.helpState.error) || watching;
   if (busy && !pollTimer) pollTimer = setInterval(load, 1500);
   if (!busy && pollTimer) { clearInterval(pollTimer); pollTimer = null; }
   S.state = r.state;
@@ -496,6 +515,7 @@ function visitRow(p) {
       <a class="name" href="${BLOG}${esc(p.blogId)}" target="_blank" rel="noopener">${esc(p.nickname)}</a>${relBadge(p.relation)}${p.isNew ? `<span class="badge b-new">🌱 새 친구</span>` : ""}
       <div class="meta">${meta}</div>
       ${comments[0] ? cmt(comments[0]) : ""}
+      ${comments.slice(0, 3).map((c) => helpBlock({ logNo: c.logNo, blogId: p.blogId, date: c.date })).join("")}
       ${comments.length > 1 || p.likes.length ? `<details><summary>자세히 (댓글 ${comments.length} · 공감한 글 ${p.likes.length})</summary>
         ${comments.slice(1).map(cmt).join("")}
         ${p.likes.length ? `<ul>${p.likes.map((l) => `<li>❤️ ${esc(l.title)} <small>${md(l.date)}</small></li>`).join("")}</ul>` : ""}
@@ -526,6 +546,7 @@ function renderReply() {
         <div class="meta">${esc(u.title)} · ${ago(u.date)}</div>
         ${u.rootText != null ? `<div class="snippet"><small>원댓글: ${esc(u.rootText) || "(스티커)"}</small></div>` : ""}
         <div class="snippet" style="white-space:normal">${u.text.trim() ? esc(u.text) : "<small>(스티커/이미지)</small>"}</div>
+        ${S.help[helpKey(u)] ? helpBlock(u) : ""}
         ${suggestBlock(replyKey(u), "추천 답글", templateReply(u))}
       </div>
       <div class="side">

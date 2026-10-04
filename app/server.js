@@ -19,6 +19,7 @@ const { findAndJudgeImages } = require("./lib/images");
 const { saveDraftToNaver, finalizeTocAndSummary, openTemplateEditor } = require("./lib/blogEditor");
 const neighbors = require("./lib/neighbors");
 const suggest = require("./lib/suggest");
+const helpAnswer = require("./lib/helpAnswer");
 const like = require("./lib/like");
 const stats = require("./lib/stats");
 const notion = require("./lib/notion");
@@ -452,7 +453,12 @@ app.get("/api/neighbor-trends", (req, res) => {
 });
 
 app.get("/api/neighbors", (req, res) => {
+  const nbCache = neighbors.getCached();
+  const help = helpAnswer.readHelp();
   res.json({
+    help,
+    helpState: helpAnswer.getState(),
+    helpTodo: nbCache ? helpAnswer.collectQuestions(nbCache).filter((q) => !help[q.key]).length : 0,
     blogId: neighbors.BLOG_ID,
     data: neighbors.getCached(),
     visited: neighbors.getVisited(),
@@ -482,6 +488,14 @@ app.post("/api/neighbors/like", async (req, res) => {
   const { blogId, logNo } = req.body;
   if (!/^[\w-]+$/.test(blogId || "") || !/^\d+$/.test(String(logNo || ""))) return res.status(400).json({ error: "blogId/logNo가 올바르지 않습니다." });
   like.openAndWatch(blogId, String(logNo)); // 오류는 likeWatch의 status: "error"로 전달됨
+  res.json({ started: true });
+});
+
+// 질문·어려움을 말한 댓글에 대해 프로그램이 직접 답을 찾는다 (Claude 없이, 백그라운드)
+app.post("/api/neighbors/help", (req, res) => {
+  const cache = neighbors.getCached();
+  if (!cache) return res.status(400).json({ error: "먼저 [새로 불러오기]를 해주세요." });
+  helpAnswer.build(cache, { force: req.body && req.body.force === true });
   res.json({ started: true });
 });
 
