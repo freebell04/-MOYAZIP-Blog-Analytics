@@ -1,7 +1,7 @@
 // 성과 통계 → 노션 블록 리포트 (주간 / 월간).
 // 프로그램이 정리한 숫자·분석·추천·회고를 그대로 옮긴다.
 
-const { computeProgress, bar } = require("./goalProgress");
+const { computeProgress, bar, mondayOf } = require("./goalProgress");
 
 // ---- 블록 헬퍼 (rich_text 한 덩어리는 2000자 제한) ----
 function rt(text, ann = {}) {
@@ -48,6 +48,15 @@ const addDays = (s, n) => {
 const WEEKDAY = ["일", "월", "화", "수", "목", "금", "토"];
 const md = (s) => `${Number(s.slice(5, 7))}/${Number(s.slice(8, 10))}(${WEEKDAY[new Date(s + "T00:00:00").getDay()]})`;
 
+/** 통계의 일별 데이터에서 from~to(양끝 포함) 합계 */
+function sumDaily(d, from, to) {
+  const rows = (d.daily || []).filter((x) => x.date >= from && x.date <= to);
+  const sum = (k) => rows.reduce((a, x) => a + (x[k] || 0), 0);
+  return { days: rows.length, cv: sum("cv"), like: sum("like"), comment: sum("comment") };
+}
+/** "오늘까지"인지 "10/03까지"인지 (통계가 어제 것이면 그 날짜로 정확히 적는다) */
+const untilLabel = (upTo) => (upTo === todayKst() ? "오늘까지" : `${mdOf(upTo)}까지`);
+
 /** 글 올린 날 정리: 날짜별로 묶는다 → [{date, titles}] (날짜 오름차순) */
 function postDays(posts) {
   const by = {};
@@ -56,9 +65,9 @@ function postDays(posts) {
 }
 
 /** 리포트 맨 위에 놓는 "글 올린 날" 칸. 날짜와 그날 올린 글을 함께 적는다 (withTitles: 월간은 길어서 날짜만) */
-function postedDaysBlock(posts, totalDays, withTitles) {
+function postedDaysBlock(posts, totalDays, withTitles, label = "") {
   const days = postDays(posts);
-  const head = `글 올린 날 ${days.length}일 / ${totalDays}일 · 발행 ${posts.length}개`;
+  const head = `${label}글 올린 날 ${days.length}일 / ${totalDays}일 · 발행 ${posts.length}개`;
   if (!days.length) return callout(`${head}\n이 기간에 올린 글이 없어요`, "📅");
   const lines = withTitles ? days.map((d) => `${md(d.date)}  ${d.titles.join(" · ")}`) : [days.map((d) => md(d.date)).join("  ")];
   return callout([head, ...lines].join("\n"), "📅");
@@ -173,11 +182,22 @@ function buildWeekly(d, { goals, history }) {
   const goal = h.goalViews ?? (goals && goals.weeklyViews);
   const posts = d.posts.filter((x) => x.date >= week && x.date <= end);
   const earlyOfWeek = d.early ? d.early.posts.filter((e) => e.date >= week && e.date <= end) : [];
+  // 이번 주(월요일~통계 기준일, 보통 오늘): 네이버는 주 합계를 끝난 주에만 줘서, 일별 숫자를 더해서 보여준다
+  const upTo = d.today || todayKst();
+  const mon = mondayOf(upTo);
+  const cw = sumDaily(d, mon, upTo);
+  const cwPosts = d.posts.filter((x) => x.date >= mon && x.date <= upTo);
+  const cwLabel = `이번 주 ${mdOf(mon)}~${mdOf(upTo)} (${untilLabel(upTo)})`;
 
   const blocks = [
-    postedDaysBlock(posts, 7, true),
     callout(
-      `조회수 ${fmt(w.cv)}회 (전주 ${fmt(prev.cv)}회, ${signed(pct(w.cv, prev.cv))}) · 순방문자 ${fmt(w.uv)}명\n` +
+      `${cwLabel} · 조회수 ${fmt(cw.cv)}회 · 공감 ${fmt(cw.like)} · 댓글 ${fmt(cw.comment)} · 발행 ${cwPosts.length}개\n` +
+        `진행 중인 주라서 숫자가 계속 쌓여요 (${cw.days}일 집계${upTo === todayKst() ? ", 오늘은 아직 하루가 안 끝났어요" : ""}). 아래 \"지난주\"는 월~일이 끝나 확정된 주(${mdOf(week)}~${mdOf(end)})예요.`,
+      "🗓️"
+    ),
+    postedDaysBlock(posts, 7, true, "지난주 "),
+    callout(
+      `지난주 ${mdOf(week)}~${mdOf(end)} 조회수 ${fmt(w.cv)}회 (전주 ${fmt(prev.cv)}회, ${signed(pct(w.cv, prev.cv))}) · 순방문자 ${fmt(w.uv)}명\n` +
         `공감 ${fmt(h.like)} · 댓글 ${fmt(h.comment)} · 이웃 증감 ${h.relation != null ? (h.relation >= 0 ? "+" : "") + h.relation : "-"} · 발행 ${posts.length}개` +
         (goal ? `\n목표 ${fmt(goal)}회 → 달성률 ${Math.round((w.cv / goal) * 100)}%${w.cv >= goal ? " 🎉" : ""}` : ""),
       "📊"
@@ -195,7 +215,9 @@ function buildWeekly(d, { goals, history }) {
           ["주간 댓글", fmt(goals.weeklyComments), fmt(h.comment), goals.weeklyComments && h.comment != null ? `${Math.round((h.comment / goals.weeklyComments) * 100)}%` : "-"],
         ])
       : p("(목표가 아직 없어요 — 통계 페이지의 🎯 목표(KPI) 설정에서 정할 수 있어요)", { italic: true, color: "gray" }),
-    h2("📝 이번 주 발행한 글"),
+    h2(`📝 이번 주 발행한 글 (${mdOf(mon)}~${mdOf(upTo)} ${untilLabel(upTo)})`),
+    ...(cwPosts.length ? cwPosts.map((x) => bullet(`${x.date} ${x.title}`)) : [p("(아직 발행한 글 없음)", { color: "gray" })]),
+    h2(`📝 지난주 발행한 글 (${mdOf(week)}~${mdOf(end)})`),
     ...(posts.length ? posts.map((x) => bullet(`${x.date} ${x.title}`)) : [p("(발행한 글 없음)", { color: "gray" })]),
   ];
   if (earlyOfWeek.length) blocks.push(h3("🚀 발행 후 3일 성과"), earlyTable(earlyOfWeek));
@@ -206,7 +228,7 @@ function buildWeekly(d, { goals, history }) {
   return {
     key: `week:${week}`,
     icon: "📊",
-    title: `📊 ${mdOf(todayKst())} 주간 블로그 리포트 (${mdOf(week)}~${mdOf(end)} 기준)`,
+    title: `📊 ${mdOf(todayKst())} 주간 블로그 리포트 (${mdOf(mon)}~${mdOf(upTo)} ${untilLabel(upTo)})`,
     date: { start: todayKst() },
     blocks,
   };
@@ -230,8 +252,17 @@ function buildMonthly(d, { goals, history }) {
   // 그 달이 끝나기 전에 세운 목표일 때만 달성률을 보여준다 (나중에 세운 목표를 소급 적용하지 않음)
   const goal = goals && goals.monthlyViews && goals.updatedAt && goals.updatedAt.slice(0, 10) <= end ? goals.monthlyViews : null;
 
+  // 이번 달(1일~통계 기준일, 보통 오늘): 네이버는 월 합계를 끝난 달에만 줘서, 일별 숫자를 더해서 보여준다
+  const upTo = d.today || todayKst();
+  const curMonth = upTo.slice(0, 7);
+  const cm = curMonth !== month ? sumDaily(d, `${curMonth}-01`, upTo) : null;
+  const cmPosts = curMonth !== month ? d.posts.filter((x) => x.date >= `${curMonth}-01` && x.date <= upTo) : [];
+
   const blocks = [
-    postedDaysBlock(posts, end.slice(8, 10) * 1, false),
+    ...(cm
+      ? [callout(`이번 달 ${Number(curMonth.slice(5))}월 ${mdOf(`${curMonth}-01`)}~${mdOf(upTo)} (${untilLabel(upTo)}) · 조회수 ${fmt(cm.cv)}회 · 공감 ${fmt(cm.like)} · 댓글 ${fmt(cm.comment)} · 발행 ${cmPosts.length}개\n진행 중인 달이라 숫자가 계속 쌓여요. 아래는 월이 끝나 확정된 ${Number(month.slice(5))}월 결과예요.`, "🗓️")]
+      : []),
+    postedDaysBlock(posts, end.slice(8, 10) * 1, false, `${Number(month.slice(5))}월 `),
     callout(
       `${month} 조회수 ${fmt(m.cv)}회 (전월 ${fmt(pm.cv)}회, ${signed(pct(m.cv, pm.cv))})\n` +
         `서로이웃 ${fmt(m.friend)} · 이웃 ${fmt(m.follow)} · 그 외 ${fmt(m.etc)} · 발행 ${posts.length}개` +
@@ -254,7 +285,7 @@ function buildMonthly(d, { goals, history }) {
   blocks.push(h2("🪞 이번 달 돌아보기"), quote("이번 달 가장 잘 된 것 / 아쉬운 것 / 다음 달 집중할 것을 여기에 적어보세요."));
   blocks.push(divider(), p(`블로그 자동화 대시보드에서 ${new Date().toLocaleString("ko-KR")}에 저장`, { color: "gray" }));
 
-  return { key: `month:${month}`, icon: "🗓️", title: `🗓️ ${mdOf(todayKst())} 월간 블로그 리포트 (${month} 기준)`, date: { start: todayKst() }, blocks };
+  return { key: `month:${month}`, icon: "🗓️", title: `🗓️ ${mdOf(todayKst())} 월간 블로그 리포트 (${Number(month.slice(5))}월 결과${cm ? ` · ${Number(curMonth.slice(5))}월은 ${mdOf(upTo)}${upTo === todayKst() ? "(오늘)" : ""}까지` : ""})`, date: { start: todayKst() }, blocks };
 }
 
 /** 회고만 담은 짧은 페이지 (지난주가 아닌 예전 주에 회고를 적었는데 그 주 리포트가 노션에 없을 때) */
