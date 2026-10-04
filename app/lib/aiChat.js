@@ -172,6 +172,7 @@ async function start(ai, prompt, kind = "post") {
       s.targetId = targetId;
       s.client = client;
       session.notifyChrome(`${site.name} 채팅 창`);
+      require("./windowLayout").splitSoon([1500, 6000]); // 왼쪽: 이 프로그램 화면, 오른쪽: AI 채팅 (반반)
       client.send("Page.bringToFront").catch(() => {}); // 기다리지 않는다 (창 상태에 따라 응답이 안 오기도 함)
 
       // 입력창이 생길 때까지 기다린다 (로그인이 안 돼 있으면 사용자가 로그인할 때까지)

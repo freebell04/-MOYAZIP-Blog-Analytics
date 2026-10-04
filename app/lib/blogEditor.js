@@ -970,6 +970,7 @@ async function openTemplateEditor() {
 let busyDepth = 0;
 const guarded = (fn) => async (...a) => {
   busyDepth++;
+  require("./windowLayout").splitSoon([3000, 10000]); // 글이 자동으로 써지는 동안: 왼쪽 이 프로그램 화면 / 오른쪽 글쓰기 크롬 (반반)
   try {
     return await fn(...a);
   } finally {
