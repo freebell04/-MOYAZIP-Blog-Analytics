@@ -155,10 +155,59 @@ function killStaleProfileChrome() {
   } catch {}
 }
 
+/** 디버그 포트로 떠 있는 크롬의 --user-data-dir 값 (없으면 "") */
+function runningProfileDir() {
+  try {
+    const out = require("child_process").execFileSync(
+      "powershell.exe",
+      ["-NoProfile", "-Command", `Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" | Where-Object { $_.CommandLine -match '--remote-debugging-port=${CDP_PORT}' -and $_.CommandLine -notmatch '--type=' } | Select-Object -First 1 -ExpandProperty CommandLine`],
+      { timeout: 10000, windowsHide: true }
+    ).toString();
+    const m = out.match(/--user-data-dir=(?:"([^"]+)"|(\S+))/);
+    return m ? (m[1] || m[2]) : "";
+  } catch {
+    return "";
+  }
+}
+
+/** 열려 있는 크롬 창(탭)이 하나라도 있는지 */
+async function hasOpenPage() {
+  try {
+    const list = await (await fetch(`${CDP_URL}/json/list`, { signal: AbortSignal.timeout(2000) })).json();
+    return list.some((t) => t.type === "page");
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 크롬 프로세스는 떠 있어 포트(9222)는 열려 있는데 창을 전부 닫아서 탭이 하나도 없는 상태에서는
+ * 새 탭을 만들 수 없다 ("Failed to open new tab - no browser is open"). 이럴 땐 같은 프로필로 크롬을 한 번 더
+ * 실행해서(이미 켜진 크롬이 받아서) 새 창을 하나 열어준다.
+ */
+async function ensureWindow() {
+  if (await hasOpenPage()) return;
+  const chromePath = findChromePath();
+  if (!chromePath) return;
+  // 9222 포트를 실제로 쥐고 있는 크롬이 쓰는 프로필 폴더로 연다 (다른 폴더에 설치한 프로그램의 크롬일 수도 있어서)
+  const dir = runningProfileDir() || CHROME_PROFILE_DIR;
+  spawn(chromePath, [`--user-data-dir=${dir}`, "about:blank"], { detached: true, stdio: "ignore" }).unref();
+  for (let i = 0; i < 12; i++) {
+    await sleep(500);
+    if (await hasOpenPage()) return;
+  }
+  // 그래도 창이 안 생기면 크롬이 제대로 응답하지 않는 상태 → 이 프로필의 크롬을 정리하고 처음부터 다시 띄운다
+  killStaleProfileChrome();
+  await sleep(1500);
+}
+
 async function ensureDebugChrome() {
   if (await isCdpUp()) {
-    await closeHungTabs();
-    return { alreadyRunning: true };
+    await ensureWindow();
+    if (await isCdpUp()) {
+      await closeHungTabs();
+      return { alreadyRunning: true };
+    }
   }
 
   const chromePath = findChromePath();
