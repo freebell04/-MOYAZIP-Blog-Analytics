@@ -211,6 +211,7 @@ app.post("/api/search", async (req, res) => {
     const round = Math.max(0, Math.min(50, Number(req.body.round) || 0));
     const exclude = Array.isArray(req.body.exclude) ? req.body.exclude.slice(0, 500).map(String) : [];
     const hints = req.body.ctx && Array.isArray(req.body.ctx.titles) ? { titles: req.body.ctx.titles.slice(0, 8) } : {};
+    if (/^(popular|namu|review|news)$/.test(req.body.only || "")) hints.only = req.body.only; // 한 묶음만 다시 찾기
     res.json(await searchGrouped(String(keyword).trim().slice(0, 100), round, exclude, hints));
   } catch (e) {
     res.status(500).json({ error: e.message });

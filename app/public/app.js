@@ -130,7 +130,8 @@ function renderSearch(r, pinned) {
     } else if (!list.length) {
       body = `<div class="empty-state">새로 찾은 글이 없어요.</div>`;
     }
-    sections.push(`<h3 class="grp-title">${g.icon} ${g.name} <small>${esc(g.hint)}</small></h3>` + body);
+    const reloadBtn = g.key === "neighbor" ? "" : `<button type="button" class="grp-reload" data-grp="${g.key}" title="이 묶음만 새로운 글로 다시 찾기" aria-label="${esc(g.name)} 새로 찾기">🔄</button>`;
+    sections.push(`<h3 class="grp-title"><span>${g.icon} ${g.name} <small>${esc(g.hint)}</small></span>${reloadBtn}</h3>` + body);
   }
   searchState.all = all;
 
@@ -158,6 +159,35 @@ function renderSearch(r, pinned) {
     });
   });
   $("#reload-btn").addEventListener("click", () => runSearch(searchState.keyword, searchState.round + 1));
+  box.querySelectorAll(".grp-reload").forEach((b) => b.addEventListener("click", () => reloadGroup(b.dataset.grp, b)));
+}
+
+/** 한 묶음(후기·나무위키·인기글·뉴스)만 새로운 글로 다시 찾는다. 다른 묶음과 체크해둔 글감은 그대로 둔다 */
+async function reloadGroup(key, btn) {
+  if (!searchState.last || btn.disabled) return;
+  searchState.groupRound = searchState.groupRound || {};
+  const round = (searchState.groupRound[key] || searchState.round || 0) + 1;
+  btn.disabled = true;
+  btn.classList.add("spin");
+  const r = await fetch("/api/search", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ keyword: searchState.keyword, round, exclude: [...searchState.shown], only: key }),
+  })
+    .then((x) => x.json())
+    .catch((e) => ({ error: e.message }));
+  btn.classList.remove("spin");
+  btn.disabled = false;
+  if (r.error) return alert("새로 찾지 못했어요: " + r.error);
+  searchState.groupRound[key] = round;
+  for (const x of r[key] || []) searchState.shown.add(x.link);
+  if (!(r[key] || []).length) {
+    btn.title = "더 이상 새로 보여줄 글이 없어요";
+    btn.textContent = "✔";
+    return;
+  }
+  searchState.last = { ...searchState.last, [key]: r[key] };
+  renderSearch(searchState.last, selectedItems.slice());
 }
 
 async function runSearch(keyword, round) {
@@ -187,6 +217,8 @@ async function runSearch(keyword, round) {
   for (const g of GROUPS) for (const x of r[g.key] || []) searchState.shown.add(x.link);
   if (r.richKeyword && r.richKeyword !== keyword) $("#ctx-rich") && ($("#ctx-rich").textContent = r.richKeyword);
   if (!round) selectedItems = [];
+  searchState.last = r;
+  searchState.groupRound = {};
   renderSearch(r, round ? pinned : []);
   if (r.exhausted) $("#reload-btn").insertAdjacentHTML("afterend", `<p class="hint">더 이상 새로 보여줄 글이 없어요. 다른 키워드를 넣어보세요.</p>`);
 
@@ -568,6 +600,9 @@ function renderSectionImages(post) {
   const notes = Array.isArray(post.sectionImageNotes) ? post.sectionImageNotes : [];
   const oldImgs = Array.isArray(post.sectionImages) ? post.sectionImages : []; // 예전 형식(img 태그)이 오면 alt를 설명으로 쓴다
   const topic = (post.tags && post.tags[0]) || $("#keyword").value.trim() || "";
+  const place = String(post.placeName || "").trim().slice(0, 30);
+  // 장소(카페 등) 글이면 이미지 검색어를 "장소 이름 + 소제목 내용"으로 맞춘다 (이미 이름이 들어 있으면 그대로)
+  const withPlace = (q, p) => (p && !q.replace(/\s/g, "").includes(p.replace(/\s/g, "")) ? `${p} ${q}`.slice(0, 50) : q);
   pickItems = Array.from({ length: n }, (_, i) => {
     const heading = ((post.sectionHeadingLines || [])[i] || []).join(" ").trim() || `${i + 1}번 챕터`;
     const oldAlt = (String(oldImgs[i] || "").match(/alt\s*=\s*["']([^"']*)["']/i) || [])[1] || "";
@@ -575,7 +610,7 @@ function renderSectionImages(post) {
       heading,
       note: String(notes[i] || oldAlt || "").trim(),
       tag: String(tags[i] || "").trim(),
-      ko: String(kws[i] || "").trim() || [topic, heading].filter(Boolean).join(" ").slice(0, 40), // AI가 안 줬으면 주제 키워드 + 챕터 제목
+      ko: withPlace(String(kws[i] || "").trim() || [topic, heading].filter(Boolean).join(" ").slice(0, 40), place), // AI가 안 줬으면 주제 키워드 + 챕터 제목. 장소 글이면 맨 앞에 장소 이름
       file: "",
       previewUrl: "",
       quality: "",

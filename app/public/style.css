@@ -307,3 +307,12 @@ textarea { resize: vertical; margin-top: 4px; }
 .si-guide small { color: #64748b; }
 button.si-link { cursor: pointer; font-family: inherit; }
 .si-thumb .si-img:hover { outline: 3px solid #86e0ad; }
+
+/* 글감 묶음 제목 오른쪽 새로고침 아이콘 */
+.grp-title { display: flex; align-items: center; gap: 8px; }
+.grp-title > span { flex: 1; min-width: 0; }
+.grp-reload { flex: none; width: 32px; height: 32px; border: 1px solid var(--line, #e5e7eb); border-radius: 50%; background: #fff; cursor: pointer; font-size: 15px; line-height: 1; }
+.grp-reload:hover:not(:disabled) { background: #ecfdf5; border-color: #03c75a; }
+.grp-reload:disabled { cursor: wait; opacity: .7; }
+.grp-reload.spin { animation: grpspin .8s linear infinite; }
+@keyframes grpspin { to { transform: rotate(360deg); } }

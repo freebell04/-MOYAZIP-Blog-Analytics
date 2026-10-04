@@ -188,6 +188,8 @@ const IMAGE_TAG_RULES = [
   "- sectionImageNotes: 그 자리에 어떤 이미지가 들어가면 좋은지 한국어 한 줄 설명. 예: 지글지글 구워지는 흑돼지 고기 클로즈업",
   "- 각 이미지는 그 챕터의 내용과 글 주제, 글 형식을 함께 고려해서, 사람들이 좋아할 만한 사진이 나오도록 검색어를 잡아줘. 챕터마다 서로 다른 사진이 나오게 해줘. (이미지 링크나 img 태그는 필요 없어. 내가 검색어로 직접 고를 거야)",
   "- tags: 이 글에 달 블로그 키워드 태그 5~10개 (# 없이 단어만).",
+  "- placeName: 글의 중심이 카페·식당·매장·관광지 같은 특정 장소라면 그 장소 이름(지점명 포함, 예: 카페인24 강남점). 장소가 중심이 아니면 빈 문자열.",
+  "[장소 글 규칙] placeName이 있으면: (1) 첫 번째 섹션은 반드시 위치 정보(주소, 찾아가는 방법·가까운 역, 영업시간, 주차)로 맨 위에 둬. 확실하지 않은 정보는 지어내지 말고 [여기에 직접 입력]으로 남겨. (2) sectionImageKeywords는 모두 '장소 이름 + 그 챕터 소제목의 핵심 단어' 형식으로 써줘. 예: 카페인24 강남점 외관, 카페인24 강남점 메뉴, 카페인24 강남점 주차.",
 ];
 function withExtras(schemaStr) {
   try {
@@ -197,6 +199,7 @@ function withExtras(schemaStr) {
     o.sectionImageTags = Array.from({ length: n }, (_, i) => `${i + 1}번 챕터 영어 검색 태그, 예: brunch cafe dessert`);
     o.sectionImageNotes = Array.from({ length: n }, (_, i) => `${i + 1}번 챕터에 들어갈 이미지 설명 한 줄`);
     o.tags = ["키워드1", "키워드2", "키워드3"];
+    o.placeName = "특정 장소(카페·식당 등)가 글의 중심이면 그 이름, 아니면 빈 문자열";
     return JSON.stringify(o);
   } catch {
     return schemaStr;

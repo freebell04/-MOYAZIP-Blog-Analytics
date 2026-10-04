@@ -275,8 +275,16 @@ async function searchGrouped(keyword, round = 0, exclude = [], hints = {}) {
     };
     // 꼭 필요한 화면만 먼저 동시에 읽고, 글이 모자랄 때만 추가로 읽는다 (많이 읽으면 네이버가 막는다)
     const pages = new Map();
+    // 한 묶음만 다시 찾을 때(hints.only)는 그 묶음에 쓰는 화면만 읽어서 빠르게 끝낸다
+    const only = hints.only || "";
+    const allowed = (u) =>
+      !only ||
+      (only === "popular" && [urls.popRich, urls.popBase, urls.popLatest].includes(u)) ||
+      (only === "namu" && String(u).includes(enc(" 나무위키"))) ||
+      (only === "review" && [urls.review, urls.reviewFallback].includes(u)) ||
+      (only === "news" && u === urls.news);
     const load = async (list) => {
-      const r = await fetchCardsMany(list.filter((u) => u && !pages.has(u)));
+      const r = await fetchCardsMany(list.filter((u) => u && !pages.has(u) && allowed(u)));
       for (const [u, c] of r) pages.set(u, c);
     };
     const cards = (u) => (u && pages.get(u)) || [];
