@@ -57,7 +57,7 @@ function waitRestart() {
 $("#save").addEventListener("click", async () => {
   const r = await fetch("/api/license", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: $("#key").value }) }).then((r) => r.json());
   if (!r.ok) { $("#msg").innerHTML = `<span class="error">${r.reason}</span>`; return; }
-  $("#msg").innerHTML = `<span class="ok">✅ ${r.name}님, 확인됐어요! ${r.start} ~ ${r.end} (남은 기간 ${r.daysLeft}일)${r.setup ? `<br>블로그 '${r.id}'로 자동 설정하는 중이에요. 잠시만 기다려주세요...` : ""}</span>`;
+  $("#msg").innerHTML = `<span class="ok">✅ ${r.name}님, 확인됐어요! ${r.start} ~ ${r.end} (남은 기간 ${r.daysLeft}일)${r.setup ? `<br>블로그 '${r.blog || r.id}'로 자동 설정하는 중이에요. 잠시만 기다려주세요...` : ""}</span>`;
   if (r.setup) return waitRestart();
   setTimeout(() => (location.href = "/"), 1200);
 });

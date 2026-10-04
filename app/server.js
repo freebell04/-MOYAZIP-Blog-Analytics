@@ -71,13 +71,14 @@ app.use(express.json({ limit: "10mb" }));
 
 // --- 사용 키 (체험단·구매자용). 키는 별도의 체험단 관리자 프로그램이 만든다 ---
 const license = require("./lib/license");
-app.get("/api/license", (req, res) => res.json({ ...license.status(), trial: license.trialAvailable(), trialUrl: license.TRIAL_URL }));
+app.get("/api/license", (req, res) => res.json({ ...license.status(), trial: license.trialAvailable() && !license.signedUp(), signedUp: license.signedUp(), trialUrl: license.TRIAL_URL }));
 // 무료 체험 키에는 신청할 때 적은 블로그 아이디와 이름이 들어 있다 → 처음 설정 화면(블로그 아이디·이름 입력)을 건너뛰고 그대로 설정한다.
 // (관리자가 직접 만든 키처럼 블로그 아이디가 없으면 지금처럼 설정 화면이 나온다)
 function setupFromKey(r) {
-  if (config.isConfigured() || !r.ok || !/^[A-Za-z0-9_-]{3,30}$/.test(r.id || "")) return false;
+  const bid = r.blog || r.id || "";
+  if (config.isConfigured() || !r.ok || !/^[A-Za-z0-9_-]{3,30}$/.test(bid)) return false;
   try {
-    config.save({ blogId: r.id, blogName: r.name });
+    config.save({ blogId: bid, blogName: r.name });
     return true;
   } catch {
     return false;

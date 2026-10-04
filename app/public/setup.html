@@ -52,6 +52,7 @@
 
 <script>
 const $ = (s) => document.querySelector(s);
+fetch("/api/license").then((r) => r.json()).then((l) => { if (l.blog && !$("#blog-id").value) $("#blog-id").value = l.blog; if (l.name && !$("#blog-name").value) $("#blog-name").value = l.name; }).catch(() => {});
 fetch("/api/setup").then((r) => r.json()).then((c) => {
   if (c.blogId) $("#blog-id").value = c.blogId;
   if (c.blogName && c.blogName !== "내 블로그") $("#blog-name").value = c.blogName;

@@ -13,6 +13,9 @@ MCowBQYDK2VwAyEALvlPAnQtHYYI2koy0xcoLXIAaFMomunj64Ji/og2sew=
 -----END PUBLIC KEY-----`;
 const DATA = path.join(__dirname, "..", "data");
 const LICENSE_PATH = path.join(DATA, "license.json");
+const SIGNED_PATH = path.join(DATA, "signed-up.json");
+/** 이 컴퓨터에서 이미 가입(체험 시작)했거나 키를 한 번이라도 넣었는지 */
+const signedUp = () => fs.existsSync(SIGNED_PATH) || !!saved();
 
 // 자동 무료 체험 서버(Cloudflare Worker) 주소. 비어 있으면 키 입력 화면에 "무료 체험 시작"이 나오지 않는다.
 const TRIAL_URL = process.env.NBH_TRIAL_URL || "https://blog-studio-trial.moyazip-studio.workers.dev";
@@ -32,7 +35,7 @@ function check(key) {
   const p = JSON.parse(payload.toString("utf-8"));
   const t = today();
   const daysLeft = Math.round((new Date(p.e + "T00:00:00Z") - new Date(t + "T00:00:00Z")) / 86400000) + 1;
-  const info = { name: p.n, start: p.s, end: p.e, daysLeft, id: p.id || "" };
+  const info = { name: p.n, start: p.s, end: p.e, daysLeft, id: p.id || "", blog: p.b || "" };
   if (t < p.s) return { ok: false, ...info, reason: `${p.s}부터 쓸 수 있는 키예요.` };
   if (t > p.e) return { ok: false, ...info, expired: true, reason: `사용 기간이 끝났어요 (${p.s} ~ ${p.e}).` };
   return { ok: true, ...info };
@@ -62,6 +65,7 @@ function activate(key) {
   if (!r.ok) return r;
   fs.mkdirSync(DATA, { recursive: true });
   fs.writeFileSync(LICENSE_PATH, JSON.stringify({ key: String(key).trim(), activatedAt: new Date().toISOString() }, null, 2));
+  fs.writeFileSync(SIGNED_PATH, JSON.stringify({ at: new Date().toISOString(), name: r.name })); // 한 번이라도 가입·키 입력을 했다는 표시 (지워도 다시 가입 안내를 띄우지 않는다)
   cached = { at: 0, result: null }; // 방금 넣은 키가 바로 적용되게
   return r;
 }
@@ -101,4 +105,4 @@ async function startTrial({ name, blog }) {
 
 const trialAvailable = () => !!TRIAL_URL;
 
-module.exports = { check, status, activate, today, startTrial, trialAvailable, TRIAL_URL };
+module.exports = { check, status, activate, today, startTrial, trialAvailable, signedUp, TRIAL_URL };
