@@ -34,6 +34,9 @@ const pct = (a, b) => (a != null && b ? Math.round(((a - b) / b) * 1000) / 10 : 
 const signed = (v) => (v == null ? "-" : `${v >= 0 ? "+" : ""}${v}%`);
 const pad = (n) => String(n).padStart(2, "0");
 const ymd = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+// 저장한 날(오늘, 한국 시간) — 리포트 제목과 노션 날짜는 오늘로 쓰고, 어느 기간 데이터인지는 제목 끝에 "기준"으로 남긴다
+const todayKst = () => new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10);
+const mdOf = (d) => d.slice(5).replace("-", "/");
 const addDays = (s, n) => {
   const d = new Date(s + "T00:00:00");
   d.setDate(d.getDate() + n);
@@ -165,8 +168,8 @@ function buildWeekly(d, { goals, history }) {
   return {
     key: `week:${week}`,
     icon: "📊",
-    title: `📊 주간 블로그 리포트 ${week.slice(5).replace("-", "/")}~${end.slice(5).replace("-", "/")}`,
-    date: { start: week, end },
+    title: `📊 ${mdOf(todayKst())} 주간 블로그 리포트 (${mdOf(week)}~${mdOf(end)} 기준)`,
+    date: { start: todayKst() },
     blocks,
   };
 }
@@ -212,7 +215,7 @@ function buildMonthly(d, { goals, history }) {
   blocks.push(h2("🪞 이번 달 돌아보기"), quote("이번 달 가장 잘 된 것 / 아쉬운 것 / 다음 달 집중할 것을 여기에 적어보세요."));
   blocks.push(divider(), p(`블로그 자동화 대시보드에서 ${new Date().toLocaleString("ko-KR")}에 저장`, { color: "gray" }));
 
-  return { key: `month:${month}`, icon: "🗓️", title: `🗓️ 월간 블로그 리포트 ${month}`, date: { start, end }, blocks };
+  return { key: `month:${month}`, icon: "🗓️", title: `🗓️ ${mdOf(todayKst())} 월간 블로그 리포트 (${month} 기준)`, date: { start: todayKst() }, blocks };
 }
 
 /** 회고만 담은 짧은 페이지 (지난주가 아닌 예전 주에 회고를 적었는데 그 주 리포트가 노션에 없을 때) */
@@ -222,8 +225,8 @@ function buildMemoOnly(rec) {
   return {
     key: `week:${week}`,
     icon: "✍️",
-    title: `✍️ 주간 회고 ${week.slice(5).replace("-", "/")}~${end.slice(5).replace("-", "/")}`,
-    date: { start: week, end },
+    title: `✍️ ${mdOf(todayKst())} 주간 회고 (${mdOf(week)}~${mdOf(end)} 기준)`,
+    date: { start: todayKst() },
     blocks: [
       callout(
         `조회수 ${fmt(rec.cv)}회${rec.goalViews ? ` (목표 ${fmt(rec.goalViews)}회, ${Math.round((rec.cv / rec.goalViews) * 100)}%)` : ""} · 공감 ${fmt(rec.like)} · 댓글 ${fmt(rec.comment)} · 발행 ${fmt(rec.posts)}개`,
