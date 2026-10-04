@@ -24,30 +24,9 @@ const ENGINES = {
   pixabay: (q) => `https://pixabay.com/images/search/${enc(q.trim())}/`,
 };
 
-// 크롬 탭 안에 심는 스크립트: 클릭한 자리의 이미지를 찾아 주소를 기록하고, 위쪽에 안내줄을 보여준다.
-// (네이버 이미지 검색의 작은 이미지는 search.pstatic.net/common/?src=<원본주소> 형태라서 원본 주소를 따로 뽑아 둔다)
-const PICK_SCRIPT = `(() => {
-  if (window.__nbhPickInstalled) return;
-  window.__nbhPickInstalled = true;
-  window.__nbhPicks = [];
-  const bar = document.createElement("div");
-  bar.id = "__nbh_bar";
-  bar.style.cssText = "position:fixed;top:0;left:0;right:0;z-index:2147483647;background:#03c75a;color:#fff;font:600 14px/1.5 'Malgun Gothic',sans-serif;padding:9px 14px;text-align:center;pointer-events:none;box-shadow:0 2px 8px rgba(0,0,0,.25)";
-  bar.textContent = "🟩 블로그 도우미: 마음에 드는 이미지를 클릭하면 자동으로 복사돼요 → 네이버 글쓰기 창에서 넣을 자리를 누르고 Ctrl+V";
-  document.documentElement.appendChild(bar);
-  window.__nbhToast = (t, ok) => { bar.textContent = t; bar.style.background = ok === false ? "#e03131" : "#03c75a"; };
-  const original = (u) => { try { const s = new URL(u, location.href).searchParams.get("src"); return s ? decodeURIComponent(s) : u; } catch { return u; } };
-  document.addEventListener("click", (e) => {
-    const els = document.elementsFromPoint(e.clientX, e.clientY);
-    let img = els.find((el) => el.tagName === "IMG" && (el.naturalWidth >= 80 || el.width >= 80));
-    if (!img && e.target && e.target.closest) { const a = e.target.closest("a"); if (a) img = a.querySelector("img"); }
-    if (!img) return;
-    const src = img.currentSrc || img.src;
-    if (!src) return;
-    window.__nbhPicks.push({ src, original: original(src), page: location.href, w: img.naturalWidth, h: img.naturalHeight });
-    window.__nbhToast("⏳ 이미지를 복사하는 중...");
-  }, true);
-})()`;
+// 크롬 탭 안에 심는 스크립트 (lib/imagePickInject.js 를 글자 그대로 읽어서 탭에 넣는다).
+// 네이버 이미지 검색의 작은 이미지는 search.pstatic.net/common/?src=<원본주소> 형태라서, 그 안에서 원본 주소를 따로 뽑아 둔다.
+const PICK_SCRIPT = fs.readFileSync(path.join(__dirname, "imagePickInject.js"), "utf-8");
 
 // ---------------------------------------------------------------------------
 // 이미지 받아오기·변환·저장·클립보드
@@ -177,7 +156,7 @@ async function startPick({ chapter, query, engine = "naver", openUrl }) {
   if (!q) throw new Error("검색어가 비어 있어요.");
   const url = openUrl || (ENGINES[engine] || ENGINES.naver)(q);
   if (current && current.client) current.client.close(); // 이전 고르기는 그만둔다 (탭은 그대로 둠)
-  const s = (state = { status: "opening", chapter, query: q, engine, count: 0, seq: 0 });
+  const s = (state = { status: "opening", chapter, query: q, engine, count: 0, seq: 0, armed: false });
   current = {};
 
   (async () => {
@@ -205,6 +184,9 @@ async function startPick({ chapter, query, engine = "naver", openUrl }) {
         if (Date.now() - installedAt > 3000) {
           installedAt = Date.now();
           await client.eval(PICK_SCRIPT).catch(() => {});
+          // 클릭 감지(안내줄)가 실제로 켜졌는지 확인해서 앱에 알려준다
+          s.armed = !!(await client.eval(`!!document.getElementById("__nbh_bar")`).catch(() => false));
+          s.pageUrl = String((await client.eval("location.href").catch(() => "")) || "").slice(0, 120);
         }
         const clicks = await client.eval("(window.__nbhPicks || []).splice(0)").catch(() => []);
         if (clicks && clicks.length) {

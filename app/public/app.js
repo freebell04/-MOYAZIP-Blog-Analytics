@@ -489,6 +489,7 @@ const ENGINE_BTNS = [
 let pickItems = [];
 let pickPoll = null;
 let pickSeen = {}; // 챕터별로 마지막에 화면에 반영한 복사 순번
+let pickWait = {}; // 챕터별로 "준비 중" 상태가 시작된 시각 (오래 걸리면 안내)
 
 function renderSectionImages(post) {
   const box = $("#image-candidates");
@@ -568,6 +569,7 @@ function paintThumb(i) {
 }
 
 async function startPickFor(i, engine) {
+  pickWait[i] = 0;
   pickState(i, "⏳ 크롬에 이미지 검색을 여는 중이에요...");
   const r = await fetch("/api/images/pick", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ chapter: i, query: pickItems[i].ko, engine }) })
     .then((x) => x.json())
@@ -595,7 +597,16 @@ async function pollPick() {
   const how = "네이버 글쓰기 창에서 넣을 자리를 누르고 <b>Ctrl+V</b>";
   if (it.copiedAt && Date.now() - it.copiedAt < 5000) return; // 방금 앱에서 이미지를 눌러 다시 복사했으면 그 안내를 잠깐 유지
   if (st.status === "opening") pickState(i, "⏳ 크롬에 이미지 검색을 여는 중이에요...");
-  else if (st.status === "waiting") pickState(i, st.file ? `✅ 복사됐어요 (${esc(st.quality)}) · ${how} · 다른 이미지를 클릭하면 바꿔서 복사돼요${st.error ? `<br><span class="error">⚠ ${esc(st.error)}</span>` : ""}` : `🟢 크롬에서 이미지 검색이 열렸어요. 마음에 드는 이미지를 <b>클릭</b>하면 자동으로 복사돼요${st.error ? `<br><span class="error">⚠ ${esc(st.error)}</span>` : ""}`);
+  else if (st.status === "waiting") {
+    const err = st.error ? `<br><span class="error">⚠ ${esc(st.error)}</span>` : "";
+    if (st.file) pickState(i, `✅ 복사됐어요 (${esc(st.quality)}) · ${how} · 다른 이미지를 클릭하면 바꿔서 복사돼요${err}`);
+    else if (st.armed) pickState(i, `🟢 준비됐어요! 크롬의 이미지 검색에서 마음에 드는 이미지를 <b>클릭</b>하면 자동으로 복사돼요 (크롬 위쪽에 초록 안내줄이 보여요)${err}`);
+    else {
+      pickWait[i] = pickWait[i] || Date.now();
+      const slow = Date.now() - pickWait[i] > 8000;
+      pickState(i, slow ? `⚠ 크롬 탭에서 클릭 감지가 아직 안 켜졌어요 (크롬 위쪽에 초록 안내줄이 없으면 이 상태예요). 크롬의 그 탭을 새로고침(F5)하거나, 검색 버튼을 다시 눌러주세요.${st.pageUrl ? `<br><small class="muted">현재 탭 주소: ${esc(st.pageUrl)}</small>` : ""}${err}` : `⏳ 크롬 이미지 검색을 준비하는 중이에요...${err}`);
+    }
+  }
   else if (st.status === "working") pickState(i, "⏳ 이미지를 복사하는 중이에요...");
   else if (st.status === "copied") pickState(i, `✅ 복사됐어요 (${esc(st.quality)}) · ${how} · 다른 이미지를 클릭하면 바꿔서 복사돼요`);
   else if (st.status === "closed" || st.status === "error") {
