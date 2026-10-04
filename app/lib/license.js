@@ -32,7 +32,7 @@ function check(key) {
   const p = JSON.parse(payload.toString("utf-8"));
   const t = today();
   const daysLeft = Math.round((new Date(p.e + "T00:00:00Z") - new Date(t + "T00:00:00Z")) / 86400000) + 1;
-  const info = { name: p.n, start: p.s, end: p.e, daysLeft };
+  const info = { name: p.n, start: p.s, end: p.e, daysLeft, id: p.id || "" };
   if (t < p.s) return { ok: false, ...info, reason: `${p.s}부터 쓸 수 있는 키예요.` };
   if (t > p.e) return { ok: false, ...info, expired: true, reason: `사용 기간이 끝났어요 (${p.s} ~ ${p.e}).` };
   return { ok: true, ...info };

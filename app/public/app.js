@@ -11,6 +11,16 @@ async function refreshLoginStatus() {
   const el = $("#login-status");
 
   if (r.loggedIn) {
+    if (!window.__wasLoggedIn && window.__loginTried) {
+      // 방금 로그인이 끝났을 때: 안내하고 바로 관심분야 입력으로
+      const t = document.createElement("div");
+      t.textContent = "✅ 네이버 로그인이 끝났어요! 관심분야를 입력해보세요";
+      t.style.cssText = "position:fixed;top:14px;left:50%;transform:translateX(-50%);z-index:99996;background:#03c75a;color:#fff;font-weight:700;padding:12px 20px;border-radius:12px;box-shadow:0 6px 18px rgba(0,0,0,.2);font-size:14px";
+      document.body.appendChild(t);
+      setTimeout(() => t.remove(), 4000);
+      $("#keyword") && $("#keyword").focus();
+    }
+    window.__wasLoggedIn = true;
     el.textContent = "로그인됨";
     el.className = "status-pill ok";
     stopLoginPolling();
@@ -41,6 +51,7 @@ function stopLoginPolling() {
 }
 
 $("#login-btn").addEventListener("click", async () => {
+  window.__loginTried = true;
   $("#login-btn").disabled = true;
   $("#login-status").textContent = "크롬 창을 여는 중...";
   try {
@@ -277,10 +288,18 @@ $("#finalize-btn").addEventListener("click", async () => {
   $("#finalize-status").textContent = r.error ? "오류: " + r.error : "목차·요약까지 완료! 네이버 블로그에서 최종 확인 후 발행해주세요.";
 });
 
-// 프로그램을 처음 켰을 때는 저장된 세션이 있어도 무조건 "로그인 필요"로 시작한다.
-// (버튼을 눌러야만 실제로 브라우저에서 로그인 상태를 눈으로 확인하고 갱신함)
+// 저장된 세션이 있어도 처음에는 "로그인 필요"로 시작하고, 실제 로그인 상태는 브라우저에서 눈으로 확인해 갱신한다.
+// 이 브라우저 창에서 처음 열 때는 버튼을 누르지 않아도 로그인 확인·로그인 화면을 자동으로 연다
+// (이미 로그인돼 있으면 로그인 화면 없이 바로 "로그인됨"). 새로고침할 때마다 다시 열지는 않는다.
 $("#login-status").textContent = "로그인 필요";
 $("#login-status").className = "status-pill no";
+(() => {
+  let first = true;
+  try { first = !sessionStorage.getItem("nbh-autologin"); sessionStorage.setItem("nbh-autologin", "1"); } catch {}
+  if (!first) return;
+  $("#login-status").textContent = "로그인 확인 중...";
+  setTimeout(() => $("#login-btn").click(), 700);
+})();
 
 // --- 체크한 글감을 AI(Claude / ChatGPT / Gemini)에게 넘겨서 대화하며 쓰기 ---
 const AI_SITES = {

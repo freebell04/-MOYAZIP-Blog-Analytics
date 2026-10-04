@@ -71,13 +71,28 @@ app.use(express.json({ limit: "10mb" }));
 // --- 사용 키 (체험단·구매자용). 키는 별도의 체험단 관리자 프로그램이 만든다 ---
 const license = require("./lib/license");
 app.get("/api/license", (req, res) => res.json({ ...license.status(), trial: license.trialAvailable(), trialUrl: license.TRIAL_URL }));
+// 무료 체험 키에는 신청할 때 적은 블로그 아이디와 이름이 들어 있다 → 처음 설정 화면(블로그 아이디·이름 입력)을 건너뛰고 그대로 설정한다.
+// (관리자가 직접 만든 키처럼 블로그 아이디가 없으면 지금처럼 설정 화면이 나온다)
+function setupFromKey(r) {
+  if (config.isConfigured() || !r.ok || !/^[A-Za-z0-9_-]{3,30}$/.test(r.id || "")) return false;
+  try {
+    config.save({ blogId: r.id, blogName: r.name });
+    return true;
+  } catch {
+    return false;
+  }
+}
+// 모든 모듈이 시작할 때 블로그 아이디를 읽으므로, 설정을 저장했으면 다시 시작한다 (serverloop가 다시 켜줌: 종료 코드 3)
+function respondActivated(res, r) {
+  const setup = setupFromKey(r);
+  res.status(r.ok ? 200 : 400).json({ ...r, setup });
+  if (setup) setTimeout(() => process.exit(3), 300);
+}
 app.post("/api/license/trial", async (req, res) => {
-  const r = await license.startTrial(req.body || {});
-  res.status(r.ok ? 200 : 400).json(r);
+  respondActivated(res, await license.startTrial(req.body || {}));
 });
 app.post("/api/license", (req, res) => {
-  const r = license.activate((req.body || {}).key);
-  res.status(r.ok ? 200 : 400).json(r);
+  respondActivated(res, license.activate((req.body || {}).key));
 });
 // --- 크롬 창이 열렸을 때 화면에 띄우는 안내용 신호 ---
 app.get("/api/chrome-notice", (req, res) => res.json(require("./lib/session").getChromeNotice()));
@@ -118,6 +133,12 @@ app.post("/api/setup", (req, res) => {
 app.use((req, res, next) => {
   // 키 입력 화면은 설정 전에도 열려야 한다 (새 설치: 키 → 설정 순서. 여기서 막으면 서로 리디렉션하며 무한 반복된다)
   if (config.isConfigured() || req.path === "/setup.html" || req.path === "/license.html" || req.path.startsWith("/api/setup") || req.path.startsWith("/api/license") || /\.(css|js|png|ico|svg)$/.test(req.path)) return next();
+  // 이미 입력해 둔 체험 키에 블로그 아이디가 들어 있으면 설정 화면 대신 자동으로 설정한다
+  if (setupFromKey(license.status())) {
+    setTimeout(() => process.exit(3), 300);
+    if (req.path.startsWith("/api/")) return res.status(503).json({ error: "설정을 마치고 다시 시작하는 중이에요. 잠시 뒤 다시 시도해주세요." });
+    return res.status(200).type("html").send('<!doctype html><meta charset="utf-8"><title>설정 중</title><p style="font-family:sans-serif;margin:40px">블로그 설정을 마치고 다시 시작하는 중이에요. 잠시만 기다려주세요...</p><script>setInterval(()=>fetch("/api/setup",{cache:"no-store"}).then(r=>r.json()).then(s=>{if(s.configured)location.href="/"}).catch(()=>{}),1500)</script>');
+  }
   if (req.path.startsWith("/api/")) return res.status(400).json({ error: "먼저 블로그 아이디를 설정해주세요." });
   res.redirect("/setup.html");
 });

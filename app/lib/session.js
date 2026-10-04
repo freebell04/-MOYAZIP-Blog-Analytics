@@ -239,6 +239,9 @@ async function startLoginWatch() {
   clearSession(); // 서버에선 로그아웃 상태이므로 옛 쿠키 파일은 버린다 (대시보드에 "로그인 필요"로 보이게)
   await page.goto("https://nid.naver.com/nidlogin.login", { waitUntil: "domcontentloaded" }).catch(() => {});
   await page.bringToFront().catch(() => {});
+  // "로그인 상태 유지"만 미리 체크해둔다 (크롬을 껐다 켜도 로그인이 남게). 아이디·비밀번호는 건드리지 않고 사용자가 직접 입력한다
+  await page.waitForSelector("#loginStay", { timeout: 4000 }).catch(() => {});
+  await page.evaluate(() => { const k = document.querySelector("#loginStay"); if (k && !k.checked) k.click(); }).catch(() => {});
   notifyChrome("네이버 로그인 화면");
 
   watchState = { watching: true, error: null };
