@@ -37,6 +37,22 @@
   <div class="step" data-step="4"><span class="step-num">4</span>목차·요약</div>
 </nav>
 
+<section id="login-guide" class="card" style="display:none;border:2px solid #03c75a;background:#f0fdf4;margin:0 auto 14px;max-width:1040px">
+  <div style="display:flex;gap:10px;align-items:flex-start">
+    <div style="font-size:24px;line-height:1">🔑</div>
+    <div style="flex:1;min-width:0">
+      <h3 style="margin:0 0 4px;font-size:16px">처음이세요? 네이버 로그인은 처음 한 번만 하면 돼요</h3>
+      <ol style="margin:6px 0 0;padding-left:20px;font-size:13.5px;line-height:1.85;color:#1f2937">
+        <li>잠시 뒤 <b>크롬 창</b>이 열려요. 네이버 <b>아이디·비밀번호</b>로 로그인하세요. ("로그인 상태 유지"는 미리 체크돼 있어요)</li>
+        <li>크롬이 <b>"비밀번호를 저장할까요?"</b>라고 물으면 <b>[저장]</b>을 추천해요. 다음부터는 로그인이 한 번에 돼요.</li>
+        <li>네이버가 <b>"새로운 기기" · "자주 쓰는 기기 등록"</b>이나 <b>2단계 인증</b>을 물으면 화면 안내대로 <b>[등록]</b>·인증하세요. 한 번만 하면 돼요.</li>
+        <li>크롬 창이 안 보이면 작업 표시줄의 <b>주황색 크롬 아이콘</b>을 눌러 맨 앞 탭을 확인하세요.</li>
+        <li>로그인이 끝나면 <b>이 화면이 자동으로 이어져요.</b> 아무 버튼도 누르지 않아도 돼요. (오래 걸리면 위의 [네이버 로그인]을 다시 눌러주세요)</li>
+      </ol>
+    </div>
+  </div>
+</section>
+
 <main>
   <section id="step-search" class="card">
     <div class="card-head">
@@ -148,6 +164,15 @@
 
 <footer class="foot-note">임시저장까지 자동으로 진행되고, 최종 발행은 네이버 블로그에서 직접 확인 후 눌러주세요.</footer>
 
+<div id="ai-login-guide" style="display:none;position:fixed;left:18px;top:50%;transform:translateY(-50%);z-index:99991;width:min(340px,calc(100vw - 36px));background:#fff;border:2px solid #f59e0b;border-radius:16px;padding:18px 20px;box-shadow:0 12px 32px rgba(0,0,0,.2);font-family:'Noto Sans KR',system-ui,sans-serif;">
+  <div id="ai-login-title" style="font-weight:700;font-size:15px;color:#92400e">🔑 처음이라면 AI 로그인이 필요해요</div>
+  <ol style="margin:8px 0 0;padding-left:20px;font-size:13px;line-height:1.8;color:#1f2937">
+    <li>크롬에 열린 <b id="ai-login-name">AI</b> 탭에서 <b>로그인</b>하세요. (처음 한 번만)</li>
+    <li>로그인하면 <b>요청문이 자동으로 입력</b>돼요.</li>
+    <li>크롬이 <b>비밀번호 저장</b>을 물으면 <b>[저장]</b>을 추천해요.</li>
+    <li>창이 안 보이면 작업 표시줄의 <b>주황색 크롬 아이콘</b>을 눌러주세요.</li>
+  </ol>
+</div>
 <div id="ai-popup" style="display:none;position:fixed;left:18px;top:50%;transform:translateY(-50%);z-index:99985;width:min(300px,calc(100vw - 36px));background:#fff;border:2px solid #03c75a;border-radius:16px;padding:18px 20px;box-shadow:0 12px 32px rgba(0,0,0,.2);font-family:'Noto Sans KR',system-ui,sans-serif;text-align:center;">
   <div style="width:34px;height:34px;margin:0 auto 10px;border:4px solid #d1fae5;border-top-color:#03c75a;border-radius:50%;animation:busyspin 0.9s linear infinite"></div>
   <div id="ai-popup-title" style="font-weight:700;font-size:15px;color:#065f46">AI에서 대화 나눠보세요</div>

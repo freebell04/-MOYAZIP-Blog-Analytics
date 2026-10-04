@@ -27,6 +27,8 @@ let loginPollTimer = null;
 async function refreshLoginStatus() {
   const r = await fetch("/api/session-status").then((r) => r.json());
   const el = $("#login-status");
+  const guide = $("#login-guide");
+  if (guide) guide.style.display = r.loggedIn ? "none" : "block"; // 로그인이 안 돼 있을 때만 처음 쓰는 분을 위한 안내를 맨 앞에 보여준다
 
   if (r.loggedIn) {
     if (!window.__wasLoggedIn && window.__loginTried) {
@@ -473,6 +475,16 @@ async function pollAiChat() {
   if (quick && !aiBusy) { aiBusy = true; busyOn(st.name + " 창을 열고 요청문을 넣는 중이에요. 잠시만 기다려주세요.", "AI 창을 여는 중이에요"); }
   if (!quick && aiBusy) { aiBusy = false; busyOff(); }
   // 대화 중에는 "AI에서 대화 나눠보세요" 안내 창을 띄우고, 완성(결과 도착)·오류·종료 때 자동으로 닫는다
+  // 처음 쓰는 AI(또는 로그인이 필요한 상태)면 로그인 안내를 띄운다. 대화가 시작되면(요청문이 들어가면) 자동으로 닫는다
+  const seenKey = "nbh-ai-seen-" + (st.ai || "");
+  let seen = false;
+  try { seen = !!localStorage.getItem(seenKey); if (st.status === "chatting") localStorage.setItem(seenKey, "1"); } catch {}
+  const lg = $("#ai-login-guide");
+  if (lg) {
+    const show = !isFormat && (st.status === "needLogin" || (!seen && ["opening", "sending"].includes(st.status)));
+    if (show) $("#ai-login-name").textContent = st.name;
+    lg.style.display = show ? "block" : "none";
+  }
   const pop = $("#ai-popup");
   if (pop) {
     if (st.status === "chatting") { $("#ai-popup-title").textContent = isFormat ? `${st.name}에서 분석 결과를 기다리는 중이에요` : `${st.name}에서 대화 나눠보세요`; pop.style.display = "block"; }
