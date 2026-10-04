@@ -1,6 +1,8 @@
 // 성과 통계 → 노션 블록 리포트 (주간 / 월간).
 // 프로그램이 정리한 숫자·분석·추천·회고를 그대로 옮긴다.
 
+const { computeProgress, bar } = require("./goalProgress");
+
 // ---- 블록 헬퍼 (rich_text 한 덩어리는 2000자 제한) ----
 function rt(text, ann = {}) {
   const s = String(text ?? "");
@@ -60,6 +62,41 @@ function postedDaysBlock(posts, totalDays, withTitles) {
   if (!days.length) return callout(`${head}\n이 기간에 올린 글이 없어요`, "📅");
   const lines = withTitles ? days.map((d) => `${md(d.date)}  ${d.titles.join(" · ")}`) : [days.map((d) => md(d.date)).join("  ")];
   return callout([head, ...lines].join("\n"), "📅");
+}
+
+/**
+ * 🎯 목표 진행 상황: 성과 통계 화면의 표(이번 주·이번 달 기준)를 그대로 옮기고,
+ * 그 표를 보고 "앞으로 이렇게 해보세요"를 정리한다. 목표가 없으면 안내 문구만.
+ */
+function goalProgressBlocks(d, goals) {
+  const g = computeProgress(d, goals);
+  if (!g || !g.rows.length) return [h2("🎯 목표 진행 상황"), p("(목표가 아직 없어요 — 통계 페이지의 🎯 목표(KPI) 설정에서 정할 수 있어요)", { italic: true, color: "gray" })];
+  const behind = g.rows.filter((r) => !r.onTrack);
+  const summary =
+    g.onTrackCount === g.total
+      ? `목표 ${g.total}개가 모두 순조로워요 🎉`
+      : `목표 ${g.total}개 중 ${g.onTrackCount}개가 순조로워요. 조금 느린 것: ${behind.map((r) => r.label).join(", ")}`;
+  const out = [
+    h2(`🎯 목표 진행 상황 (${mdOf(g.asOf)} 기준 · 이번 주(월~)·이번 달)`),
+    callout(`${summary}
+'지금쯤(순조 기준)'은 이 시점에 와 있어야 하는 숫자예요. 그 숫자 이상이면 순조로운 거예요.${g.asOf < todayKst() ? `
+※ 통계 기준일이 ${mdOf(g.asOf)}예요. 오늘 숫자까지 반영하려면 '통계 새로 불러오기' 후 다시 저장하세요.` : ""}`, g.onTrackCount === g.total ? "🎉" : "🎯"),
+    table(
+      ["항목", "목표", "지금까지", "달성률", "진행", "지금쯤(순조 기준)", "상태"],
+      g.rows.map((r) => [
+        r.label,
+        `${fmt(r.target)}${r.unit}`,
+        `${fmt(r.now)}${r.unit}`,
+        `${r.pct}%`,
+        bar(r.ratio),
+        `${fmt(r.expected)}${r.unit}`,
+        r.projected && r.key === "monthlyViews" ? `${r.onTrack ? "속도 👍" : "조금 느려요"} · 이 속도면 ${fmt(r.projected)}회` : r.onTrack ? "속도 👍" : "조금 느려요",
+      ])
+    ),
+  ];
+  out.push(h3("🧭 앞으로 이렇게 해보세요 (위 표 기준)"));
+  for (const a of g.advice) out.push(a.tone === "warn" ? todo(a.text) : bullet(`✅ ${a.text}`));
+  return out;
 }
 
 function memoBlocks(memo) {
@@ -145,10 +182,11 @@ function buildWeekly(d, { goals, history }) {
         (goal ? `\n목표 ${fmt(goal)}회 → 달성률 ${Math.round((w.cv / goal) * 100)}%${w.cv >= goal ? " 🎉" : ""}` : ""),
       "📊"
     ),
+    ...goalProgressBlocks(d, goals),
     // 적어둔 주간 회고는 맨 위쪽에 바로 보이게 (저장 후에 회고를 고치면 이 부분만 노션에서 바뀐다)
     h2("✍️ 회고"),
     ...memoSectionBlocks(history, week),
-    h2("🎯 목표 대비"),
+    h2("🎯 지난주 목표 대비"),
     goals
       ? table(["항목", "목표", "실제", "달성률"], [
           ["주간 조회수", fmt(goal), fmt(w.cv), goal ? `${Math.round((w.cv / goal) * 100)}%` : "-"],
@@ -200,6 +238,7 @@ function buildMonthly(d, { goals, history }) {
         (goal ? `\n월간 목표 ${fmt(goal)}회 → 달성률 ${Math.round(((m.cv || 0) / goal) * 100)}%` : ""),
       "🗓️"
     ),
+    ...goalProgressBlocks(d, goals),
   ];
   if (weeks.length) {
     blocks.push(h2("📅 주별 흐름"));
