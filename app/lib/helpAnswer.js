@@ -104,9 +104,10 @@ function compose(u, r) {
   }
   const a = shorten(f[0], 70);
   const b = f[1] ? shorten(f[1], 60) : "";
+  const link = (r.facts.find((x) => x.link) || {}).link || "";
   return [
     `${nick}님, ${issue} 막히셨군요 ㅠㅠ ${a}. 이대로 해보시고 그래도 안 되면 편하게 알려주세요.`,
-    `${issue}은 이렇게 하면 돼요. ${a}${b ? `. ${b}` : ""}. 해결되면 알려주세요 ㅎㅎ`,
+    `${issue}은 이렇게 하면 돼요. ${a}${b ? `. ${b}` : ""}.${link ? ` 자세한 방법은 여기에 잘 나와 있어요 ${link}` : ""} 해결되면 알려주세요 ㅎㅎ`,
   ];
 }
 
@@ -261,7 +262,7 @@ const postCache = new Map(); // logNo → 내 글 본문 (한 번만 읽는다)
 function todoCount(cache) {
   const have = readHelp();
   const c = collectComments(cache).filter((q) => !have[q.key]).length;
-  const v = (cache.neighbors || cache.people || []).filter((p) => p.latestPost && !have[visitLocalKey(p)]).length;
+  const v = (cache.neighbors || cache.people || []).filter((p) => p.latestPost && !have[visitLocalKey(p)] && Date.now() - new Date(p.latestPost.date) < 30 * 864e5).slice(0, 80).length;
   return c + v;
 }
 
@@ -270,7 +271,10 @@ async function build(cache, { force = false } = {}) {
   if (state.running || !cache) return;
   const have = readHelp();
   const comments = collectComments(cache).filter((q) => force || !have[q.key]);
-  const visits = (cache.neighbors || cache.people || []).filter((p) => p.latestPost && (force || !have[visitLocalKey(p)]));
+  const visits = (cache.neighbors || cache.people || [])
+    .filter((p) => p.latestPost && (force || !have[visitLocalKey(p)]) && Date.now() - new Date(p.latestPost.date) < 30 * 864e5)
+    .sort((x, y) => new Date(y.latestPost.date) - new Date(x.latestPost.date))
+    .slice(0, 80);
   const total = comments.length + visits.length;
   if (!total) return;
   let done = 0;
