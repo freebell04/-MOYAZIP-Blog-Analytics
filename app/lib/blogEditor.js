@@ -374,35 +374,88 @@ async function typeWithBold(page, text) {
  * 인용구는 아래에 빈 줄이 없으면 빠져나올 수 없어서(↓가 '출처' 칸에서 멈춤),
  * 넣기 전에 아래 빈 줄을 먼저 만들어두고 ↓↓ 로 그 줄로 내려온다.
  */
+/**
+ * 툴바 버튼 클릭: 도움말·말풍선 같은 게 버튼을 가려서 클릭이 안 먹으면(기본 30초를 기다리다 통째로 실패하던 원인)
+ * 짧게(5초) 기다려 보고, 안 되면 Esc로 가리개를 치운 뒤 화면 위치와 상관없이 직접 눌러본다.
+ */
+async function clickToolbar(f, page, selector) {
+  try {
+    await f.click(selector, { timeout: 5000 });
+    return;
+  } catch {}
+  await page.keyboard.press("Escape").catch(() => {});
+  await page.waitForTimeout(300);
+  const btn = f.locator(selector).first();
+  await btn.waitFor({ state: "attached", timeout: 5000 });
+  await btn.evaluate((el) => el.click());
+}
+
+/** 문서 맨 끝의 빈 줄로 커서를 되돌린다 (어떤 블록이 중간에 실패해도 이어서 쓸 수 있게) */
+async function goToDocEnd(page) {
+  await page.keyboard.press("Escape").catch(() => {});
+  await page.keyboard.press("Control+End").catch(() => {});
+  await page.waitForTimeout(200);
+}
+
+async function writeOneBlock(f, page, b) {
+  if (b.type === "para") {
+    await typeWithBold(page, b.text);
+    await page.keyboard.press("Enter");
+  } else if (b.type === "hr") {
+    await clickToolbar(f, page, "button.se-insert-horizontal-line-default-toolbar-button");
+    await page.waitForTimeout(500); // 구분선 뒤에 빈 줄이 자동으로 생기고 커서가 그리로 간다
+  } else if (b.type === "quote") {
+    await page.keyboard.press("Enter");
+    await page.keyboard.press("ArrowUp");
+    if (b.style === "default") {
+      await clickToolbar(f, page, "button.se-insert-quotation-default-toolbar-button");
+    } else {
+      await clickToolbar(f, page, "button.se-document-toolbar-select-option-button[data-name='quotation']");
+      await page.waitForTimeout(400);
+      await clickToolbar(f, page, `button[data-value='${b.style}']`);
+    }
+    await page.waitForTimeout(600);
+    for (let i = 0; i < b.lines.length; i++) {
+      if (i > 0) await page.keyboard.press("Enter");
+      if (b.bold) await page.keyboard.press("Control+b");
+      await typeWithBold(page, b.lines[i]);
+      if (b.bold) await page.keyboard.press("Control+b");
+    }
+    await page.keyboard.press("ArrowDown"); // 출처 칸
+    await page.keyboard.press("ArrowDown"); // 미리 만들어둔 아래 빈 줄
+    await page.waitForTimeout(300);
+  }
+}
+
 async function writeStyledBody(frame, page, blocks) {
   const f = page.frames().find((x) => x.url().includes("PostWriteForm")) || frame;
   for (const b of blocks) {
-    if (b.type === "para") {
-      await typeWithBold(page, b.text);
-      await page.keyboard.press("Enter");
-    } else if (b.type === "hr") {
-      await f.click("button.se-insert-horizontal-line-default-toolbar-button");
-      await page.waitForTimeout(500); // 구분선 뒤에 빈 줄이 자동으로 생기고 커서가 그리로 간다
-    } else if (b.type === "quote") {
-      await page.keyboard.press("Enter");
-      await page.keyboard.press("ArrowUp");
-      if (b.style === "default") {
-        await f.click("button.se-insert-quotation-default-toolbar-button");
-      } else {
-        await f.click("button.se-document-toolbar-select-option-button[data-name='quotation']");
-        await page.waitForTimeout(400);
-        await f.click(`button[data-value='${b.style}']`);
+    try {
+      await writeOneBlock(f, page, b);
+    } catch (e1) {
+      // 한 블록(구분선·소제목 인용구)이 에디터 반응 때문에 실패해도 글 전체가 중간에 멈추지 않게 한다:
+      // 한 번 더 시도하고, 그래도 안 되면 꾸밈 없이 일반 줄(소제목은 굵게)로 넣고 계속 쓴다.
+      console.warn(`[글쓰기] ${b.type} 블록 입력 실패 → 다시 시도: ${String(e1.message).split("\n")[0]}`);
+      await goToDocEnd(page);
+      try {
+        await writeOneBlock(f, page, b);
+      } catch (e2) {
+        console.warn(`[글쓰기] ${b.type} 블록을 일반 줄로 대신 넣었어요: ${String(e2.message).split("\n")[0]}`);
+        await goToDocEnd(page);
+        if (b.type === "quote") {
+          b.degraded = true; // 검사에서도 인용구가 아닌 일반 줄로 본다
+          const heading = b.lines.join(" ");
+          b.type = "para";
+          b.text = b.bold ? `**${heading}**` : heading;
+          await typeWithBold(page, b.text);
+          await page.keyboard.press("Enter");
+        } else if (b.type === "hr") {
+          b.degraded = true;
+          b.type = "skip"; // 구분선은 없어도 글 내용에는 지장이 없다
+        } else {
+          throw e2;
+        }
       }
-      await page.waitForTimeout(600);
-      for (let i = 0; i < b.lines.length; i++) {
-        if (i > 0) await page.keyboard.press("Enter");
-        if (b.bold) await page.keyboard.press("Control+b");
-        await typeWithBold(page, b.lines[i]);
-        if (b.bold) await page.keyboard.press("Control+b");
-      }
-      await page.keyboard.press("ArrowDown"); // 출처 칸
-      await page.keyboard.press("ArrowDown"); // 미리 만들어둔 아래 빈 줄
-      await page.waitForTimeout(300);
     }
   }
 }
