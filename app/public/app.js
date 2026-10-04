@@ -635,7 +635,7 @@ async function startPickFor(i, engine) {
   const r = await fetch("/api/images/pick", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ chapter: i, query: pickItems[i].ko, engine }) })
     .then((x) => x.json())
     .catch((e) => ({ error: e.message }));
-  if (r.error) return pickState(i, `<span class="error">⚠ ${esc(r.error)}</span>`);
+  if (r.error) return pickState(i, `<span class="error">⚠ ${esc(netMsg(r.error))}</span>`);
   clearInterval(pickPoll);
   pickPoll = setInterval(pollPick, 1000);
   pollPick();
@@ -677,15 +677,24 @@ async function pollPick() {
 }
 
 // 앱에 보이는 이미지를 누르면 그 이미지가 복사된다 → 글쓰기 창에서 Ctrl+V만 하면 된다
+const netMsg = (m) => (/failed to fetch|networkerror|load failed/i.test(String(m)) ? "프로그램(서버)과 연결이 끊겼어요. 잠시 뒤 다시 눌러보고, 계속 안 되면 프로그램을 다시 실행해주세요." : String(m));
 async function copyPicked(i) {
   const it = pickItems[i];
-  if (!it || !it.file) return;
+  if (!it || !it.file || it.copying) return; // 빠르게 두 번 눌러도 한 번만 처리
+  it.copying = true;
+  try {
+    await copyPickedInner(i, it);
+  } finally {
+    it.copying = false;
+  }
+}
+async function copyPickedInner(i, it) {
   try {
     const blob = await fetch(it.previewUrl).then((r) => r.blob());
     await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
   } catch {
     const r = await fetch("/api/images/copy", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ file: it.file }) }).then((x) => x.json()).catch((e) => ({ error: e.message }));
-    if (r.error) return pickState(i, `<span class="error">⚠ ${esc(r.error)}</span>`);
+    if (r.error) return pickState(i, `<span class="error">⚠ ${esc(netMsg(r.error))}</span>`);
   }
   it.copiedAt = Date.now();
   pickState(i, "✅ 이 이미지를 복사했어요 · 네이버 글쓰기 창에서 넣을 자리를 누르고 <b>Ctrl+V</b>");
