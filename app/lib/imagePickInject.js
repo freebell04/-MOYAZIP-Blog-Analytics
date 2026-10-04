@@ -45,6 +45,21 @@
     }
     return null;
   };
+  // 40초 동안 아무것도 안 고르면 앱이 부른다: 화면 위쪽(검색 결과 맨 앞)의 큰 이미지를 하나 골라 기록한다
+  window.__nbhAutoPick = () => {
+    const ok = [...document.images].filter((i) => {
+      const r = i.getBoundingClientRect();
+      const u = i.currentSrc || i.src || "";
+      return r.width >= 120 && r.height >= 120 && r.bottom > 0 && u && !/logo|icon|sprite|blank|loading|profile/i.test(u);
+    });
+    ok.sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top || a.getBoundingClientRect().left - b.getBoundingClientRect().left);
+    const i = ok[0];
+    if (!i) return false;
+    const u = i.currentSrc || i.src;
+    window.__nbhPicks.push({ src: u, original: original(u), page: location.href, w: i.naturalWidth, h: i.naturalHeight });
+    window.__nbhToast("⏳ 이미지를 자동으로 골라 복사하는 중...");
+    return true;
+  };
   const handler = (e) => {
     if (window.__nbhLocked) return; // 한 장 복사한 뒤에는 (네이버가 클릭으로 다음 이미지로 넘겨도) 더 복사하지 않는다
     try {

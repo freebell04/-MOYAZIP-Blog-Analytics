@@ -305,7 +305,7 @@ $("#save-draft-btn").addEventListener("click", async () => {
 
   busyOff();
   setAiButtons(false);
-  if (!r.error) savedDraftOnce = true;
+  if (!r.error) { savedDraftOnce = true; maybeCloseImageTabs(); }
   $("#save-draft-btn").disabled = false;
   $("#save-status").textContent = r.error
     ? "오류: " + r.error
@@ -616,11 +616,20 @@ function renderSectionImages(post) {
 
 const pickRow = (i) => document.querySelector(`.si-row[data-i="${i}"]`);
 const pickState = (i, html) => { const r = pickRow(i); if (r) r.querySelector(".si-state").innerHTML = html; };
+let pickTabsClosed = false;
+/** 모든 챕터의 이미지를 골랐고 임시저장도 끝났으면, 이미지 검색으로 열어 둔 크롬 탭을 닫는다 (한 번만) */
+function maybeCloseImageTabs() {
+  if (pickTabsClosed || !savedDraftOnce || !pickItems.length || !pickItems.every((x) => x.file)) return;
+  pickTabsClosed = true;
+  fetch("/api/images/pick/close-tabs", { method: "POST" }).catch(() => {});
+}
+
 function updatePickSummary() {
   const el = $("#si-summary");
   if (!el) return;
   const got = pickItems.filter((x) => x.file).length;
   el.innerHTML = `소제목 아래에 넣을 이미지 — 고른 챕터 <b>${got}</b> / ${pickItems.length}`;
+  maybeCloseImageTabs();
 }
 function paintThumb(i) {
   const it = pickItems[i];
@@ -661,6 +670,7 @@ async function pollPick() {
   else if (st.status === "waiting") {
     const err = st.error ? `<br><span class="error">⚠ ${esc(st.error)}</span>` : "";
     if (st.file) pickState(i, `✅ 복사됐어요 (${esc(st.quality)}) · ${how} · 다른 이미지로 바꾸려면 크롬의 초록 줄을 누른 뒤 클릭하세요${err}`);
+    else if (st.armed && st.autoAt && !st.autoTried) pickState(i, `🟢 준비됐어요! 크롬의 이미지 검색에서 마음에 드는 이미지를 <b>클릭</b>하세요. <b>${Math.max(0, Math.ceil((st.autoAt - Date.now()) / 1000))}초</b> 안에 안 고르면 맨 앞 이미지를 자동으로 골라 복사해요.`);
     else if (st.armed) pickState(i, `🟢 준비됐어요! 크롬의 이미지 검색에서 마음에 드는 이미지를 <b>클릭</b>하면 자동으로 복사돼요 (크롬 위쪽에 초록 안내줄이 보여요)${err}`);
     else {
       pickWait[i] = pickWait[i] || Date.now();
@@ -702,6 +712,7 @@ async function copyPickedInner(i, it) {
 
 function loadPost(post) {
   savedDraftOnce = false; // 새 글이면 새로 저장한다
+  pickTabsClosed = false;
   // 내 형식을 저장해 쓰는 경우엔 모야ZIP 전용 네이버 템플릿을 적용하지 않는다
   if (formatInfo) $("#use-template-checkbox").checked = !!formatInfo.useTemplate;
   post.introLines = post.introLines || [];
