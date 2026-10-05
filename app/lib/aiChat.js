@@ -62,15 +62,41 @@ const CHECKS = {
   post: `j.title && Array.isArray(j.sections) && j.sections.length && j.title !== "블로그 제목" && j.sections[0] !== "1번 섹션 본문"`,
   format: `j.formatName && Array.isArray(j.sections) && j.sections.length && !String(j.formatName).startsWith("형식 이름")`,
 };
-const findResultJs = (kind) => `(() => {
-  const blocks = [...document.querySelectorAll("pre, code")].map((el) => el.innerText || el.textContent || "");
-  for (let i = blocks.length - 1; i >= 0; i--) {
-    const m = blocks[i].match(/\\{[\\s\\S]*\\}/);
-    if (!m) continue;
-    try {
-      const j = JSON.parse(m[0]);
-      if (j && ${CHECKS[kind]}) return JSON.stringify(j);
-    } catch {}
+// 화면에서 결과 JSON을 찾는다:
+//  1) 코드블록(pre/code)  2) 대화 말풍선의 일반 글자 (예: 내가 이미 받아 둔 JSON을 대화창에 그냥 붙여넣은 경우)
+// 두 가지 형식 모두 알아본다 — 초안 {title, sections[]} / 형식 {formatName, sections[]}.
+// 요청문 속 예시값(제목 "블로그 제목", 형식 이름 "형식 이름(예: …)")은 제외한다. 결과는 {kind, json} 문자열.
+const findResultJs = () => `(() => {
+  const isPost = (j) => j && j.title && Array.isArray(j.sections) && j.sections.length && j.title !== "블로그 제목" && j.sections[0] !== "1번 섹션 본문";
+  const isFormat = (j) => j && j.formatName && Array.isArray(j.sections) && j.sections.length && !String(j.formatName).startsWith("형식 이름");
+  // 글자 속에서 중괄호가 맞게 닫히는 {…} 덩어리들 (문자열 안의 중괄호는 무시)
+  const objects = (text) => {
+    const out = [];
+    for (let i = 0; i < text.length; i++) {
+      if (text[i] !== "{") continue;
+      let depth = 0, inStr = false, esc = false;
+      for (let k = i; k < text.length; k++) {
+        const c = text[k];
+        if (inStr) { if (esc) esc = false; else if (c === "\\\\") esc = true; else if (c === '"') inStr = false; continue; }
+        if (c === '"') inStr = true;
+        else if (c === "{") depth++;
+        else if (c === "}" && --depth === 0) { out.push(text.slice(i, k + 1)); i = k; break; }
+      }
+    }
+    return out;
+  };
+  const sources = [
+    ...[...document.querySelectorAll("pre, code")].map((el) => el.innerText || el.textContent || ""),
+    ...[...document.querySelectorAll('[data-message-author-role], user-query, model-response, .query-text, [data-testid*="message"]')].map((el) => el.innerText || ""),
+  ];
+  for (let i = sources.length - 1; i >= 0; i--) {
+    for (const o of objects(sources[i]).reverse()) {
+      try {
+        const j = JSON.parse(o);
+        if (isPost(j)) return JSON.stringify({ kind: "post", json: j });
+        if (isFormat(j)) return JSON.stringify({ kind: "format", json: j });
+      } catch {}
+    }
   }
   return null;
 })()`;
@@ -209,9 +235,11 @@ async function start(ai, prompt, kind = "post") {
       while (s === state) {
         if (client.closed || !(await targetAlive(targetId).catch(() => true))) return void (s.status = "closed");
         if (Date.now() > chatDeadline) return void (s.status = "timeout");
-        const found = await client.eval(findResultJs(kind)).catch(() => null);
+        const found = await client.eval(findResultJs()).catch(() => null);
         if (found && found === last) {
-          s.result = JSON.parse(found);
+          const r = JSON.parse(found);
+          s.kind = r.kind; // 글감으로 시작했는데 형식(분석) 결과가 온 경우 등, 실제로 받은 종류를 따른다
+          s.result = r.json;
           s.status = "done";
           return;
         }
