@@ -262,7 +262,8 @@ const postCache = new Map(); // logNo → 내 글 본문 (한 번만 읽는다)
 function todoCount(cache) {
   const have = readHelp();
   const c = collectComments(cache).filter((q) => !have[q.key]).length;
-  const v = (cache.neighbors || cache.people || []).filter((p) => p.latestPost && !have[visitLocalKey(p)] && Date.now() - new Date(p.latestPost.date) < 30 * 864e5).slice(0, 80).length;
+  const done = require("./neighbors").getVisited();
+  const v = (cache.neighbors || cache.people || []).filter((p) => p.latestPost && done[p.blogId] !== p.latestPost.logNo && !have[visitLocalKey(p)] && Date.now() - new Date(p.latestPost.date) < 30 * 864e5).slice(0, 80).length;
   return c + v;
 }
 
@@ -271,8 +272,9 @@ async function build(cache, { force = false } = {}) {
   if (state.running || !cache) return;
   const have = readHelp();
   const comments = collectComments(cache).filter((q) => force || !have[q.key]);
+  const doneMap = require("./neighbors").getVisited(); // 답방을 마친 글은 추천 댓글을 만들지 않는다
   const visits = (cache.neighbors || cache.people || [])
-    .filter((p) => p.latestPost && (force || !have[visitLocalKey(p)]) && Date.now() - new Date(p.latestPost.date) < 30 * 864e5)
+    .filter((p) => p.latestPost && doneMap[p.blogId] !== p.latestPost.logNo && (force || !have[visitLocalKey(p)]) && Date.now() - new Date(p.latestPost.date) < 30 * 864e5)
     .sort((x, y) => new Date(y.latestPost.date) - new Date(x.latestPost.date))
     .slice(0, 80);
   const total = comments.length + visits.length;

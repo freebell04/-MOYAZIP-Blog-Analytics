@@ -214,6 +214,7 @@
         <th data-sort="comments" class="num">💬 댓글</th>
         <th data-sort="latest">최신 글</th>
         <th>공감</th>
+        <th>답방</th>
         <th></th>
       </tr></thead>
       <tbody id="nb-body"></tbody>
@@ -520,6 +521,7 @@ const VISIT_CATS = [
     test: (p) => !isNeighbor(p) },
   { v: "neighbor", label: "👥 이웃", hint: "내가 추가한 이웃과 서로이웃이에요.", test: isNeighbor },
   { v: "all", label: "전체", hint: "이웃 목록에 있는 모든 사람이에요.", test: () => true },
+  { v: "done", label: "✅ 답방 완료한 글", hint: "답방을 마친 이웃 글이에요 (직접 체크했거나, 네이버에서 이미 공감·댓글을 남긴 글). 체크를 풀면 다시 할 일로 돌아가요.", test: (p) => isDone(p) && !!p.latestPost },
 ];
 const currentCat = () => VISIT_CATS.find((c) => c.v === S.visitCat) || VISIT_CATS[0];
 
@@ -532,7 +534,7 @@ function renderVisit() {
   const cat = currentCat();
 
   $("#visit-cats").innerHTML = VISIT_CATS.map((c) => {
-    const left = pool.filter(c.test).filter((p) => !isDone(p)).length;
+    const left = c.v === "done" ? pool.filter(c.test).length : pool.filter(c.test).filter((p) => !isDone(p)).length;
     return `<button class="cat ${c.v === cat.v ? "on" : ""}" data-cat="${c.v}">${c.label}<span class="cnt">${left}</span></button>`;
   }).join("");
   $("#visit-hint").textContent = cat.hint;
@@ -540,9 +542,10 @@ function renderVisit() {
   const inCat = pool.filter(cat.test);
   const doneN = inCat.filter(isDone).length;
   $("#visit-progress").style.width = inCat.length ? `${(doneN / inCat.length) * 100}%` : "0";
-  $("#visit-progress-label").textContent = `${cat.label.replace(/^\S+\s/, "")} · ${doneN} / ${inCat.length}명 답방 완료`;
+  $("#visit-progress-label").textContent = cat.v === "done" ? `${cat.label.replace(/^\S+\s/, "")} · ${inCat.length}개` : `${cat.label.replace(/^\S+\s/, "")} · ${doneN} / ${inCat.length}명 답방 완료`;
 
-  const list = inCat.filter((p) => S.visitFilter === "all" || (S.visitFilter === "done") === isDone(p));
+  const vf = cat.v === "done" ? "all" : S.visitFilter; // "완료한 글" 칸에서는 완료/할일 구분 없이 모두 보여준다
+  const list = inCat.filter((p) => vf === "all" || (vf === "done") === isDone(p));
   list.sort((a, b) =>
     S.visitSort === "recent" ? postTime(b) - postTime(a) : visitScore(b) - visitScore(a) || postTime(b) - postTime(a));
 
@@ -610,7 +613,7 @@ function renderReply() {
 /** 이웃 목록에서 프로필 아래에 보이는 추천 댓글 한 줄 (AI가 만든 게 있으면 그것, 없으면 글 속 문구로 만든 것) */
 function nbSuggest(n) {
   const lp = n.latestPost;
-  if (!lp) return "";
+  if (!lp || isDone(n)) return ""; // 답방을 마친 글에는 추천 댓글을 쓰지 않는다
   const ai = S.suggestions[`visit:${n.blogId}:${lp.logNo}`];
   const lv = S.help[`lv:${n.blogId}:${lp.logNo}`];
   const t = (ai && ai[0]) || (lv && lv.list && lv.list[0]);
@@ -662,9 +665,10 @@ function renderNeighbors() {
       <td class="num">${n.commentCount || `<span class="zero">0</span>`}</td>
       <td>${lp ? `<a class="clip" style="display:block;color:inherit" href="${esc(lp.link)}" target="_blank" rel="noopener">${isFresh(lp) ? "🆕 " : ""}${esc(lp.title)}</a><small class="muted">${ago(lp.date)}</small>` : `<span class="zero">-</span>`}</td>
       <td>${lp ? likeButton(n.blogId, lp.logNo, true) : ""}</td>
+      <td>${lp ? `<label style="white-space:nowrap"><input type="checkbox" data-done="${esc(n.blogId)}" ${isDone(n) ? "checked" : ""}> 완료</label>` : ""}</td>
       <td>${suggest ? `<a class="btn btn-outline act" href="${BLOG}${esc(n.blogId)}" target="_blank" rel="noopener">이웃추가 하러</a>` : ""}</td>
     </tr>`;
-  }).join("") : `<tr><td colspan="7" class="muted" style="text-align:center;padding:24px">해당하는 이웃이 없어요.</td></tr>`;
+  }).join("") : `<tr><td colspan="8" class="muted" style="text-align:center;padding:24px">해당하는 이웃이 없어요.</td></tr>`;
 }
 
 function renderPosts() {
