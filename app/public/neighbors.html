@@ -663,7 +663,7 @@ function renderNeighbors() {
       <td>${relBadge(relOf(n))}</td>
       <td class="num">${n.likeCount || `<span class="zero">0</span>`}</td>
       <td class="num">${n.commentCount || `<span class="zero">0</span>`}</td>
-      <td>${lp ? `<a class="clip" style="display:block;color:inherit" href="${esc(lp.link)}" target="_blank" rel="noopener">${isFresh(lp) ? "🆕 " : ""}${esc(lp.title)}</a><small class="muted">${ago(lp.date)}</small>` : `<span class="zero">-</span>`}</td>
+      <td>${lp ? `<a class="clip" style="display:block;color:inherit" href="${esc(lp.link)}" target="_blank" rel="noopener" data-split data-tag="visit:${esc(n.blogId)}">${isFresh(lp) ? "🆕 " : ""}${esc(lp.title)}</a><small class="muted">${ago(lp.date)}</small>` : `<span class="zero">-</span>`}</td>
       <td>${lp ? likeButton(n.blogId, lp.logNo, true) : ""}</td>
       <td>${lp ? `<label style="white-space:nowrap"><input type="checkbox" data-done="${esc(n.blogId)}" ${isDone(n) ? "checked" : ""}> 완료</label>` : ""}</td>
       <td>${suggest ? `<a class="btn btn-outline act" href="${BLOG}${esc(n.blogId)}" target="_blank" rel="noopener">이웃추가 하러</a>` : ""}</td>
