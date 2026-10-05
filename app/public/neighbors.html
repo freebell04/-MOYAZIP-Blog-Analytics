@@ -565,7 +565,7 @@ function visitRow(p) {
   return `<div class="row ${done ? "done" : ""}">
     ${avatar(p)}
     <div style="min-width:0">
-      <a class="name" href="${BLOG}${esc(p.blogId)}" target="_blank" rel="noopener">${esc(p.nickname)}</a>${relBadge(p.relation)}${p.isNew ? `<span class="badge b-new">🌱 새 친구</span>` : ""}
+      <a class="name" href="${BLOG}${esc(p.blogId)}" target="_blank" rel="noopener" data-split data-tag="visit:${esc(p.blogId)}">${esc(p.nickname)}</a>${relBadge(p.relation)}${p.isNew ? `<span class="badge b-new">🌱 새 친구</span>` : ""}
       <div class="meta">${meta}</div>
       ${comments[0] ? cmt(comments[0]) : ""}
       ${comments.slice(0, 3).map((c) => helpBlock({ logNo: c.logNo, blogId: p.blogId, date: c.date })).join("")}
@@ -581,7 +581,7 @@ function visitRow(p) {
              <a class="btn btn-primary" href="https://m.blog.naver.com/CommentList.naver?blogId=${esc(p.blogId)}&logNo=${esc(lp.logNo)}" target="_blank" rel="noopener" data-go="${esc(p.blogId)}" data-split data-tag="visit:${esc(p.blogId)}">💬 댓글 쓰러 가기</a>
              <a class="btn btn-outline" href="${esc(lp.link)}" target="_blank" rel="noopener" data-go="${esc(p.blogId)}" data-split data-tag="visit:${esc(p.blogId)}">글 읽으러 가기</a>`
            : `<small class="muted">최신 글을 못 찾았어요</small>
-             <a class="btn btn-outline" href="${BLOG}${esc(p.blogId)}" target="_blank" rel="noopener" data-go="${esc(p.blogId)}">블로그 가기</a>`}
+             <a class="btn btn-outline" href="${BLOG}${esc(p.blogId)}" target="_blank" rel="noopener" data-split data-tag="visit:${esc(p.blogId)}" data-go="${esc(p.blogId)}">블로그 가기</a>`}
       <label><input type="checkbox" data-done="${esc(p.blogId)}" ${done ? "checked" : ""}> 답방 완료</label>
     </div>
   </div>`;
@@ -595,7 +595,7 @@ function renderReply() {
     return `<div class="row">
       ${avatar(p)}
       <div style="min-width:0">
-        <a class="name" href="${BLOG}${esc(u.blogId)}" target="_blank" rel="noopener">${esc(u.nickname)}</a>${relBadge(p.relation)}
+        <a class="name" href="${BLOG}${esc(u.blogId)}" target="_blank" rel="noopener" data-split data-tag="visit:${esc(u.blogId)}">${esc(u.nickname)}</a>${relBadge(p.relation)}
         <div class="meta">${esc(u.title)} · ${ago(u.date)}</div>
         ${u.rootText != null ? `<div class="snippet"><small>원댓글: ${esc(u.rootText) || "(스티커)"}</small></div>` : ""}
         <div class="snippet" style="white-space:normal">${u.text.trim() ? esc(u.text) : "<small>(스티커/이미지)</small>"}</div>
@@ -659,14 +659,14 @@ function renderNeighbors() {
     const suggest = n.addedMe && !n.iAdded;
     const lp = n.latestPost;
     return `<tr class="${suggest && n.likeCount + n.commentCount > 0 ? "hl" : ""}">
-      <td><div class="who">${avatar(n)}<div><a class="name" href="${BLOG}${esc(n.blogId)}" target="_blank" rel="noopener">${esc(n.nickname || n.blogId)}</a><small>${esc(n.blogName || "")}</small>${nbSuggest(n)}</div></div></td>
+      <td><div class="who">${avatar(n)}<div><a class="name" href="${BLOG}${esc(n.blogId)}" target="_blank" rel="noopener" data-split data-tag="visit:${esc(n.blogId)}">${esc(n.nickname || n.blogId)}</a><small>${esc(n.blogName || "")}</small>${nbSuggest(n)}</div></div></td>
       <td>${relBadge(relOf(n))}</td>
       <td class="num">${n.likeCount || `<span class="zero">0</span>`}</td>
       <td class="num">${n.commentCount || `<span class="zero">0</span>`}</td>
       <td>${lp ? `<a class="clip" style="display:block;color:inherit" href="${esc(lp.link)}" target="_blank" rel="noopener" data-split data-tag="visit:${esc(n.blogId)}">${isFresh(lp) ? "🆕 " : ""}${esc(lp.title)}</a><small class="muted">${ago(lp.date)}</small>` : `<span class="zero">-</span>`}</td>
       <td>${lp ? likeButton(n.blogId, lp.logNo, true) : ""}</td>
       <td>${lp ? `<label style="white-space:nowrap"><input type="checkbox" data-done="${esc(n.blogId)}" ${isDone(n) ? "checked" : ""}> 완료</label>` : ""}</td>
-      <td>${suggest ? `<a class="btn btn-outline act" href="${BLOG}${esc(n.blogId)}" target="_blank" rel="noopener">이웃추가 하러</a>` : ""}</td>
+      <td>${suggest ? `<a class="btn btn-outline act" href="${BLOG}${esc(n.blogId)}" target="_blank" rel="noopener" data-split data-tag="visit:${esc(n.blogId)}">이웃추가 하러</a>` : ""}</td>
     </tr>`;
   }).join("") : `<tr><td colspan="8" class="muted" style="text-align:center;padding:24px">해당하는 이웃이 없어요.</td></tr>`;
 }
@@ -851,7 +851,12 @@ document.addEventListener("change", (e) => {
   if (e.target.dataset.tagdone) {
     const tag = e.target.dataset.tagdone;
     setTagDone(tag, e.target.checked);
-    if (e.target.checked) fetch("/api/neighbors/close-tab", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tag }) }).catch(() => {});
+    if (e.target.checked) {
+      const close = (t) => fetch("/api/neighbors/close-tab", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tag: t }) }).catch(() => {});
+      close(tag);
+      const m = tag.match(/^reply:\d+:([\w-]+):/);
+      if (m) close(`visit:${m[1]}`); // 댓글 단 사람의 블로그 창도 같이 닫는다
+    }
   }
 });
 $("#nb-search").addEventListener("input", (e) => { S.nbSearch = e.target.value; renderNeighbors(); });
