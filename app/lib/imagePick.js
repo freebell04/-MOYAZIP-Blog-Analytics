@@ -81,6 +81,43 @@ async function toPng(buf, mime) {
   }
 }
 
+/** 가로 W × 세로 H 로 맞춘다 (비율이 다르면 가운데를 기준으로 넘치는 부분을 잘라낸다). 결과는 PNG */
+async function toPngSized(buf, mime, W, H) {
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage();
+    const url = `data:${mime || "image/png"};base64,${buf.toString("base64")}`;
+    const out = await page.evaluate(async ([u, W, H]) => {
+      const img = new Image();
+      img.src = u;
+      await img.decode();
+      const c = document.createElement("canvas");
+      c.width = W;
+      c.height = H;
+      const x = c.getContext("2d");
+      x.imageSmoothingQuality = "high";
+      const sc = Math.max(W / img.naturalWidth, H / img.naturalHeight); // 꽉 채우고(cover) 가운데 기준으로 자른다
+      const dw = img.naturalWidth * sc, dh = img.naturalHeight * sc;
+      x.drawImage(img, (W - dw) / 2, (H - dh) / 2, dw, dh);
+      return c.toDataURL("image/png");
+    }, [url, W, H]);
+    return { png: Buffer.from(out.split(",")[1], "base64"), w: W, h: H };
+  } finally {
+    await browser.close();
+  }
+}
+
+/** AI 이미지 만들기 같은 다른 흐름이 진행 상태를 알릴 때 쓴다 (챕터 카드가 이미지 고르기와 같은 상태로 보여준다) */
+function setGenState(o) {
+  state = { count: 0, seq: (state && state.seq) || 0, ...o };
+}
+/** 다른 흐름에서 만든 이미지를 "복사됨" 상태로 알린다 */
+function adoptCopied({ chapter, file, quality, width, height }) {
+  try { require("./usage").track("image"); } catch {}
+  state = { status: "copied", chapter, file, previewUrl: `/images/${file}`, quality, width, height, seq: ((state && state.seq) || 0) + 1, count: ((state && state.count) || 0) + 1 };
+  bringEditorToFront();
+}
+
 function savePng(png) {
   fs.mkdirSync(IMG_DIR, { recursive: true });
   const file = `chapter-${Date.now()}-${Math.random().toString(36).slice(2, 7)}.png`;
@@ -261,4 +298,4 @@ function stop() {
   state = { status: "idle" };
 }
 
-module.exports = { startPick, getState, stop, closeTabs, copyImageToClipboard, ENGINES, PICK_SCRIPT, _test: { download, toPng, savePng, handlePick } };
+module.exports = { toPngSized, setGenState, adoptCopied, savePng, startPick, getState, stop, closeTabs, copyImageToClipboard, ENGINES, PICK_SCRIPT, _test: { download, toPng, savePng, handlePick } };

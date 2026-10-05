@@ -320,3 +320,7 @@ button.si-link { cursor: pointer; font-family: inherit; }
 /* 이웃 목록: 프로필 아래 추천 댓글 */
 .nb-sugg { margin-top: 6px; display: flex; gap: 6px; align-items: flex-start; font-size: 12px; line-height: 1.5; color: #374151; background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 6px 8px; max-width: 340px; }
 .nb-sugg span { flex: 1; min-width: 0; }
+
+/* 챕터 카드의 "AI로 이미지 만들기" 버튼 */
+.si-link.ai { border-color: #7c3aed; color: #6d28d9; background: #f5f3ff; font-weight: 700; }
+.si-link.ai:hover { background: #ede9fe; }

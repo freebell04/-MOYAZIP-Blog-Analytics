@@ -248,4 +248,4 @@ function stop() {
   state = { status: "idle" };
 }
 
-module.exports = { start, getState, markTaken, focus, stop, SITES, findReusableTab };
+module.exports = { _h: { firstMatch, putPrompt, pressSend, targetAlive, within, sleep, SITES, LOGIN_URL }, start, getState, markTaken, focus, stop, SITES, findReusableTab };

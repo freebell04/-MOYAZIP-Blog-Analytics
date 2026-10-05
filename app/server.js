@@ -120,6 +120,15 @@ app.post("/api/images/pick", async (req, res) => {
   }
 });
 app.get("/api/images/pick/status", (req, res) => res.json(imagePick.getState()));
+// 챕터 본문으로 ChatGPT가 이미지를 만들어서(1201×673) 복사해 준다 (진행은 위 상태로 확인)
+app.post("/api/images/generate", async (req, res) => {
+  try {
+    const b = req.body || {};
+    res.json(await require("./lib/imageGen").start({ chapter: Number(b.chapter) || 0, heading: String(b.heading || "").slice(0, 200), body: String(b.body || "").slice(0, 3000) }));
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
 app.post("/api/images/pick/stop", (req, res) => { imagePick.stop(); res.json({ ok: true }); });
 app.post("/api/images/pick/close-tabs", async (req, res) => res.json({ ok: true, closed: await imagePick.closeTabs() }));
 app.post("/api/images/copy", async (req, res) => { // 이미 고른 이미지를 다시 클립보드에 복사 (앱에서 이미지를 눌렀을 때)

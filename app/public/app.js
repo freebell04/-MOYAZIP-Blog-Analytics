@@ -590,6 +590,7 @@ const ENGINE_BTNS = [
   { id: "unsplash", label: "🆓 Unsplash", free: true },
   { id: "pexels", label: "🆓 Pexels", free: true },
   { id: "pixabay", label: "🆓 Pixabay", free: true },
+  { id: "aigen", label: "🎨 AI로 이미지 만들기", free: false, ai: true },
 ];
 let pickItems = [];
 let pickPoll = null;
@@ -648,7 +649,7 @@ function renderSectionImages(post) {
         <div class="si-info">
           ${it.note ? `<div class="si-alt">${esc(it.note)}</div>` : ""}
           <div class="si-tag">검색어: <b>${esc(it.ko)}</b>${it.tag ? ` · 영어 태그: <b>${esc(it.tag)}</b>` : ""}</div>
-          <div class="si-links">${ENGINE_BTNS.map((e) => `<button type="button" class="si-link${e.free ? " free" : ""}" data-engine="${e.id}" title="${e.free ? "무료로 쓸 수 있는 사진 사이트" : "저작권을 꼭 확인하세요"}">${e.label}</button>`).join("")}</div>
+          <div class="si-links">${ENGINE_BTNS.map((e) => `<button type="button" class="si-link${e.free ? " free" : ""}${e.ai ? " ai" : ""}" data-engine="${e.id}" title="${e.ai ? "이 챕터 본문 내용으로 ChatGPT가 이미지를 만들어요 (1201×673)" : e.free ? "무료로 쓸 수 있는 사진 사이트" : "저작권을 꼭 확인하세요"}">${e.label}</button>`).join("")}</div>
           <div class="si-state"></div>
         </div>
       </div>
@@ -685,7 +686,20 @@ function paintThumb(i) {
   th.style.cursor = it.file ? "pointer" : "default";
 }
 
+async function startGenFor(i) {
+  const body = (currentPost && currentPost.sections && currentPost.sections[i]) || "";
+  pickState(i, "🎨 ChatGPT에 이미지를 요청하는 중이에요...");
+  const r = await fetch("/api/images/generate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ chapter: i, heading: pickItems[i].heading, body }) })
+    .then((x) => x.json())
+    .catch((e) => ({ error: e.message }));
+  if (r.error) return pickState(i, `<span class="error">⚠ ${esc(netMsg(r.error))}</span>`);
+  clearInterval(pickPoll);
+  pickPoll = setInterval(pollPick, 1500);
+  pollPick();
+}
+
 async function startPickFor(i, engine) {
+  if (engine === "aigen") return startGenFor(i);
   pickWait[i] = 0;
   pickState(i, "⏳ 크롬에 이미지 검색을 여는 중이에요...");
   const r = await fetch("/api/images/pick", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ chapter: i, query: pickItems[i].ko, engine }) })
@@ -713,6 +727,7 @@ async function pollPick() {
   }
   const how = "네이버 글쓰기 창에서 넣을 자리를 누르고 <b>Ctrl+V</b>";
   if (it.copiedAt && Date.now() - it.copiedAt < 5000) return; // 방금 앱에서 이미지를 눌러 다시 복사했으면 그 안내를 잠깐 유지
+  if (st.status === "generating") { pickState(i, `🎨 ${esc(st.note || "ChatGPT가 이미지를 만드는 중이에요 (1~2분)...")}`); return; }
   if (st.status === "opening") pickState(i, "⏳ 크롬에 이미지 검색을 여는 중이에요...");
   else if (st.status === "waiting") {
     const err = st.error ? `<br><span class="error">⚠ ${esc(st.error)}</span>` : "";
