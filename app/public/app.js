@@ -787,8 +787,51 @@ function cleanPostText(v) {
   return v;
 }
 
+/**
+ * 예전 구조의 글({introLines, sectionHeadingLines, sections: ["본문", …]})을 내 템플릿 자리에 맞는 구조로 바꾼다.
+ * (이미 받아 둔 JSON을 내 템플릿 모드에서 쓸 때) 본문의 | 표 | 는 "칸: 칸" 줄로 풀어 쓴다.
+ */
+function legacyToTpl(post) {
+  const clean = (t) => String(t || "").replace(/\*\*/g, "").trim();
+  const firstSentence = (t) => (clean(t).split(/(?<=[.!?요다])\s+/)[0] || "").slice(0, 60);
+  const secs = (post.sections || []).map((body, i) => {
+    const title = clean(((post.sectionHeadingLines || [])[i] || []).join(" ")).replace(/^\d+\.\s*/, "").replace(/^[①-⑩]\s*/, "") || `${i + 1}번`;
+    const lines = [];
+    for (const raw of String(body || "").split("\n")) {
+      const l = raw.trim();
+      if (!l) continue;
+      if (/^\|\s*:?-{2,}/.test(l)) continue; // 표의 구분선
+      if (l.startsWith("|")) {
+        const cells = l.replace(/^\||\|$/g, "").split("|").map((c) => clean(c)).filter(Boolean);
+        if (cells.length) lines.push(cells.length > 1 ? `${cells[0]}: ${cells.slice(1).join(" / ")}` : cells[0]);
+      } else lines.push(clean(l.replace(/^[-*•]\s+/, "• ")));
+    }
+    const short = lines.find((l) => !l.startsWith("•") && !l.includes(": ")) || lines[0] || "";
+    const rest = lines.filter((l) => l !== short);
+    const keyword = ((title.split(/[,，!?！？]/)[0] || title).trim().split(/\s+/).slice(0, 2).join(" ")).slice(0, 12); // 소제목 자리에 들어갈 짧은 키워드
+    return { title, short: short.slice(0, 80), keyword, explain: rest.join("\n") };
+  });
+  const title = clean(post.title);
+  const last = secs[secs.length - 1];
+  return {
+    title,
+    intro: (post.introLines || []).map(clean).join("\n"),
+    shortHeading: (title.split(/[|｜]/)[0] || title).trim().slice(0, 24),
+    topicLine: title.slice(0, 40),
+    sections: secs,
+    tocLines: secs.slice(0, 5).map((x) => x.title.slice(0, 40)),
+    summaryLines: secs.slice(0, 5).map((x) => firstSentence(x.short) || x.title),
+    reflection: last ? (last.explain.split("\n").filter(Boolean).slice(-1)[0] || last.short) : "",
+  };
+}
+
 function loadPost(post) {
   post = cleanPostText(post); // AI가 \n 을 글자 그대로 준 경우를 정리
+  // 내 템플릿 모드인데 예전 구조의 글이 오면 템플릿 구조로 바꿔서 쓴다
+  if (formatInfo && formatInfo.kind === "mytpl" && post && !post.tpl && Array.isArray(post.introLines) && Array.isArray(post.sections) && typeof post.sections[0] === "string") {
+    const tpl = legacyToTpl(post);
+    post.tpl = tpl;
+  }
   // 내 템플릿 모드의 글({intro, sections:[{title,short,keyword,explain}…]})은 미리보기·이미지용 모양으로도 바꿔 둔다 (원본은 tpl에 보관)
   if (post && typeof post.intro === "string" && Array.isArray(post.sections) && post.sections[0] && typeof post.sections[0] === "object") {
     const tpl = JSON.parse(JSON.stringify(post));
