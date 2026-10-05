@@ -757,7 +757,22 @@ async function copyPickedInner(i, it) {
   pickState(i, "✅ 이 이미지를 복사했어요 · 네이버 글쓰기 창에서 넣을 자리를 누르고 <b>Ctrl+V</b>");
 }
 
+const unescapeText = (t) =>
+  String(t)
+    .replace(/\\r\\n|\\n|\\r/g, "\n")
+    .replace(/\\t/g, " ")
+    .replace(/\\"/g, '"')
+    .replace(/\\\//g, "/");
+/** 글(JSON) 안의 모든 글자에서 글자 그대로 들어온 \\n 같은 표시를 정리한다 */
+function cleanPostText(v) {
+  if (typeof v === "string") return unescapeText(v);
+  if (Array.isArray(v)) return v.map(cleanPostText);
+  if (v && typeof v === "object") return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, cleanPostText(x)]));
+  return v;
+}
+
 function loadPost(post) {
+  post = cleanPostText(post); // AI가 \n 을 글자 그대로 준 경우를 정리
   savedDraftOnce = false; // 새 글이면 새로 저장한다
   pickTabsClosed = false;
   // 내 형식을 저장해 쓰는 경우엔 모야ZIP 전용 네이버 템플릿을 적용하지 않는다

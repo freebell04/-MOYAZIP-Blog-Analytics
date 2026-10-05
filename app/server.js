@@ -421,12 +421,14 @@ app.post("/api/save-draft", async (req, res) => {
   if (!body && !sections) return res.status(400).json({ error: "body 또는 sections가 필요합니다." });
 
   try {
+    // 글자 그대로 들어온 \n 같은 표시는 진짜 줄바꿈으로 바꿔서 입력한다 (AI가 JSON을 이중으로 이스케이프해서 줄 때가 있다)
+    const fix = (v) => (typeof v === "string" ? v.replace(/\\r\\n|\\n|\\r/g, "\n").replace(/\\t/g, " ").replace(/\\"/g, '"') : Array.isArray(v) ? v.map(fix) : v);
     const result = await saveDraftToNaver({
-      title,
+      title: fix(title),
       bodyHtml: body,
-      introLines,
-      sectionHeadingLines,
-      sections,
+      introLines: fix(introLines),
+      sectionHeadingLines: fix(sectionHeadingLines),
+      sections: fix(sections),
       imagePaths: imagePaths || [],
       useTemplate: useTemplate !== false,
       continueDraft: continueDraft === true,
