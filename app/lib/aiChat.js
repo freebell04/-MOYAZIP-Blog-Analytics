@@ -89,16 +89,19 @@ const findResultJs = () => `(() => {
     ...[...document.querySelectorAll("pre, code")].map((el) => el.innerText || el.textContent || ""),
     ...[...document.querySelectorAll('[data-message-author-role], user-query, model-response, .query-text, [data-testid*="message"]')].map((el) => el.innerText || ""),
   ];
+  let count = 0, found = null;
   for (let i = sources.length - 1; i >= 0; i--) {
     for (const o of objects(sources[i]).reverse()) {
       try {
         const j = JSON.parse(o);
-        if (isPost(j)) return JSON.stringify({ kind: "post", json: j });
-        if (isFormat(j)) return JSON.stringify({ kind: "format", json: j });
+        const kind = isPost(j) ? "post" : isFormat(j) ? "format" : "";
+        if (!kind) continue;
+        count++;
+        if (!found) found = { kind, json: j };
       } catch {}
     }
   }
-  return null;
+  return JSON.stringify({ count, found });
 })()`;
 
 async function targetAlive(targetId) {
@@ -144,6 +147,49 @@ async function pressSend(client, site, sel) {
  * 이미 열려 있는 이 AI의 "새 대화" 탭을 찾는다. 입력창이 보이고 비어 있으면 로그인된 상태 + 바로 쓸 수 있는 탭이라
  * 새 탭을 열지 않고 그대로 이어 쓴다. (이미 대화가 진행 중인 탭은 건드리지 않는다)
  */
+// ---- 한 대화(탭)를 계속 쓴다: 처음 한 번만 새 대화를 만들고, 그 뒤로는 같은 탭에 이어서 보낸다 ----
+const TABS_PATH = require("path").join(__dirname, "..", "data", "ai-tabs.json");
+function readTabs() {
+  try { return JSON.parse(require("fs").readFileSync(TABS_PATH, "utf-8")); } catch { return {}; }
+}
+function rememberTab(ai, id) {
+  const t = readTabs();
+  t[ai] = id;
+  try { require("fs").mkdirSync(require("path").dirname(TABS_PATH), { recursive: true }); require("fs").writeFileSync(TABS_PATH, JSON.stringify(t)); } catch {}
+}
+
+/**
+ * 이 AI의 대화 탭을 구한다 (글쓰기·형식 분석·이미지 만들기가 모두 같은 탭을 쓴다).
+ *  1) 지난번에 쓰던 대화 탭이 아직 그 AI 사이트로 열려 있으면 그대로 이어서 쓴다 (새 대화를 만들지 않는다)
+ *  2) 없으면 이미 열려 있는 새 대화 탭 → 3) 그것도 없으면 새 탭 (처음 한 번)
+ * @returns {Promise<{id, client, continued:boolean, reused:boolean}>}
+ */
+async function acquireTab(ai, site) {
+  const port = new URL(session.CDP_URL).port || "9222";
+  const id = readTabs()[ai];
+  if (id) {
+    try {
+      const list = await (await fetch(`${session.CDP_URL}/json/list`)).json();
+      const t = list.find((x) => x.id === id && x.type === "page");
+      if (t && (() => { try { return new URL(t.url).hostname === new URL(site.url).hostname && !LOGIN_URL.test(t.url); } catch { return false; } })()) {
+        const client = await within(connectPage(`ws://localhost:${port}/devtools/page/${id}`), 3000);
+        if (client && client.eval) return { id, client, continued: true, reused: true };
+      }
+    } catch {}
+  }
+  const reuse = await findReusableTab(ai, site);
+  if (reuse) { rememberTab(ai, reuse.id); return { ...reuse, continued: false, reused: true }; }
+  const version = await (await fetch(`${session.CDP_URL}/json/version`)).json();
+  const browserWs = await connectPage(version.webSocketDebuggerUrl);
+  // 빈 탭을 만든 뒤 붙고 나서 이동한다 (URL로 바로 만들면 붙은 연결이 처음 about:blank 화면에 묶여 있는 경우가 있다)
+  const { targetId } = await browserWs.send("Target.createTarget", { url: "about:blank", newWindow: false });
+  browserWs.close();
+  const client = await connectPage(`ws://localhost:${port}/devtools/page/${targetId}`);
+  await within(client.send("Page.navigate", { url: site.url }), 3000);
+  rememberTab(ai, targetId);
+  return { id: targetId, client, continued: false, reused: false };
+}
+
 async function findReusableTab(ai, site) {
   try {
     const list = await (await fetch(`${session.CDP_URL}/json/list`)).json();
@@ -175,26 +221,12 @@ async function start(ai, prompt, kind = "post") {
   (async () => {
     try {
       await session.ensureDebugChrome();
-      // 1순위(가장 빠름): 이미 열려 있는 새 대화 탭 = 이미 로그인돼 있다는 뜻 → 로그인 확인 없이 그대로 쓴다
-      const reuse = await findReusableTab(ai, site);
-      let targetId, client;
-      if (reuse) {
-        targetId = reuse.id;
-        client = reuse.client;
-        s.reused = true;
-        s.note = `이미 열려 있던 ${site.name} 탭(로그인 상태)을 이어서 썼어요.`;
-      } else {
-        // 2순위: 같은 크롬에 새 탭을 연다 (이 크롬에서 한 번이라도 로그인했다면 쿠키로 바로 로그인된 상태)
-        const version = await (await fetch(`${session.CDP_URL}/json/version`)).json();
-        const browserWs = await connectPage(version.webSocketDebuggerUrl);
-        // 빈 탭을 만든 뒤 붙고 나서 이동한다 (URL로 바로 만들면 붙은 연결이 처음 about:blank 화면에 묶여 있는 경우가 있다)
-        ({ targetId } = await browserWs.send("Target.createTarget", { url: "about:blank", newWindow: false }));
-        browserWs.close();
-        const port = new URL(session.CDP_URL).port || "9222";
-        client = await connectPage(`ws://localhost:${port}/devtools/page/${targetId}`);
-        // 응답(로드 완료)을 오래 기다리지 않는다 — 아래에서 입력창이 생길 때까지 어차피 확인하며 기다린다
-        await within(client.send("Page.navigate", { url: site.url }), 3000);
-      }
+      const tab = await acquireTab(ai, site);
+      const targetId = tab.id;
+      const client = tab.client;
+      s.reused = tab.reused;
+      if (tab.continued) s.note = `이전에 쓰던 ${site.name} 대화 창에 이어서 보냈어요 (새 대화를 만들지 않았어요).`;
+      else if (tab.reused) s.note = `이미 열려 있던 ${site.name} 탭(로그인 상태)을 이어서 썼어요.`;
       s.targetId = targetId;
       s.client = client;
       session.notifyChrome(`${site.name} 채팅 창`);
@@ -222,6 +254,9 @@ async function start(ai, prompt, kind = "post") {
       }
       await sleep(800); // 입력창이 막 생긴 직후엔 이벤트를 못 받는 경우가 있다
 
+      // 이어 쓰는 대화에는 예전 결과가 남아 있어서, 지금 보내기 전의 개수를 기억해 두고 "새로 늘어난" 결과만 받는다
+      let baseline = 0;
+      try { baseline = JSON.parse(await client.eval(findResultJs())).count || 0; } catch {}
       s.status = "sending";
       await putPrompt(client, sel, prompt);
       const sent = await pressSend(client, site, sel);
@@ -235,7 +270,9 @@ async function start(ai, prompt, kind = "post") {
       while (s === state) {
         if (client.closed || !(await targetAlive(targetId).catch(() => true))) return void (s.status = "closed");
         if (Date.now() > chatDeadline) return void (s.status = "timeout");
-        const found = await client.eval(findResultJs()).catch(() => null);
+        let cur = null;
+        try { cur = JSON.parse(await client.eval(findResultJs())); } catch {}
+        const found = cur && cur.found && cur.count > baseline ? JSON.stringify(cur.found) : null; // 보내기 전보다 늘어난 결과만
         if (found && found === last) {
           const r = JSON.parse(found);
           s.kind = r.kind; // 글감으로 시작했는데 형식(분석) 결과가 온 경우 등, 실제로 받은 종류를 따른다
@@ -276,4 +313,4 @@ function stop() {
   state = { status: "idle" };
 }
 
-module.exports = { _h: { firstMatch, putPrompt, pressSend, targetAlive, within, sleep, SITES, LOGIN_URL }, start, getState, markTaken, focus, stop, SITES, findReusableTab };
+module.exports = { acquireTab, _h: { firstMatch, putPrompt, pressSend, targetAlive, within, sleep, SITES, LOGIN_URL }, start, getState, markTaken, focus, stop, SITES, findReusableTab };

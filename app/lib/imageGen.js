@@ -61,18 +61,8 @@ const FETCH_DATAURL = (src) => `(async () => {
   return await new Promise((res, rej) => { const f = new FileReader(); f.onload = () => res(f.result); f.onerror = rej; f.readAsDataURL(b); });
 })()`;
 
-async function openTab(site) {
-  const reuse = await aiChat.findReusableTab("chatgpt", site);
-  if (reuse) return reuse;
-  const version = await (await fetch(`${session.CDP_URL}/json/version`)).json();
-  const browserWs = await connectPage(version.webSocketDebuggerUrl);
-  const { targetId } = await browserWs.send("Target.createTarget", { url: "about:blank", newWindow: false });
-  browserWs.close();
-  const port = new URL(session.CDP_URL).port || "9222";
-  const client = await connectPage(`ws://localhost:${port}/devtools/page/${targetId}`);
-  await within(client.send("Page.navigate", { url: site.url }), 3000);
-  return { id: targetId, client };
-}
+// 글을 쓰던 ChatGPT 대화 탭을 그대로 이어서 쓴다 (없을 때만 새 대화를 만든다)
+const openTab = (site) => aiChat.acquireTab("chatgpt", site);
 
 /** 이미지 만들기를 시작한다 (바로 반환 — 진행은 이미지 고르기와 같은 상태로 확인) */
 async function start({ chapter, heading, body, style = "auto", paste = true }) {
