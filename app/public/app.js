@@ -334,6 +334,7 @@ $("#save-draft-btn").addEventListener("click", async () => {
       imagePaths: Object.values(selectedImagePaths),
       useTemplate: $("#use-template-checkbox").checked,
       continueDraft: savedDraftOnce,
+      tpl: currentPost.tpl,
     }),
   }).then((r) => r.json()).catch((e) => ({ error: e.message }));
 
@@ -788,6 +789,14 @@ function cleanPostText(v) {
 
 function loadPost(post) {
   post = cleanPostText(post); // AI가 \n 을 글자 그대로 준 경우를 정리
+  // 내 템플릿 모드의 글({intro, sections:[{title,short,keyword,explain}…]})은 미리보기·이미지용 모양으로도 바꿔 둔다 (원본은 tpl에 보관)
+  if (post && typeof post.intro === "string" && Array.isArray(post.sections) && post.sections[0] && typeof post.sections[0] === "object") {
+    const tpl = JSON.parse(JSON.stringify(post));
+    post.tpl = tpl;
+    post.introLines = [tpl.intro];
+    post.sectionHeadingLines = tpl.sections.map((s) => [s.title || ""]);
+    post.sections = tpl.sections.map((s) => [s.short, s.keyword ? `소제목: ${s.keyword}` : "", s.explain].filter(Boolean).join("\n"));
+  }
   savedDraftOnce = false; // 새 글이면 새로 저장한다
   pickTabsClosed = false;
   // 내 형식을 저장해 쓰는 경우엔 모야ZIP 전용 네이버 템플릿을 적용하지 않는다

@@ -733,7 +733,12 @@ async function saveDraftToNaver(post) {
 
     const titleArea = frame.locator(".se-title-text .se-text-paragraph, .se-documentTitle .se-text-paragraph").first();
 
-    if (useTemplate && post.introLines && post.introLines.length && post.sections && post.sections.length) {
+    if (useTemplate && post.tpl) {
+      // 내 템플릿 모드: 제목을 넣고, 템플릿의 자리(인트로·목차 표·본문 ①~⑥·요약 표·소감)에 글을 채운다
+      await replaceShortText(page, titleArea, post.title);
+      await page.waitForTimeout(500);
+      await require("./myTemplate").fillMyTemplate(frame, page, post.tpl, { replaceShortText, replaceWrappedText });
+    } else if (useTemplate && post.introLines && post.introLines.length && post.sections && post.sections.length) {
       await replaceShortText(page, titleArea, post.title);
       await page.waitForTimeout(500);
       // 템플릿의 정확한 자리에 본문만 채워 넣기 (목차/전체요약은 2단계에서 별도로)
@@ -979,4 +984,4 @@ const guarded = (fn) => async (...a) => {
 };
 const isBusy = () => busyDepth > 0;
 
-module.exports = { saveDraftToNaver: guarded(saveDraftToNaver), finalizeTocAndSummary: guarded(finalizeTocAndSummary), openTemplateEditor: guarded(openTemplateEditor), isBusy, _test: { composeStyledBlocks, writeStyledBody, verifyStyledBody } };
+module.exports = { saveDraftToNaver: guarded(saveDraftToNaver), finalizeTocAndSummary: guarded(finalizeTocAndSummary), openTemplateEditor: guarded(openTemplateEditor), isBusy, _test: { composeStyledBlocks, writeStyledBody, verifyStyledBody, replaceShortText, replaceWrappedText } };

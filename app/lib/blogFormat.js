@@ -49,7 +49,11 @@ function clear() {
 }
 
 /** 앱 화면에 보여줄 현재 형식 정보. useTemplate: 네이버 '앞으로 쓸 템플릿'을 적용할지 */
+/** 이 컴퓨터에서 "내 템플릿(앞으로 쓸 템플릿)으로 바로 쓰기"가 켜져 있는지 (data/owner.json 의 {"myTemplate": true} — 다른 사람에게는 화면에 나타나지 않는다) */
+const myTemplateOn = () => !!ownerSettings().myTemplate;
+
 function describe() {
+  if (myTemplateOn()) return { kind: "mytpl", name: "내 템플릿 (앞으로 쓸 템플릿)", format: null, useTemplate: true };
   const saved = getSaved();
   if (saved) return { kind: "saved", name: saved.formatName || "내 블로그 형식", format: saved, useTemplate: false };
   if (DEFAULT_KIND === "moyazip" || ownerSettings().moyazipTemplate) return { kind: "moyazip", name: "모야ZIP 형식 (기본)", format: null, useTemplate: false }; // 네이버 템플릿은 안 불러오고 빈 글쓰기 화면에 바로 쓴다
@@ -210,7 +214,30 @@ function withExtras(schemaStr) {
 function buildPostPrompt(data) {
   const d = describe();
   let rules, schema;
-  if (d.kind === "saved") {
+  if (d.kind === "mytpl") {
+    rules = [
+      "- 원문 문장을 베끼지 말고 새로 쓸 것", ...READABILITY_RULES,
+      "- 내 네이버 블로그 템플릿(앞으로 쓸 템플릿)의 자리에 그대로 채워 넣을 거라서, 아래 JSON 구조와 글자 수를 정확히 지켜줘.",
+      "- title: 블로그 제목 (한 줄)",
+      "- intro: 인트로 글 (3~5문장. 줄을 바꾸려면 \\n 한 번만 써서 문단을 나눠)",
+      "- shortHeading: 짧은 소제목 (인트로 아래에 들어갈 한 줄, 15자 안팎)",
+      "- topicLine: 이번 주제에 대한 한 줄 (목차 표 맨 위 \"주제\" 칸에 들어감)",
+      "- sections: 정확히 6개 (본문 블록 ①~⑥). 각각 title(본문 제목, 짧게) / short(짧은 본문, 한 줄) / keyword(소제목: 핵심 키워드 딱 1개) / explain(소제목에 대한 설명, 3~5문장).",
+      "- tocLines: 정확히 5개 — 목차 표 ①~⑤ 칸에 들어갈 본문 내용 한 줄씩 (섹션 1~5에 해당)",
+      "- summaryLines: 정확히 5개 — 요약 표 1~5 칸에 들어갈 한 줄 요약 (섹션 1~5에 해당)",
+      "- reflection: 소중한 기록 \"소감\" (2~3문장, 솔직한 느낌)",
+    ];
+    schema = JSON.stringify({
+      title: "블로그 제목",
+      intro: "인트로 글",
+      shortHeading: "짧은 소제목",
+      topicLine: "이번 주제에 대한 한 줄",
+      sections: Array.from({ length: 6 }, (_, i) => ({ title: `${i + 1}번 본문 제목`, short: "짧은 본문 한 줄", keyword: "소제목 키워드 1개", explain: "소제목에 대한 설명" })),
+      tocLines: ["①번 내용 한 줄", "②번 내용 한 줄", "③번 내용 한 줄", "④번 내용 한 줄", "⑤번 내용 한 줄"],
+      summaryLines: ["1번 한 줄 요약", "2번 한 줄 요약", "3번 한 줄 요약", "4번 한 줄 요약", "5번 한 줄 요약"],
+      reflection: "소감",
+    });
+  } else if (d.kind === "saved") {
     const n = d.format.sections.length;
     rules = ["- 원문 문장을 베끼지 말고 새로 쓸 것", ...READABILITY_RULES, ...formatRules(d.format)];
     schema = JSON.stringify({
@@ -271,4 +298,4 @@ function buildPostPrompt(data) {
   ].join("\n");
 }
 
-module.exports = { getSaved, save, clear, describe, isValidFormat, fetchOwnSamples, buildAnalyzePrompt, buildPostPrompt };
+module.exports = { myTemplateOn, getSaved, save, clear, describe, isValidFormat, fetchOwnSamples, buildAnalyzePrompt, buildPostPrompt };

@@ -441,13 +441,14 @@ app.post("/api/save-draft", async (req, res) => {
 
   try {
     // 글자 그대로 들어온 \n 같은 표시는 진짜 줄바꿈으로 바꿔서 입력한다 (AI가 JSON을 이중으로 이스케이프해서 줄 때가 있다)
-    const fix = (v) => (typeof v === "string" ? v.replace(/\\r\\n|\\n|\\r/g, "\n").replace(/\\t/g, " ").replace(/\\"/g, '"') : Array.isArray(v) ? v.map(fix) : v);
+    const fix = (v) => (typeof v === "string" ? v.replace(/\\r\\n|\\n|\\r/g, "\n").replace(/\\t/g, " ").replace(/\\"/g, '"') : Array.isArray(v) ? v.map(fix) : v && typeof v === "object" ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, fix(x)])) : v);
     const result = await saveDraftToNaver({
       title: fix(title),
       bodyHtml: body,
       introLines: fix(introLines),
       sectionHeadingLines: fix(sectionHeadingLines),
       sections: fix(sections),
+      tpl: req.body.tpl ? fix(req.body.tpl) : undefined,
       imagePaths: imagePaths || [],
       useTemplate: useTemplate !== false,
       continueDraft: continueDraft === true,
