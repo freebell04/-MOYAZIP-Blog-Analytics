@@ -406,11 +406,26 @@ async function loadFormat() {
   if (!formatInfo) return;
   $("#format-name").textContent = formatInfo.name;
   $("#format-json").value = formatInfo.format ? JSON.stringify(formatInfo.format, null, 2) : "";
+  // 내 템플릿 모드: 이 칸의 AI 버튼은 "분석"이 아니라 "내 템플릿에 바로 글쓰기"로 바뀐다
+  const my = formatInfo.kind === "mytpl";
+  document.querySelectorAll(".format-analyze-btn").forEach((b) => {
+    b.textContent = my ? b.textContent.replace("로 분석", "로 내 템플릿에 쓰기") : b.textContent.replace("로 내 템플릿에 쓰기", "로 분석");
+  });
+  const desc = $("#format-desc");
+  if (desc) desc.textContent = my ? "내 네이버 템플릿(앞으로 쓸 템플릿)에 맞춰 바로 써요. 위에서 글감을 체크하거나 주제를 적은 뒤 AI 버튼을 누르면, 대화를 마치고 \"완성\"이라고 보낼 때 템플릿 자리에 글이 채워져요." : "내 최근 글 3개를 AI가 분석해서 제목·말투·구성·마무리 방식을 저장해두면, 초안을 쓸 때 그 형식을 따라요. (내 컴퓨터에만 저장)";
+  const det = $("#format-details");
+  if (det) det.style.display = my ? "none" : "";
 }
 loadFormat();
 
 document.querySelectorAll(".format-analyze-btn").forEach((btn) => {
   btn.addEventListener("click", async () => {
+    // 내 템플릿 모드에서는 위 "AI와 대화하면서 글쓰기"의 같은 AI 버튼을 누른 것과 똑같이 글쓰기를 시작한다
+    if (formatInfo && formatInfo.kind === "mytpl") {
+      const target = document.querySelector(`.handoff-btn[data-ai="${btn.dataset.ai}"]`);
+      if (target) target.click();
+      return;
+    }
     document.querySelectorAll(".format-analyze-btn").forEach((b) => (b.disabled = true));
     $("#format-status").textContent = "내 블로그 최근 글을 읽는 중이에요...";
     const r = await fetch("/api/format/analyze", {
