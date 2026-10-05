@@ -353,13 +353,14 @@ app.post("/api/handoff", async (req, res) => {
 // --- AI 채팅(ChatGPT/Gemini/Claude) 연결: 로그인용 크롬에 채팅 탭을 열고 요청문을 보낸 뒤, 결과 JSON을 자동으로 받아온다 ---
 app.post("/api/ai-chat", async (req, res) => {
   const { ai, keyword, selected, context } = req.body;
+  const mode = req.body.mode === "mytpl" ? "mytpl" : "default"; // mytpl = 내 블로그 글 형식 칸에서 시작 (내 템플릿에 쓰기)
   if (!aiChat.SITES[ai]) return res.status(400).json({ error: "지원하지 않는 AI예요." });
   // 글감이 없어도(검색 결과가 없는 지점·가게 후기 등) 키워드만으로 시작할 수 있다 — AI가 먼저 내게 질문해서 정보를 받아 쓴다
   if ((!selected || !selected.length) && !String(keyword || "").trim()) return res.status(400).json({ error: "검색어나 글감이 필요해요. 위 입력칸에 주제를 적어주세요." });
   try {
     const data = await makeHandoff(keyword, selected || [], context);
-    const prompt = blogFormat.buildPostPrompt(data);
-    const st = await aiChat.start(ai, prompt);
+    const prompt = blogFormat.buildPostPrompt(data, { myTemplate: mode === "mytpl" });
+    const st = await aiChat.start(ai, prompt, "post", mode);
     usage.track("ai");
     res.json({ success: true, ...st, count: data.items.length, prompt });
   } catch (e) {
@@ -381,7 +382,7 @@ app.post("/api/ai-chat/stop", (req, res) => {
 });
 
 // --- 내 블로그 글 형식: 최근 글로 AI에게 분석받아 저장하고, 초안 요청문에 반영 ---
-app.get("/api/format", (req, res) => res.json(blogFormat.describe()));
+app.get("/api/format", (req, res) => res.json({ ...blogFormat.describe(), myTemplateAvailable: blogFormat.myTemplateOn() })); // myTemplateAvailable: 이 컴퓨터에서 내 템플릿 쓰기가 켜져 있는지
 app.post("/api/format", (req, res) => {
   try {
     const saved = blogFormat.save(req.body);

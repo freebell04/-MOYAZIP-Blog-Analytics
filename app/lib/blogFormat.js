@@ -53,7 +53,6 @@ function clear() {
 const myTemplateOn = () => !!ownerSettings().myTemplate;
 
 function describe() {
-  if (myTemplateOn()) return { kind: "mytpl", name: "내 템플릿 (앞으로 쓸 템플릿)", format: null, useTemplate: true };
   const saved = getSaved();
   if (saved) return { kind: "saved", name: saved.formatName || "내 블로그 형식", format: saved, useTemplate: false };
   if (DEFAULT_KIND === "moyazip" || ownerSettings().moyazipTemplate) return { kind: "moyazip", name: "모야ZIP 형식 (기본)", format: null, useTemplate: false }; // 네이버 템플릿은 안 불러오고 빈 글쓰기 화면에 바로 쓴다
@@ -211,8 +210,9 @@ function withExtras(schemaStr) {
   }
 }
 
-function buildPostPrompt(data) {
-  const d = describe();
+function buildPostPrompt(data, opts = {}) {
+  // 내 템플릿 요청(내 블로그 글 형식 칸의 AI 버튼)이고 이 컴퓨터에서 켜져 있을 때만 내 템플릿 구조로 쓴다. 그 밖(AI와 대화하면서 글쓰기 등)은 원래 형식 그대로
+  const d = opts.myTemplate && myTemplateOn() ? { kind: "mytpl", name: "내 템플릿 (앞으로 쓸 템플릿)", format: null, useTemplate: true } : describe();
   let rules, schema;
   if (d.kind === "mytpl") {
     rules = [

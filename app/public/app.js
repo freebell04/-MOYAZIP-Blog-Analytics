@@ -407,7 +407,7 @@ async function loadFormat() {
   $("#format-name").textContent = formatInfo.name;
   $("#format-json").value = formatInfo.format ? JSON.stringify(formatInfo.format, null, 2) : "";
   // 내 템플릿 모드: 이 칸의 AI 버튼은 "분석"이 아니라 "내 템플릿에 바로 글쓰기"로 바뀐다
-  const my = formatInfo.kind === "mytpl";
+  const my = !!formatInfo.myTemplateAvailable;
   document.querySelectorAll(".format-analyze-btn").forEach((b) => {
     b.textContent = my ? b.textContent.replace("로 분석", "로 내 템플릿에 쓰기") : b.textContent.replace("로 내 템플릿에 쓰기", "로 분석");
   });
@@ -421,9 +421,8 @@ loadFormat();
 document.querySelectorAll(".format-analyze-btn").forEach((btn) => {
   btn.addEventListener("click", async () => {
     // 내 템플릿 모드에서는 위 "AI와 대화하면서 글쓰기"의 같은 AI 버튼을 누른 것과 똑같이 글쓰기를 시작한다
-    if (formatInfo && formatInfo.kind === "mytpl") {
-      const target = document.querySelector(`.handoff-btn[data-ai="${btn.dataset.ai}"]`);
-      if (target) target.click();
+    if (formatInfo && formatInfo.myTemplateAvailable) {
+      startHandoff(btn.dataset.ai, "mytpl"); // 내 블로그 글 형식 칸에서 누르면 내 템플릿으로 쓴다
       return;
     }
     document.querySelectorAll(".format-analyze-btn").forEach((b) => (b.disabled = true));
@@ -521,7 +520,7 @@ async function pollAiChat() {
       loadFormat();
     } else {
       line.textContent = `✅ ${st.name}의 완성본을 받아왔어요.`;
-      loadPost(st.result);
+      loadPost(st.result, { mytpl: st.mode === "mytpl" });
     }
     return;
   }
@@ -537,17 +536,16 @@ async function pollAiChat() {
   if (["closed", "timeout"].includes(st.status)) { clearInterval(aiPollTimer); if (aiBusy) { aiBusy = false; busyOff(); } setAiButtons(false); }
 }
 
-document.querySelectorAll(".handoff-btn").forEach((btn) => {
-  btn.addEventListener("click", async () => {
+async function startHandoff(ai, mode = "default") {
+  {
     if (!selectedItems.length && !$("#keyword").value.trim()) return alert("글감을 하나 이상 선택하거나, 위 입력칸에 주제를 적어주세요.");
     if (!selectedItems.length && !confirm("선택한 글감 없이 시작할까요?\n\nAI가 먼저 질문을 하고, 내가 답한 사실로만 글을 써요. (검색 결과가 없는 주제에 알맞아요)")) return;
-    const ai = btn.dataset.ai;
     setAiButtons(true);
     $("#handoff-status").textContent = "글감 본문을 모으는 중이에요...";
     const r = await fetch("/api/ai-chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ai, keyword: $("#keyword").value.trim(), selected: selectedItems, context: searchCtx ? { title: searchCtx.title, questions: searchCtx.questions, refs: searchCtx.refs } : undefined }),
+      body: JSON.stringify({ ai, mode, keyword: $("#keyword").value.trim(), selected: selectedItems, context: searchCtx ? { title: searchCtx.title, questions: searchCtx.questions, refs: searchCtx.refs } : undefined }),
     })
       .then((r) => r.json())
       .catch((e) => ({ error: e.message }));
@@ -562,8 +560,9 @@ document.querySelectorAll(".handoff-btn").forEach((btn) => {
     clearInterval(aiPollTimer);
     aiPollTimer = setInterval(pollAiChat, 2000);
     pollAiChat();
-  });
-});
+  }
+}
+document.querySelectorAll(".handoff-btn").forEach((btn) => btn.addEventListener("click", () => startHandoff(btn.dataset.ai, "default")));
 
 $("#handoff-copy-btn").addEventListener("click", async () => {
   const ta = $("#handoff-prompt");
@@ -846,10 +845,10 @@ function legacyToTpl(post) {
   };
 }
 
-function loadPost(post) {
+function loadPost(post, opts = {}) {
   post = cleanPostText(post); // AI가 \n 을 글자 그대로 준 경우를 정리
-  // 내 템플릿 모드인데 예전 구조의 글이 오면 템플릿 구조로 바꿔서 쓴다
-  if (formatInfo && formatInfo.kind === "mytpl" && post && !post.tpl && Array.isArray(post.introLines) && Array.isArray(post.sections) && typeof post.sections[0] === "string") {
+  // 내 블로그 글 형식 칸(내 템플릿)에서 시작했는데 예전 구조의 글이 오면 템플릿 구조로 바꿔서 쓴다
+  if (opts.mytpl && formatInfo && formatInfo.myTemplateAvailable && post && !post.tpl && Array.isArray(post.introLines) && Array.isArray(post.sections) && typeof post.sections[0] === "string") {
     const tpl = legacyToTpl(post);
     post.tpl = tpl;
   }
@@ -864,7 +863,7 @@ function loadPost(post) {
   savedDraftOnce = false; // 새 글이면 새로 저장한다
   pickTabsClosed = false;
   // 내 형식을 저장해 쓰는 경우엔 모야ZIP 전용 네이버 템플릿을 적용하지 않는다
-  if (formatInfo) $("#use-template-checkbox").checked = !!formatInfo.useTemplate;
+  $("#use-template-checkbox").checked = post.tpl ? true : !!(formatInfo && formatInfo.useTemplate);
   post.introLines = post.introLines || [];
   post.sectionHeadingLines = post.sectionHeadingLines || [];
   currentPost = post;

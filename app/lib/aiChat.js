@@ -252,11 +252,11 @@ async function findReusableTab(ai, site) {
 }
 
 /** AI 채팅 탭을 열고 요청문을 보낸 뒤, 결과 JSON이 나올 때까지 지켜본다 (바로 반환 — 진행은 getState()). */
-async function start(ai, prompt, kind = "post") {
+async function start(ai, prompt, kind = "post", mode = "default") {
   const site = SITES[ai];
   if (!site) throw new Error("알 수 없는 AI예요: " + ai);
   if (state.client) state.client.close(); // 이전 대화 지켜보기는 그만둔다 (탭은 그대로 둠)
-  const s = (state = { status: "opening", ai, kind, name: site.name, startedAt: Date.now() });
+  const s = (state = { status: "opening", ai, kind, mode, name: site.name, startedAt: Date.now() });
 
   (async () => {
     try {
