@@ -8,7 +8,7 @@ const fs = require("fs");
 const { execFile } = require("child_process");
 
 const SCRIPT = path.join(__dirname, "..", "data", "window-layout.ps1");
-const TITLE_KEY = "네이버 블로그 자동화";
+const TITLE_KEY = "네이버 블로그 자동화|이웃 소통|성과 통계"; // 이 프로그램 화면들의 창 제목 (| 로 구분)
 
 const PS = `param([string]$Mode, [string]$Profile, [string]$TitleKey)
 Add-Type -AssemblyName System.Windows.Forms
@@ -30,7 +30,8 @@ $wa = [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea
 $cp = Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" | Where-Object { $_.CommandLine -and $_.CommandLine.Contains($Profile) -and $_.CommandLine -notmatch '--type=' } | Select-Object -First 1
 $chr = $null
 if ($cp) { $chr = Get-Process -Id $cp.ProcessId -ErrorAction SilentlyContinue }
-$dash = Get-Process | Where-Object { $_.MainWindowHandle -ne 0 -and $_.MainWindowTitle -like "*$TitleKey*" -and ((-not $chr) -or $_.Id -ne $chr.Id) } | Select-Object -First 1
+$keys = $TitleKey -split "\|"
+$dash = Get-Process | Where-Object { $p = $_; $_.MainWindowHandle -ne 0 -and ($keys | Where-Object { $p.MainWindowTitle -like "*$_*" }) -and ((-not $chr) -or $_.Id -ne $chr.Id) } | Select-Object -First 1
 $half = [int]($wa.Width / 2)
 if ($Mode -eq 'info') { "dash=" + [bool]$dash + " chrome=" + [bool]($chr -and $chr.MainWindowHandle -ne 0); exit }
 if ($Mode -eq 'dashboard') { if ($dash) { Raise $dash.MainWindowHandle }; exit }

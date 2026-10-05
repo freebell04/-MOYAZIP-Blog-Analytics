@@ -102,6 +102,7 @@ async function openAndWatch(blogId, logNo) {
   if (cur && cur.status === "watching" && cur.client) {
     await cur.client.send("Page.bringToFront").catch(() => {}); // 이미 열려 있으면 그 창을 앞으로
     session.notifyChrome("이웃 글 창");
+    require("./windowLayout").splitSoon([800, 3500]); // 왼쪽: 이웃 소통 화면, 오른쪽: 이웃 글 (반반)
     return;
   }
   if (cur && cur.status === "opening") return;
@@ -123,6 +124,7 @@ async function openAndWatch(blogId, logNo) {
     w.client = client;
     await client.send("Page.bringToFront").catch(() => {});
     session.notifyChrome("이웃 글 창");
+    require("./windowLayout").splitSoon([800, 3500]); // 왼쪽: 이웃 소통 화면, 오른쪽: 이웃 글 (반반)
 
     // 공감 버튼은 스크롤해야 늦게 불러와져서, 아래로 내려가며 버튼이 생길 때까지 기다린 뒤 그 위치로 맞춘다
     let ready = false;
@@ -169,4 +171,26 @@ async function openAndWatch(blogId, logNo) {
   }
 }
 
-module.exports = { openAndWatch, getWatches, getLiked, connectPage };
+/** 답방을 마친 이웃의 글 탭을 닫는다 (이 프로그램이 열었던 탭과, 같은 이웃의 글이 열린 다른 탭 모두) */
+async function closeFor(blogId) {
+  if (!/^[\w-]+$/.test(String(blogId || ""))) return 0;
+  let n = 0;
+  for (const [k, w] of Object.entries(watches)) {
+    if (k.startsWith(blogId + ":")) {
+      try { w.client && w.client.close(); } catch {}
+      delete watches[k];
+    }
+  }
+  try {
+    const list = await (await fetch(`${session.CDP_URL}/json/list`, { signal: AbortSignal.timeout(3000) })).json();
+    const re = new RegExp(`(blogId=${blogId}(&|$)|naver\\.com/${blogId}(/|\\?|$))`, "i");
+    for (const t of list.filter((x) => x.type === "page" && /blog\.naver\.com/.test(x.url) && re.test(x.url))) {
+      if (/postwrite|PostWriteForm|Redirect=Write/i.test(t.url)) continue; // 글쓰기 탭은 건드리지 않는다
+      const r = await fetch(`${session.CDP_URL}/json/close/${t.id}`, { signal: AbortSignal.timeout(3000) }).catch(() => null);
+      if (r && r.ok) n++;
+    }
+  } catch {}
+  return n;
+}
+
+module.exports = { openAndWatch, getWatches, getLiked, connectPage, closeFor };

@@ -213,6 +213,7 @@
         <th data-sort="likes" class="num">❤️ 공감</th>
         <th data-sort="comments" class="num">💬 댓글</th>
         <th data-sort="latest">최신 글</th>
+        <th>공감</th>
         <th></th>
       </tr></thead>
       <tbody id="nb-body"></tbody>
@@ -564,6 +565,17 @@ function renderReply() {
   }).join("") : `<div class="empty">답글 안 단 댓글이 없어요 👍</div>`;
 }
 
+/** 이웃 목록에서 프로필 아래에 보이는 추천 댓글 한 줄 (AI가 만든 게 있으면 그것, 없으면 글 속 문구로 만든 것) */
+function nbSuggest(n) {
+  const lp = n.latestPost;
+  if (!lp) return "";
+  const ai = S.suggestions[`visit:${n.blogId}:${lp.logNo}`];
+  const lv = S.help[`lv:${n.blogId}:${lp.logNo}`];
+  const t = (ai && ai[0]) || (lv && lv.list && lv.list[0]);
+  if (!t) return "";
+  return `<div class="nb-sugg"><span>💬 ${esc(t)}</span><button class="copy-btn" data-copy="${esc(t)}" title="복사">복사</button></div>`;
+}
+
 function renderNeighbors() {
   const all = S.data.neighbors || [];
   const q = S.nbSearch.trim().toLowerCase();
@@ -602,14 +614,15 @@ function renderNeighbors() {
     const suggest = n.addedMe && !n.iAdded;
     const lp = n.latestPost;
     return `<tr class="${suggest && n.likeCount + n.commentCount > 0 ? "hl" : ""}">
-      <td><div class="who">${avatar(n)}<div><a class="name" href="${BLOG}${esc(n.blogId)}" target="_blank" rel="noopener">${esc(n.nickname || n.blogId)}</a><small>${esc(n.blogName || "")}</small></div></div></td>
+      <td><div class="who">${avatar(n)}<div><a class="name" href="${BLOG}${esc(n.blogId)}" target="_blank" rel="noopener">${esc(n.nickname || n.blogId)}</a><small>${esc(n.blogName || "")}</small>${nbSuggest(n)}</div></div></td>
       <td>${relBadge(relOf(n))}</td>
       <td class="num">${n.likeCount || `<span class="zero">0</span>`}</td>
       <td class="num">${n.commentCount || `<span class="zero">0</span>`}</td>
       <td>${lp ? `<a class="clip" style="display:block;color:inherit" href="${esc(lp.link)}" target="_blank" rel="noopener">${isFresh(lp) ? "🆕 " : ""}${esc(lp.title)}</a><small class="muted">${ago(lp.date)}</small>` : `<span class="zero">-</span>`}</td>
+      <td>${lp ? likeButton(n.blogId, lp.logNo) : ""}</td>
       <td>${suggest ? `<a class="btn btn-outline act" href="${BLOG}${esc(n.blogId)}" target="_blank" rel="noopener">이웃추가 하러</a>` : ""}</td>
     </tr>`;
-  }).join("") : `<tr><td colspan="6" class="muted" style="text-align:center;padding:24px">해당하는 이웃이 없어요.</td></tr>`;
+  }).join("") : `<tr><td colspan="7" class="muted" style="text-align:center;padding:24px">해당하는 이웃이 없어요.</td></tr>`;
 }
 
 function renderPosts() {

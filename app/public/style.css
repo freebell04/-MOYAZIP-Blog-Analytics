@@ -316,3 +316,7 @@ button.si-link { cursor: pointer; font-family: inherit; }
 .grp-reload:disabled { cursor: wait; opacity: .7; }
 .grp-reload.spin { animation: grpspin .8s linear infinite; }
 @keyframes grpspin { to { transform: rotate(360deg); } }
+
+/* 이웃 목록: 프로필 아래 추천 댓글 */
+.nb-sugg { margin-top: 6px; display: flex; gap: 6px; align-items: flex-start; font-size: 12px; line-height: 1.5; color: #374151; background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 6px 8px; max-width: 340px; }
+.nb-sugg span { flex: 1; min-width: 0; }

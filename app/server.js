@@ -496,7 +496,9 @@ app.post("/api/neighbors/refresh", (req, res) => {
 app.post("/api/neighbors/visited", (req, res) => {
   const { blogId, logNo, done } = req.body;
   if (!blogId) return res.status(400).json({ error: "blogId가 필요합니다." });
-  res.json({ visited: neighbors.setVisited(blogId, logNo || "", done !== false) });
+  const visited = neighbors.setVisited(blogId, logNo || "", done !== false);
+  if (done !== false) like.closeFor(blogId).catch(() => {}); // 답방을 마쳤으면 그 이웃 글 탭을 닫는다
+  res.json({ visited });
 });
 
 // 이웃 글을 새 창으로 열고, 사용자가 직접 공감을 누르는지 지켜본다 (진행은 GET /api/neighbors의 likeWatch)
