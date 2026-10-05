@@ -89,7 +89,7 @@ async function start({ chapter, heading, body, style = "auto", paste = true }) {
       client = tab.client;
       session.notifyChrome("ChatGPT 이미지 만드는 창");
       require("./windowLayout").splitSoon([1500, 6000]);
-      client.send("Page.bringToFront").catch(() => {});
+      await aiChat.showTab(tab.id, client, site); // 뒤에 숨어 있던 탭이면 앞으로 가져오고 보일 때까지 기다린다
 
       // 입력창이 생길 때까지 (로그인이 안 돼 있으면 사용자가 로그인할 때까지)
       let sel = null;
@@ -114,6 +114,8 @@ async function start({ chapter, heading, body, style = "auto", paste = true }) {
 
       // 요청문을 입력창에 넣어 두기만 하고 보내지는 않는다 → 사용자가 내용을 고치거나 덧붙여서 직접 보내고, 대화하며 이미지를 다듬는다
       await putPrompt(client, sel, buildPrompt(heading, body, style));
+      const putLen = (await client.eval(`((document.querySelector(${JSON.stringify(sel)}) || {}).innerText || "").trim().length`).catch(() => 0)) || 0;
+      if (putLen < 20) throw new Error("요청문을 ChatGPT 입력창에 넣지 못했어요. ChatGPT 창(캔버스 화면이면 새 대화로 바꿔서)을 확인하고 다시 눌러주세요.");
       set({ status: "generating", waiting: true, note: "이미지 요청문을 ChatGPT 입력창에 넣어 뒀어요. 필요하면 내용을 고쳐서 보내고, 이미지가 마음에 들 때까지 대화한 뒤 \"완성\"이라고 보내세요. 그러면 글쓰기 창에 붙여넣어요." });
 
       // 사용자가 "완성"이라고 보낼 때까지 기다린다 (대화하며 다듬는 시간은 오래 걸려도 된다)

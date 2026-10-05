@@ -112,6 +112,26 @@ const findResultJs = (marker) => `(() => {
   return JSON.stringify({ count, found, markerFound: !!anchor });
 })()`;
 
+/**
+ * 대화 탭을 실제로 화면 앞으로 가져오고(보이는 상태가 될 때까지 기다림), 비어 있으면(백그라운드에서 내용이 내려간 탭) 새로 불러온다.
+ * 뒤에 숨어 있던 탭에 요청문을 넣으면 사용자가 아무것도 못 보고, 입력창을 못 찾는 일이 생긴다.
+ */
+async function showTab(id, client, site) {
+  try { await fetch(`${session.CDP_URL}/json/activate/${id}`, { signal: AbortSignal.timeout(3000) }); } catch {}
+  await within(client.send("Page.bringToFront"), 2000);
+  for (let i = 0; i < 10; i++) {
+    const vis = await client.eval("document.visibilityState").catch(() => "");
+    if (vis === "visible") break;
+    await sleep(300);
+  }
+  // 입력창도 대화 내용도 없으면(탭이 내려가서 비어 있음) 한 번 새로 불러온다
+  const blank = await client.eval(`!${JSON.stringify(site.input)}.some((s) => document.querySelector(s)) && !document.querySelector('[data-message-author-role]')`).catch(() => false);
+  if (blank) {
+    await within(client.send("Page.reload"), 2000);
+    await sleep(2500);
+  }
+}
+
 /** 표식을 넣은 결과 찾기 식 */
 const findResult = (marker) => findResultJs(marker).replace('"MARKER"', JSON.stringify(String(marker || "")));
 
@@ -184,7 +204,16 @@ async function acquireTab(ai, site) {
       const t = list.find((x) => x.id === id && x.type === "page");
       if (t && (() => { try { return new URL(t.url).hostname === new URL(site.url).hostname && !LOGIN_URL.test(t.url); } catch { return false; } })()) {
         const client = await within(connectPage(`ws://localhost:${port}/devtools/page/${id}`), 3000);
-        if (client && client.eval) return { id, client, continued: true, reused: true };
+        if (client && client.eval) {
+          // 그 탭에 요청문을 넣을 입력창이 실제로 있어야 이어서 쓴다 (캔버스 화면·로딩 중·내용이 비워진 탭이면 쓰지 않고 새 대화를 만든다)
+          let usable = false;
+          for (let i = 0; i < 8 && !usable; i++) {
+            usable = !!(await client.eval(firstMatch(site.input)).catch(() => null));
+            if (!usable) await sleep(400);
+          }
+          if (usable) return { id, client, continued: true, reused: true };
+          try { client.close(); } catch {}
+        }
       }
     } catch {}
   }
@@ -242,7 +271,7 @@ async function start(ai, prompt, kind = "post") {
       s.client = client;
       session.notifyChrome(`${site.name} 채팅 창`);
       require("./windowLayout").splitSoon([1500, 6000]); // 왼쪽: 이 프로그램 화면, 오른쪽: AI 채팅 (반반)
-      client.send("Page.bringToFront").catch(() => {}); // 기다리지 않는다 (창 상태에 따라 응답이 안 오기도 함)
+      await showTab(targetId, client, site); // 뒤에 숨어 있던 탭이면 앞으로 가져오고 보일 때까지 기다린다
 
       // 입력창이 생길 때까지 기다린다 (로그인이 안 돼 있으면 사용자가 로그인할 때까지)
       let sel = null;
@@ -334,4 +363,4 @@ function stop() {
   state = { status: "idle" };
 }
 
-module.exports = { acquireTab, _h: { firstMatch, putPrompt, pressSend, targetAlive, within, sleep, SITES, LOGIN_URL }, start, getState, markTaken, focus, stop, SITES, findReusableTab };
+module.exports = { showTab, acquireTab, _h: { firstMatch, putPrompt, pressSend, targetAlive, within, sleep, SITES, LOGIN_URL }, start, getState, markTaken, focus, stop, SITES, findReusableTab };
