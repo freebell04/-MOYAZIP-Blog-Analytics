@@ -133,7 +133,12 @@ app.post("/api/images/copy", async (req, res) => { // 이미 고른 이미지를
 // --- 체험 후기 설문 안내 (3일째·7일째·마지막 날) ---
 const survey = require("./lib/survey");
 const surveyStatus = () => survey.pending(license.status(), process.env.NBH_SURVEY_TODAY || license.today());
-app.get("/api/survey", (req, res) => res.json(surveyStatus()));
+// 주소 뒤에 ?survey=3 / 7 / 14 를 붙여 열면 그 안내 창을 미리 볼 수 있다 (평생·장기 키로는 평소에 안 뜨기 때문에 확인용). 설문 참여 기록에는 영향이 없다.
+app.get("/api/survey", (req, res) => {
+  const m = Number(req.query.preview);
+  if ([3, 7, 14].includes(m)) return res.json({ show: true, milestone: m, day: m, last: m === 14, canLater: m >= 7, url: survey.SURVEY_URL, daysLeft: 14 - m, preview: true });
+  res.json(surveyStatus());
+});
 app.post("/api/survey", (req, res) => {
   const action = String((req.body || {}).action || "");
   if (!["open", "close", "later"].includes(action)) return res.status(400).json({ error: "action이 올바르지 않아요." });

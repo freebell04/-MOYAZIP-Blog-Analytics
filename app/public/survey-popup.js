@@ -1,7 +1,7 @@
 // 무료 체험 후기 설문 안내 창 (체험 3일째·7일째·마지막 날). 띄울지 말지는 서버(/api/survey)가 정한다.
 (function () {
   if (location.protocol === "file:") return;
-  fetch("/api/survey")
+  fetch("/api/survey" + (/[?&]survey=(3|7|14)/.test(location.search) ? "?preview=" + location.search.match(/[?&]survey=(\d+)/)[1] : ""))
     .then((r) => r.json())
     .then((p) => {
       if (!p || !p.show) return;
@@ -25,7 +25,7 @@
           </div>
         </div>`;
       document.body.appendChild(box);
-      const send = (action) => fetch("/api/survey", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action }) }).catch(() => {});
+      const send = (action) => p.preview ? Promise.resolve() : fetch("/api/survey", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action }) }).catch(() => {});
       box.querySelector("#sv-open").onclick = () => {
         send("open");
         window.open(p.url, "_blank", "noopener");
