@@ -66,7 +66,7 @@ const CHECKS = {
 //  1) 코드블록(pre/code)  2) 대화 말풍선의 일반 글자 (예: 내가 이미 받아 둔 JSON을 대화창에 그냥 붙여넣은 경우)
 // 두 가지 형식 모두 알아본다 — 초안 {title, sections[]} / 형식 {formatName, sections[]}.
 // 요청문 속 예시값(제목 "블로그 제목", 형식 이름 "형식 이름(예: …)")은 제외한다. 결과는 {kind, json} 문자열.
-const findResultJs = () => `(() => {
+const findResultJs = (marker) => `(() => {
   const isPost = (j) => j && j.title && Array.isArray(j.sections) && j.sections.length && j.title !== "블로그 제목" && j.sections[0] !== "1번 섹션 본문";
   const isFormat = (j) => j && j.formatName && Array.isArray(j.sections) && j.sections.length && !String(j.formatName).startsWith("형식 이름");
   // 글자 속에서 중괄호가 맞게 닫히는 {…} 덩어리들 (문자열 안의 중괄호는 무시)
@@ -85,9 +85,17 @@ const findResultJs = () => `(() => {
     }
     return out;
   };
+  const marker = ${JSON.stringify("MARKER")};
+  const msgs = [...document.querySelectorAll('[data-message-author-role], user-query, model-response, .query-text, [data-testid*="message"]')];
+  const pres = [...document.querySelectorAll("pre, code")];
+  // 우리가 보낸 요청문(표식이 든 말풍선)을 찾으면, 그 뒤에 나온 말풍선·코드블록만 본다 → 이 대화에 예전부터 있던 JSON에는 반응하지 않는다
+  let mi = -1;
+  if (marker) msgs.forEach((m, i) => { if ((m.innerText || "").includes(marker)) mi = i; });
+  const anchor = mi >= 0 ? msgs[mi] : null;
+  const after = (el) => !anchor || (anchor !== el && !anchor.contains(el) && !!(anchor.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING));
   const sources = [
-    ...[...document.querySelectorAll("pre, code")].map((el) => el.innerText || el.textContent || ""),
-    ...[...document.querySelectorAll('[data-message-author-role], user-query, model-response, .query-text, [data-testid*="message"]')].map((el) => el.innerText || ""),
+    ...pres.filter(after).map((el) => el.innerText || el.textContent || ""),
+    ...(anchor ? msgs.slice(mi + 1) : msgs).map((el) => el.innerText || ""),
   ];
   let count = 0, found = null;
   for (let i = sources.length - 1; i >= 0; i--) {
@@ -101,8 +109,11 @@ const findResultJs = () => `(() => {
       } catch {}
     }
   }
-  return JSON.stringify({ count, found });
+  return JSON.stringify({ count, found, markerFound: !!anchor });
 })()`;
+
+/** 표식을 넣은 결과 찾기 식 */
+const findResult = (marker) => findResultJs(marker).replace('"MARKER"', JSON.stringify(String(marker || "")));
 
 async function targetAlive(targetId) {
   const list = await (await fetch(`${session.CDP_URL}/json/list`)).json();
@@ -255,10 +266,19 @@ async function start(ai, prompt, kind = "post") {
       await sleep(800); // 입력창이 막 생긴 직후엔 이벤트를 못 받는 경우가 있다
 
       // 이어 쓰는 대화에는 예전 결과가 남아 있어서, 지금 보내기 전의 개수를 기억해 두고 "새로 늘어난" 결과만 받는다
-      let baseline = 0;
-      try { baseline = JSON.parse(await client.eval(findResultJs())).count || 0; } catch {}
+      // 기준 개수: 대화가 다 그려져서 값이 안정될 때까지 (예전 글이 늦게 그려지는 걸 새 결과로 착각하지 않게)
+      let baseline = 0, prevCount = -1;
+      for (let t = 0; t < 8; t++) {
+        let c = null;
+        try { c = JSON.parse(await client.eval(findResult(""))).count; } catch {}
+        if (c !== null && c === prevCount) break;
+        prevCount = c === null ? prevCount : c;
+        baseline = prevCount < 0 ? 0 : prevCount;
+        await sleep(600);
+      }
+      const marker = "req" + Math.random().toString(36).slice(2, 7);
       s.status = "sending";
-      await putPrompt(client, sel, prompt);
+      await putPrompt(client, sel, `${prompt}\n\n(요청 번호: ${marker})`);
       const sent = await pressSend(client, site, sel);
       s.status = "chatting";
       if (!sent) s.note = "요청문을 입력창에 넣었어요. 탭에서 [보내기]를 눌러주세요.";
@@ -271,8 +291,9 @@ async function start(ai, prompt, kind = "post") {
         if (client.closed || !(await targetAlive(targetId).catch(() => true))) return void (s.status = "closed");
         if (Date.now() > chatDeadline) return void (s.status = "timeout");
         let cur = null;
-        try { cur = JSON.parse(await client.eval(findResultJs())); } catch {}
-        const found = cur && cur.found && cur.count > baseline ? JSON.stringify(cur.found) : null; // 보내기 전보다 늘어난 결과만
+        try { cur = JSON.parse(await client.eval(findResult(marker))); } catch {}
+        // 요청문이 보이면 그 뒤에 나온 결과만 / 아직 안 보이면(보내기 전·전송 실패) 기준 개수보다 늘어난 결과만
+        const found = cur && cur.found && (cur.markerFound || cur.count > baseline) ? JSON.stringify(cur.found) : null;
         if (found && found === last) {
           const r = JSON.parse(found);
           s.kind = r.kind; // 글감으로 시작했는데 형식(분석) 결과가 온 경우 등, 실제로 받은 종류를 따른다
