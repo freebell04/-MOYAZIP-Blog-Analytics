@@ -344,9 +344,22 @@ function composeStyledBlocks(post) {
     if (i > 0 || intro.length) blocks.push({ type: "hr" });
     const heading = (headings[i] || []).map((l) => l.trim()).filter(Boolean).join(" ");
     if (heading) blocks.push({ type: "quote", style: "quotation_line", lines: [heading], bold: true });
-    for (const raw of String(body || "").split("\n")) {
-      const line = raw.trim();
+    const src = String(body || "").split("\n");
+    for (let li = 0; li < src.length; li++) {
+      const line = src[li].trim();
       if (!line) continue;
+      if (line.startsWith("|")) {
+        // 마크다운 표(| a | b | 줄들, 둘째 줄 |---|---|) → 에디터에 진짜 표로 넣는다
+        const rows = [];
+        while (li < src.length && src[li].trim().startsWith("|")) {
+          const t = src[li].trim();
+          if (!TABLE_SEPARATOR_ROW.test(t.replace(/\|+\s*$/, "|"))) rows.push(parseTableRow(t.replace(/\|+\s*$/, "|")).map((c) => c.replace(/\*\*/g, "")));
+          li++;
+        }
+        li--;
+        if (rows.length) blocks.push({ type: "table", rows });
+        continue;
+      }
       blocks.push({ type: "para", text: /^[-*•]\s+/.test(line) ? "• " + line.replace(/^[-*•]\s+/, "") : line });
     }
   });
@@ -429,7 +442,15 @@ async function writeOneBlock(f, page, b) {
 
 async function writeStyledBody(frame, page, blocks) {
   const f = page.frames().find((x) => x.url().includes("PostWriteForm")) || frame;
+  let tableNo = 0;
   for (const b of blocks) {
+    if (b.type === "table") {
+      b.no = tableNo++;
+      await typeText(page, `[[TABLE_${b.no}]]`);
+      await page.keyboard.press("Enter");
+      await page.waitForTimeout(40);
+      continue;
+    }
     try {
       await writeOneBlock(f, page, b);
     } catch (e1) {
@@ -458,6 +479,20 @@ async function writeStyledBody(frame, page, blocks) {
       }
     }
   }
+  // 표: 자리표시 줄 위치에 실제 표를 넣는다. 한 표가 실패하면 내용이 사라지지 않게 그 자리를 "칸 | 칸" 글줄로 바꿔 두고 계속한다
+  for (const b of blocks.filter((x) => x.type === "table")) {
+    try {
+      await insertTableAtPlaceholder(frame, page, b.no, b.rows);
+    } catch (e) {
+      console.warn(`[글쓰기] 표 ${b.no + 1} 넣기 실패 → 글줄로 대신 넣었어요: ${String(e.message).split("\n")[0]}`);
+      b.degraded = true;
+      try {
+        const ph = f.locator(".se-text-paragraph").filter({ hasText: new RegExp(`^\\[\\[TABLE_${b.no}\\]\\]$`) }).first();
+        await ph.click({ clickCount: 3, timeout: 8000 });
+        await typeText(page, b.rows.map((r) => r.join(" | ")).join(" / "));
+      } catch {}
+    }
+  }
 }
 
 /** 입력 결과가 블록과 맞는지 확인 (인용구 개수·소제목·본문 줄) */
@@ -474,6 +509,9 @@ async function verifyStyledBody(frame, page, blocks) {
   });
   const quotes = blocks.filter((b) => b.type === "quote");
   const hrs = blocks.filter((b) => b.type === "hr").length;
+  const wantTables = blocks.filter((b) => b.type === "table" && !b.degraded).length;
+  const gotTables = await f.evaluate(() => document.querySelectorAll(".se-component.se-table").length);
+  if (gotTables !== wantTables) return { ok: false, reason: `표 개수가 다름: 원문 ${wantTables} / 에디터 ${gotTables}` };
   if (actual.quotes.length !== quotes.length) return { ok: false, reason: `인용구 개수가 다름: 원문 ${quotes.length} / 에디터 ${actual.quotes.length}` };
   if (actual.hrs !== hrs) return { ok: false, reason: `구분선 개수가 다름: 원문 ${hrs} / 에디터 ${actual.hrs}` };
   const plain = (s) => s.replace(/\*\*/g, "").replace(/\s+/g, " ").trim();
