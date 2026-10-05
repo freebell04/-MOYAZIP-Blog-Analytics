@@ -9,7 +9,7 @@ const { connectPage } = require("./like");
 
 const W = 1201;
 const H = 673;
-const GEN_WAIT_MS = 4 * 60 * 1000; // 이미지가 만들어질 때까지 최대 4분
+const CHAT_WAIT_MS = 60 * 60 * 1000; // 사용자가 대화하며 이미지를 다듬고 "완성"이라고 할 때까지 최대 1시간
 const LOGIN_WAIT_MS = 10 * 60 * 1000;
 const { firstMatch, putPrompt, pressSend, targetAlive, within, sleep, SITES, LOGIN_URL } = aiChat._h;
 
@@ -54,6 +54,8 @@ const LIST_IMGS = `[...document.querySelectorAll("img")].filter((i) => {
   const u = (i.currentSrc || i.src || "") + " " + (i.alt || "");
   return i.complete && i.naturalWidth >= 500 && r.width >= 250 && r.height >= 150 && !/avatar|profile|logo|favicon|sprite/i.test(u);
 }).map((i) => i.currentSrc || i.src)`;
+// 사용자가 보낸 메시지 중 "완성"(만) 쓴 것의 개수
+const DONE_COUNT = `[...document.querySelectorAll('[data-message-author-role="user"]')].filter((e) => /^\\s*완성[\\s.!~]*$/.test((e.innerText || "").trim())).length`;
 const GENERATING = `!!document.querySelector('button[data-testid="stop-button"], button[aria-label*="중지"], button[aria-label*="Stop"]')`;
 const FETCH_DATAURL = (src) => `(async () => {
   const r = await fetch(${JSON.stringify(src)}, { credentials: "include" });
@@ -65,11 +67,17 @@ const FETCH_DATAURL = (src) => `(async () => {
 const openTab = (site) => aiChat.acquireTab("chatgpt", site);
 
 /** 이미지 만들기를 시작한다 (바로 반환 — 진행은 이미지 고르기와 같은 상태로 확인) */
+let gen = 0; // 이미지 만들기 번호 (새로 시작하면 앞의 기다림은 끝난다)
+function cancel() {
+  gen++;
+  busy = false;
+}
+
 async function start({ chapter, heading, body, style = "auto", paste = true }) {
-  if (busy) throw new Error("이미 이미지를 만드는 중이에요. 끝난 뒤에 다시 눌러주세요.");
   if (!String(body || "").trim()) throw new Error("이 챕터의 본문이 비어 있어요.");
+  const token = ++gen; // 이미 다른 챕터를 기다리는 중이었다면 그건 그만두고 이번 것을 한다
   busy = true;
-  const set = (o) => imagePick.setGenState({ chapter, ...o });
+  const set = (o) => { if (token === gen) imagePick.setGenState({ chapter, ...o }); };
   set({ status: "generating", note: "ChatGPT 창을 여는 중이에요..." });
 
   (async () => {
@@ -100,25 +108,34 @@ async function start({ chapter, heading, body, style = "auto", paste = true }) {
       }
       await sleep(800);
 
+      // 이 대화에 이미 있던 이미지·"완성" 메시지는 기억해 두고, 이번에 새로 생긴 것만 본다
       const before = new Set((await client.eval(LIST_IMGS).catch(() => [])) || []);
-      set({ status: "generating", note: "이미지를 요청했어요. ChatGPT가 만드는 중이에요 (1~2분)..." });
-      await putPrompt(client, sel, buildPrompt(heading, body, style));
-      await pressSend(client, site, sel);
+      let doneBefore = (await client.eval(DONE_COUNT).catch(() => 0)) || 0;
 
-      // 새 이미지가 나타나고, 생성이 끝나서(중지 버튼이 없어지고) 같은 이미지가 두 번 연속 보일 때까지
-      const deadline = Date.now() + GEN_WAIT_MS;
-      let last = "";
+      // 요청문을 입력창에 넣어 두기만 하고 보내지는 않는다 → 사용자가 내용을 고치거나 덧붙여서 직접 보내고, 대화하며 이미지를 다듬는다
+      await putPrompt(client, sel, buildPrompt(heading, body, style));
+      set({ status: "generating", waiting: true, note: "이미지 요청문을 ChatGPT 입력창에 넣어 뒀어요. 필요하면 내용을 고쳐서 보내고, 이미지가 마음에 들 때까지 대화한 뒤 \"완성\"이라고 보내세요. 그러면 글쓰기 창에 붙여넣어요." });
+
+      // 사용자가 "완성"이라고 보낼 때까지 기다린다 (대화하며 다듬는 시간은 오래 걸려도 된다)
+      const deadline = Date.now() + CHAT_WAIT_MS;
       let src = "";
-      while (Date.now() < deadline) {
+      for (;;) {
+        if (token !== gen) return; // 다른 챕터의 이미지 만들기가 시작됐거나 중단됨
+        if (Date.now() > deadline) throw new Error("\"완성\"을 기다리다 시간이 지났어요. 다시 [AI로 이미지 만들기]를 눌러주세요.");
         if (!(await targetAlive(tab.id).catch(() => true))) throw new Error("ChatGPT 창이 닫혀서 멈췄어요.");
-        await sleep(3000);
+        await sleep(2000);
+        if (((await client.eval(DONE_COUNT).catch(() => 0)) || 0) <= doneBefore) continue;
+        // "완성"이 왔다 → 이미지가 아직 만들어지는 중이면 끝날 때까지 기다리고(최대 3분), 가장 마지막 새 이미지를 쓴다
+        set({ status: "generating", note: "\"완성\"을 확인했어요. 마지막 이미지를 가져오는 중이에요..." });
+        for (let w = 0; w < 90 && (await client.eval(GENERATING).catch(() => false)); w++) await sleep(2000);
+        await sleep(1500);
         const imgs = ((await client.eval(LIST_IMGS).catch(() => [])) || []).filter((u) => !before.has(u));
-        const cand = imgs[imgs.length - 1] || "";
-        const generating = await client.eval(GENERATING).catch(() => false);
-        if (cand && !generating && cand === last) { src = cand; break; }
-        last = cand;
+        src = imgs[imgs.length - 1] || "";
+        if (src) break;
+        set({ status: "generating", waiting: true, note: "아직 새 이미지가 보이지 않아요. 이미지가 만들어진 뒤 \"완성\"이라고 다시 보내주세요." });
+        // 이번 "완성"은 처리한 것으로 치고, 다음 "완성"을 기다린다
+        doneBefore = (await client.eval(DONE_COUNT).catch(() => doneBefore)) || doneBefore;
       }
-      if (!src) throw new Error("이미지가 만들어지지 않았어요. ChatGPT 창에서 이미지 생성이 되는지(요금제·사용 한도) 확인해주세요.");
 
       set({ status: "generating", note: "이미지를 가져와 1201×673으로 맞추는 중이에요..." });
       const dataUrl = await client.eval(FETCH_DATAURL(src));
@@ -135,9 +152,9 @@ async function start({ chapter, heading, body, style = "auto", paste = true }) {
       }
       imagePick.adoptCopied({ chapter, file, quality: `AI가 만든 이미지 ${w}×${h}`, width: w, height: h, pasted: !!pasted.ok, pasteNote: pasted.ok ? "" : pasted.reason || "" });
     } catch (e) {
-      set({ status: "error", error: e.message });
+      if (token === gen) set({ status: "error", error: e.message });
     } finally {
-      busy = false;
+      if (token === gen) busy = false;
       try { client && client.close(); } catch {}
     }
   })();
@@ -145,4 +162,4 @@ async function start({ chapter, heading, body, style = "auto", paste = true }) {
   return { started: true };
 }
 
-module.exports = { start, buildPrompt, STYLES, W, H, isBusy: () => busy };
+module.exports = { start, cancel, buildPrompt, STYLES, W, H, isBusy: () => busy };

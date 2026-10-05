@@ -130,7 +130,7 @@ app.post("/api/images/generate", async (req, res) => {
     res.status(400).json({ error: e.message });
   }
 });
-app.post("/api/images/pick/stop", (req, res) => { imagePick.stop(); res.json({ ok: true }); });
+app.post("/api/images/pick/stop", (req, res) => { imagePick.stop(); try { require("./lib/imageGen").cancel(); } catch {} res.json({ ok: true }); });
 app.post("/api/images/pick/close-tabs", async (req, res) => res.json({ ok: true, closed: await imagePick.closeTabs() }));
 app.post("/api/images/copy", async (req, res) => { // 이미 고른 이미지를 다시 클립보드에 복사 (앱에서 이미지를 눌렀을 때)
   try {

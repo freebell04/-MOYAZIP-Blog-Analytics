@@ -652,7 +652,7 @@ function renderSectionImages(post) {
       <select id="ai-style" style="margin-left:6px;padding:4px 8px;border:1px solid var(--line,#e5e7eb);border-radius:8px;font:inherit;font-size:13px">
         ${[["auto", "자동 (내용에 어울리게)"], ["photo", "실제 사진처럼"], ["illust", "깔끔한 일러스트"], ["watercolor", "수채화"], ["cartoon", "귀여운 3D 카툰"], ["flat", "미니멀 플랫"]].map(([v, l]) => `<option value="${v}"${v === savedStyle ? " selected" : ""}>${l}</option>`).join("")}
       </select>
-      <small class="muted">[🎨 AI로 이미지 만들기]에 적용돼요. 한 장면으로 만들고, 만들어지면 글쓰기 창에 바로 붙여넣어요.</small></p>
+      <small class="muted">[🎨 AI로 이미지 만들기]에 적용돼요. 요청문을 ChatGPT 입력창에 넣어 두기만 해요 → 고쳐서 보내고 대화로 다듬은 뒤 <b>"완성"</b>이라고 보내면 글쓰기 창에 붙여넣어요.</small></p>
     <div class="si-guide">
       <b>이렇게 하세요</b>
       <ol>
@@ -711,7 +711,7 @@ function paintThumb(i) {
 const aiStyle = () => { const el = $("#ai-style"); const v = el ? el.value : "auto"; try { localStorage.setItem("nbh-ai-style", v); } catch {} return v; };
 async function startGenFor(i) {
   const body = (currentPost && currentPost.sections && currentPost.sections[i]) || "";
-  pickState(i, "🎨 ChatGPT에 이미지를 요청하는 중이에요...");
+  pickState(i, "🎨 ChatGPT 입력창에 이미지 요청문을 넣는 중이에요...");
   const r = await fetch("/api/images/generate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ chapter: i, heading: pickItems[i].heading, body, style: aiStyle() }) })
     .then((x) => x.json())
     .catch((e) => ({ error: e.message }));
