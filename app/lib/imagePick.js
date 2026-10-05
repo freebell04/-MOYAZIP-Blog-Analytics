@@ -163,6 +163,7 @@ async function handlePick(s, click) {
   const { png, w, h } = await toPng(got.buf, got.mime);
   const file = savePng(png);
   await copyImageToClipboard(file);
+  try { require("./usage").track("image"); } catch {}
   Object.assign(s, { status: "copied", file, previewUrl: `/images/${file}`, quality: got.quality, width: w, height: h, seq: (s.seq || 0) + 1, count: (s.count || 0) + 1 });
 }
 

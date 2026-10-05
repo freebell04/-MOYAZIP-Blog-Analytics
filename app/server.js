@@ -130,6 +130,10 @@ app.post("/api/images/copy", async (req, res) => { // 이미 고른 이미지를
     res.status(400).json({ error: e.message });
   }
 });
+// --- 사용 횟수 익명 집계 (동의한 경우에만. 기본은 보내지 않음) ---
+const usage = require("./lib/usage");
+app.get("/api/usage-consent", (req, res) => res.json({ consent: usage.getConsent(), onlyTrial: true }));
+app.post("/api/usage-consent", (req, res) => res.json({ consent: usage.setConsent(!!(req.body || {}).value) }));
 // --- 체험 후기 설문 안내 (3일째·7일째·마지막 날) ---
 const survey = require("./lib/survey");
 const surveyStatus = () => survey.pending(license.status(), process.env.NBH_SURVEY_TODAY || license.today());
@@ -346,6 +350,7 @@ app.post("/api/ai-chat", async (req, res) => {
     const data = await makeHandoff(keyword, selected || [], context);
     const prompt = blogFormat.buildPostPrompt(data);
     const st = await aiChat.start(ai, prompt);
+    usage.track("ai");
     res.json({ success: true, ...st, count: data.items.length, prompt });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -438,6 +443,7 @@ app.post("/api/save-draft", async (req, res) => {
       useTemplate: useTemplate !== false,
       continueDraft: continueDraft === true,
     });
+    usage.track("draft");
     res.json(result);
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -508,6 +514,7 @@ app.post("/api/neighbors/visited", (req, res) => {
   if (done !== false && req.body.close === true) {
     like.closeFor(blogId).catch(() => {});
     like.closeTag(`visit:${blogId}`).catch(() => {});
+    usage.track("visit");
   }
   res.json({ visited });
 });
@@ -654,6 +661,7 @@ app.get("/api/stats/excel", async (req, res) => {
 });
 
 const PORT = process.env.PORT || 3300;
+usage.start();
 app.listen(PORT, () => {
   console.log(`네이버 블로그 자동화 대시보드: http://localhost:${PORT}`);
 });
