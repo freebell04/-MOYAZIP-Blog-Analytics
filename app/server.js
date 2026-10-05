@@ -497,8 +497,25 @@ app.post("/api/neighbors/visited", (req, res) => {
   const { blogId, logNo, done } = req.body;
   if (!blogId) return res.status(400).json({ error: "blogId가 필요합니다." });
   const visited = neighbors.setVisited(blogId, logNo || "", done !== false);
-  if (done !== false) like.closeFor(blogId).catch(() => {}); // 답방을 마쳤으면 그 이웃 글 탭을 닫는다
+  // 사용자가 직접 "답방 완료"를 체크했을 때만 그 이웃 글 탭을 닫는다 (링크를 누르면 자동으로 완료 표시되는 경우엔 닫지 않는다)
+  if (done !== false && req.body.close === true) {
+    like.closeFor(blogId).catch(() => {});
+    like.closeTag(`visit:${blogId}`).catch(() => {});
+  }
   res.json({ visited });
+});
+
+// 네이버 글을 자동화 크롬에서 열기 (반반 화면) / 열어 둔 탭 닫기
+app.post("/api/neighbors/open", async (req, res) => {
+  try {
+    res.json({ ok: true, ...(await like.openUrl(String(req.body.url || ""), String(req.body.tag || "").slice(0, 120))) });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+app.post("/api/neighbors/close-tab", async (req, res) => {
+  const tag = String(req.body.tag || "").slice(0, 120);
+  res.json({ ok: true, closed: await like.closeTag(tag) });
 });
 
 // 이웃 최신 글에 내가 이미 공감·댓글을 남겼는지 확인한다 (네이버에서 직접 한 것도 알아내서 답방 목록에서 뺀다)

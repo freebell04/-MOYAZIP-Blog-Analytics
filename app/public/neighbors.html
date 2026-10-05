@@ -440,7 +440,26 @@ function suggestBlock(key, label, fallback) {
   </div>`;
 }
 
-function likeButton(blogId, logNo) {
+// 댓글 답글·내 글 현황의 "답방 완료" 체크 (이 컴퓨터에만 저장)
+const replyTag = (u) => `reply:${u.logNo}:${u.blogId}:${u.date}`;
+function tagDone(tag) { try { return (JSON.parse(localStorage.getItem("nbh-tag-done") || "[]")).includes(tag); } catch { return false; } }
+function setTagDone(tag, on) {
+  try {
+    const set = new Set(JSON.parse(localStorage.getItem("nbh-tag-done") || "[]"));
+    on ? set.add(tag) : set.delete(tag);
+    localStorage.setItem("nbh-tag-done", JSON.stringify([...set].slice(-500)));
+  } catch {}
+}
+// 이 화면의 네이버 글 링크는 자동화 크롬에서 열어서 (왼쪽: 이 프로그램 / 오른쪽: 네이버) 반반으로 보여준다
+document.addEventListener("click", async (e) => {
+  const a = e.target.closest("a[data-split]");
+  if (!a) return;
+  e.preventDefault();
+  const r = await fetch("/api/neighbors/open", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url: a.href, tag: a.dataset.tag || "" }) }).then((x) => x.json()).catch(() => ({ error: "x" }));
+  if (r.error) window.open(a.href, "_blank", "noopener"); // 자동화 크롬을 못 열면 평소처럼 새 탭으로
+}, true);
+
+function likeButton(blogId, logNo, compact = false) {
   const k = `${blogId}:${logNo}`;
   const w = S.likeWatch[k] || {};
   if (S.liked[k]) return `<button class="btn like-btn on" disabled>❤️ 공감 완료${w.status === "already" ? " (이미 공감함)" : ""}</button>`;
@@ -453,7 +472,7 @@ function likeButton(blogId, logNo) {
     : w.status === "timeout" ? `<small class="muted">15분이 지나 확인을 멈췄어요</small>`
     : w.status === "error" ? `<small class="error">⚠ ${esc(w.error || "창을 열지 못했어요")}</small>`
     : "";
-  return btn("🤍 공감하러 가기 (새 탭)") + note;
+  return btn(compact ? "🤍 공감" : "🤍 공감하러 가기 (새 탭)") + note;
 }
 
 async function doLike(blogId, logNo) {
@@ -556,8 +575,8 @@ function visitRow(p) {
     <div class="side">
       ${lp ? `<div class="post-title">${isFresh(lp) ? "🆕 " : "📝 "}${esc(lp.title)}</div><small class="muted">${ago(lp.date)}</small>
              ${likeButton(p.blogId, lp.logNo)}
-             <a class="btn btn-primary" href="https://m.blog.naver.com/CommentList.naver?blogId=${esc(p.blogId)}&logNo=${esc(lp.logNo)}" target="_blank" rel="noopener" data-go="${esc(p.blogId)}">💬 댓글 쓰러 가기</a>
-             <a class="btn btn-outline" href="${esc(lp.link)}" target="_blank" rel="noopener" data-go="${esc(p.blogId)}">글 읽으러 가기</a>`
+             <a class="btn btn-primary" href="https://m.blog.naver.com/CommentList.naver?blogId=${esc(p.blogId)}&logNo=${esc(lp.logNo)}" target="_blank" rel="noopener" data-go="${esc(p.blogId)}" data-split data-tag="visit:${esc(p.blogId)}">💬 댓글 쓰러 가기</a>
+             <a class="btn btn-outline" href="${esc(lp.link)}" target="_blank" rel="noopener" data-go="${esc(p.blogId)}" data-split data-tag="visit:${esc(p.blogId)}">글 읽으러 가기</a>`
            : `<small class="muted">최신 글을 못 찾았어요</small>
              <a class="btn btn-outline" href="${BLOG}${esc(p.blogId)}" target="_blank" rel="noopener" data-go="${esc(p.blogId)}">블로그 가기</a>`}
       <label><input type="checkbox" data-done="${esc(p.blogId)}" ${done ? "checked" : ""}> 답방 완료</label>
@@ -580,8 +599,9 @@ function renderReply() {
         ${suggestBlock(replyKey(u), "추천 답글", S.help[helpKey(u)] ? S.help[helpKey(u)].list : templateReply(u))}
       </div>
       <div class="side">
-        <a class="btn btn-primary" href="https://m.blog.naver.com/CommentList.naver?blogId=${esc(S.blogId)}&logNo=${esc(u.logNo)}" target="_blank" rel="noopener">답글 달러 가기</a>
-        <a class="btn btn-outline act" href="${BLOG}${esc(S.blogId)}/${esc(u.logNo)}" target="_blank" rel="noopener">글 보기</a>
+        <a class="btn btn-primary" href="https://m.blog.naver.com/CommentList.naver?blogId=${esc(S.blogId)}&logNo=${esc(u.logNo)}" target="_blank" rel="noopener" data-split data-tag="${esc(replyTag(u))}">답글 달러 가기</a>
+        <a class="btn btn-outline act" href="${BLOG}${esc(S.blogId)}/${esc(u.logNo)}" target="_blank" rel="noopener" data-split data-tag="${esc(replyTag(u))}">글 보기</a>
+        <label><input type="checkbox" data-tagdone="${esc(replyTag(u))}" ${tagDone(replyTag(u)) ? "checked" : ""}> 답방 완료</label>
       </div>
     </div>`;
   }).join("") : `<div class="empty">답글 안 단 댓글이 없어요 👍</div>`;
@@ -641,7 +661,7 @@ function renderNeighbors() {
       <td class="num">${n.likeCount || `<span class="zero">0</span>`}</td>
       <td class="num">${n.commentCount || `<span class="zero">0</span>`}</td>
       <td>${lp ? `<a class="clip" style="display:block;color:inherit" href="${esc(lp.link)}" target="_blank" rel="noopener">${isFresh(lp) ? "🆕 " : ""}${esc(lp.title)}</a><small class="muted">${ago(lp.date)}</small>` : `<span class="zero">-</span>`}</td>
-      <td>${lp ? likeButton(n.blogId, lp.logNo) : ""}</td>
+      <td>${lp ? likeButton(n.blogId, lp.logNo, true) : ""}</td>
       <td>${suggest ? `<a class="btn btn-outline act" href="${BLOG}${esc(n.blogId)}" target="_blank" rel="noopener">이웃추가 하러</a>` : ""}</td>
     </tr>`;
   }).join("") : `<tr><td colspan="7" class="muted" style="text-align:center;padding:24px">해당하는 이웃이 없어요.</td></tr>`;
@@ -657,16 +677,16 @@ function renderPosts() {
     <td class="num">${p.likeCount}</td>
     <td class="num">${p.commentCount}</td>
     <td class="num">${p.unansweredCount ? `<span class="warn">${p.unansweredCount}</span>` : `<span class="zero">0</span>`}</td>
-    <td>${p.unansweredCount ? `<a class="btn btn-outline act" href="https://m.blog.naver.com/CommentList.naver?blogId=${esc(S.blogId)}&logNo=${esc(p.logNo)}" target="_blank" rel="noopener">댓글 보기</a>` : ""}</td>
+    <td>${p.unansweredCount ? `<a class="btn btn-outline act" href="https://m.blog.naver.com/CommentList.naver?blogId=${esc(S.blogId)}&logNo=${esc(p.logNo)}" target="_blank" rel="noopener" data-split data-tag="post:${esc(p.logNo)}">댓글 보기</a> <label style="white-space:nowrap"><input type="checkbox" data-tagdone="post:${esc(p.logNo)}" ${tagDone("post:" + p.logNo) ? "checked" : ""}> 답방 완료</label>` : ""}</td>
   </tr>`).join("");
 }
 
 // ---------- events ----------
-async function markVisited(blogId, done) {
+async function markVisited(blogId, done, close = false) {
   const p = visitPool().find((x) => x.blogId === blogId);
   const r = await fetch("/api/neighbors/visited", {
     method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ blogId, logNo: p && p.latestPost ? p.latestPost.logNo : "", done }),
+    body: JSON.stringify({ blogId, logNo: p && p.latestPost ? p.latestPost.logNo : "", done, close }),
   }).then((r) => r.json());
   S.visited = r.visited;
   render();
@@ -823,7 +843,12 @@ function syncChips() {
 }
 
 document.addEventListener("change", (e) => {
-  if (e.target.dataset.done) markVisited(e.target.dataset.done, e.target.checked);
+  if (e.target.dataset.done) markVisited(e.target.dataset.done, e.target.checked, e.target.checked); // 직접 체크하면 열려 있던 네이버 창도 닫는다
+  if (e.target.dataset.tagdone) {
+    const tag = e.target.dataset.tagdone;
+    setTagDone(tag, e.target.checked);
+    if (e.target.checked) fetch("/api/neighbors/close-tab", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tag }) }).catch(() => {});
+  }
 });
 $("#nb-search").addEventListener("input", (e) => { S.nbSearch = e.target.value; renderNeighbors(); });
 $("#refresh-btn").addEventListener("click", () => startRefresh());

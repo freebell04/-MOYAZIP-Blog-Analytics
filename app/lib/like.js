@@ -193,4 +193,35 @@ async function closeFor(blogId) {
   return n;
 }
 
-module.exports = { openAndWatch, getWatches, getLiked, connectPage, closeFor };
+const tabs = {}; // 태그("reply:..." / "visit:..." / "post:...") -> 열어 둔 크롬 탭 id
+
+/** 태그로 열어 둔 탭을 닫는다 */
+async function closeTag(tag) {
+  const id = tabs[tag];
+  delete tabs[tag];
+  if (!id) return false;
+  try {
+    const r = await fetch(`${session.CDP_URL}/json/close/${id}`, { signal: AbortSignal.timeout(3000) });
+    return r.ok;
+  } catch {
+    return false;
+  }
+}
+
+/** 네이버 블로그 주소를 자동화 크롬에서 연다 (왼쪽: 이 프로그램, 오른쪽: 네이버 반반 화면). 같은 태그로 열었던 탭은 먼저 닫는다 */
+async function openUrl(url, tag) {
+  if (!/^https:\/\/(m\.)?blog\.naver\.com\//.test(String(url || ""))) throw new Error("네이버 블로그 주소만 열 수 있어요.");
+  await session.ensureDebugChrome();
+  if (tag) await closeTag(tag);
+  const version = await (await fetch(`${session.CDP_URL}/json/version`)).json();
+  const browserWs = await connectPage(version.webSocketDebuggerUrl);
+  const { targetId } = await browserWs.send("Target.createTarget", { url, newWindow: false });
+  browserWs.close();
+  if (tag) tabs[tag] = targetId;
+  fetch(`${session.CDP_URL}/json/activate/${targetId}`).catch(() => {});
+  session.notifyChrome("네이버 글 창");
+  require("./windowLayout").splitSoon([800, 3500]);
+  return { targetId };
+}
+
+module.exports = { openAndWatch, getWatches, getLiked, connectPage, closeFor, openUrl, closeTag };
