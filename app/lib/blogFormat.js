@@ -125,7 +125,13 @@ const FORMAT_SCHEMA =
 
 function buildAnalyzePrompt(samples) {
   return [
-    `아래는 네이버 블로그 "${config.blogName()}"에 실제로 올린 최근 글 ${samples.length}개야. 이 블로거가 글을 어떤 형식으로 쓰는지 분석해줘.`,
+    // 블로그 이름(닉네임)과 아이디를 넣는다. 이름을 아직 안 정했으면(기본값 "내 블로그") 아이디만 쓴다
+    (() => {
+      const nm = String(config.blogName() || "").trim();
+      const id = String(config.blogId() || "").trim();
+      const who = nm && nm !== "내 블로그" ? `"${nm}"${id ? `(블로그 아이디: ${id})` : ""}` : id ? `"${id}"` : "내";
+      return `아래는 네이버 블로그 ${who}님이 실제로 올린 최근 글 ${samples.length}개야. 이 블로거가 글을 어떤 형식으로 쓰는지 분석해줘.`.replace("블로그 내님이", "내 블로그에");
+    })(),
     "",
     "분석할 것: 제목 짓는 방식, 말투·문체, 글 시작(도입) 방식, 본문 구성(소제목 순서와 각 부분에 쓰는 내용), 마무리 방식, 자주 쓰는 표현·이모지·줄바꿈·강조 습관.",
     "글마다 조금씩 달라도, 여러 글에 공통으로 반복되는 뼈대를 뽑아줘. 특정 글의 주제 내용(상품명·장소 등)은 넣지 말고 '형식'만 일반화해.",
