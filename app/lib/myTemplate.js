@@ -11,13 +11,40 @@
 
 const BLOCKS = 6; // 템플릿의 본문 블록 수 (꒰①꒱~꒰⑥꒱)
 
+const SEPARATOR = /^\|(\s*:?-{2,}:?\s*\|)+\s*$/;
+/** 본문 글에서 "| a | b |" 마크다운 표를 떼어낸다 → {lines: [글줄 또는 null(표 자리)], tables: [[행[칸]]…]} */
+function splitTables(text) {
+  const src = String(text || "").split("\n");
+  const lines = [];
+  const tables = [];
+  for (let i = 0; i < src.length; i++) {
+    if (src[i].trim().startsWith("|")) {
+      const rows = [];
+      while (i < src.length && src[i].trim().startsWith("|")) {
+        if (!SEPARATOR.test(src[i].trim())) rows.push(src[i].trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((c) => c.replace(/\*\*/g, "").trim()));
+        i++;
+      }
+      i--;
+      lines.push(null);
+      tables.push(rows);
+    } else lines.push(src[i]);
+  }
+  return { lines, tables };
+}
+
 /**
  * paras: [{i, t, table, quote, title}] (현재 에디터의 문단 목록) → 실행할 작업 목록
  * 작업: {i, mode: "replace"|"suffix"|"append", old?, text}
  *   replace: 문단 전체를 text로 바꾼다 / suffix: 문단 끝의 old 글자를 text로 바꾼다 / append: 문단 끝에 text를 덧붙인다
  */
 function planFill(paras, tpl) {
+  return planFillFull(paras, tpl).ops;
+}
+
+/** planFill + 설명 칸에서 떼어낸 표들 ({ops, tables}). 표는 글이 다 채워진 뒤 자리표시 줄([[TABLE_n]]) 위치에 실제 표로 넣는다 */
+function planFillFull(paras, tpl) {
   const ops = [];
+  const tables = [];
   const secs = Array.isArray(tpl.sections) ? tpl.sections : [];
   const strip = (v) => String(v == null ? "" : v).replace(/\*\*/g, ""); // **굵게** 표시는 템플릿 자리에 글자로 남지 않게 뺀다
   const val = (v) => strip(v).replace(/\s+/g, " ").trim();
@@ -58,13 +85,20 @@ function planFill(paras, tpl) {
     const q = nth((p) => p.quote && /^\d\. 소제목$/.test(p.t), k);
     if (q) ops.push({ i: q.i, mode: "suffix", old: "소제목", text: val(s.keyword) });
     const ex = nth((p) => p.t === "소제목에 대한 설명", k);
-    if (ex) ops.push({ i: ex.i, mode: "replace", text: strip(s.explain).trim() });
+    if (ex) {
+      // 설명 속 마크다운 표는 자리표시 줄로 바꿔 두고, 표 자체는 따로 모았다가 나중에 넣는다 (문서 순서대로 번호를 매긴다)
+      const sp = splitTables(strip(s.explain).trim());
+      let n = 0;
+      const withNumbers = sp.lines.map((l) => (l === null ? `[[TABLE_${tables.length + n++}]]` : l)).join("\n");
+      sp.tables.forEach((t) => tables.push(t));
+      ops.push({ i: ex.i, mode: "replace", text: withNumbers.trim() });
+    }
   }
 
   const sg = find((p) => p.t === "소감");
   if (sg >= 0) ops.push({ i: body[sg].i, mode: "replace", text: strip(tpl.reflection).trim() });
 
-  return ops.sort((a, b) => b.i - a.i); // 뒤쪽부터
+  return { ops: ops.sort((a, b) => b.i - a.i), tables }; // 뒤쪽부터
 }
 
 /** 아직 채워지지 않고 남은 자리 이름들 (저장하기 전에 확인용) */
@@ -88,7 +122,7 @@ const READ_PARAS = `[...document.querySelectorAll(".se-text-paragraph")].map((p,
 async function fillMyTemplate(frame, page, tpl, helpers) {
   const f = page.frames().find((x) => x.url().includes("PostWriteForm")) || frame;
   const paras = await f.evaluate(READ_PARAS);
-  const ops = planFill(paras, tpl);
+  const { ops, tables } = planFillFull(paras, tpl);
   if (!ops.length) throw new Error("내 템플릿의 자리를 찾지 못했어요. '앞으로 쓸 템플릿'이 맞는지 확인해주세요.");
   const all = f.locator(".se-text-paragraph");
   for (const op of ops) {
@@ -109,10 +143,21 @@ async function fillMyTemplate(frame, page, tpl, helpers) {
     }
     await page.waitForTimeout(120);
   }
+  // 표: 자리표시 줄을 지우고 그 자리에 실제 표를 넣는다. 템플릿에 이미 표가 있어서(목차 표 1개) 문서 안에서는 그만큼 뒤 번호가 된다
+  const TEMPLATE_TABLES_BEFORE = 1;
+  if (tables.length && helpers.insertTable) {
+    for (let k = 0; k < tables.length; k++) {
+      try {
+        await helpers.insertTable(f, page, k, tables[k], TEMPLATE_TABLES_BEFORE + k);
+      } catch (e) {
+        throw new Error(`표 ${k + 1}번째를 넣지 못했어요: ${String(e.message).split("\n")[0]}`);
+      }
+    }
+  }
   const after = await f.evaluate(READ_PARAS);
   const left = leftover(after);
   if (left.length) throw new Error(`템플릿에서 채워지지 않은 자리가 있어요 (${[...new Set(left)].join(", ")}). 저장하지 않고 멈췄어요.`);
   return { filled: ops.length };
 }
 
-module.exports = { BLOCKS, planFill, leftover, fillMyTemplate, READ_PARAS };
+module.exports = { BLOCKS, splitTables, planFill, planFillFull, leftover, fillMyTemplate, READ_PARAS };

@@ -800,13 +800,10 @@ function legacyToTpl(post) {
     for (const raw of String(body || "").split("\n")) {
       const l = raw.trim();
       if (!l) continue;
-      if (/^\|\s*:?-{2,}/.test(l)) continue; // 표의 구분선
-      if (l.startsWith("|")) {
-        const cells = l.replace(/^\||\|$/g, "").split("|").map((c) => clean(c)).filter(Boolean);
-        if (cells.length) lines.push(cells.length > 1 ? `${cells[0]}: ${cells.slice(1).join(" / ")}` : cells[0]);
-      } else lines.push(clean(l.replace(/^[-*•]\s+/, "• ")));
+      if (l.startsWith("|")) lines.push(l); // 표는 그대로 둔다 (저장할 때 에디터에 진짜 표로 넣는다)
+      else lines.push(clean(l.replace(/^[-*•]\s+/, "• ")));
     }
-    const short = lines.find((l) => !l.startsWith("•") && !l.includes(": ")) || lines[0] || "";
+    const short = lines.find((l) => !l.startsWith("•") && !l.startsWith("|")) || lines[0] || "";
     const rest = lines.filter((l) => l !== short);
     const keyword = ((title.split(/[,，!?！？]/)[0] || title).trim().split(/\s+/).slice(0, 2).join(" ")).slice(0, 12); // 소제목 자리에 들어갈 짧은 키워드
     return { title, short: short.slice(0, 80), keyword, explain: rest.join("\n") };

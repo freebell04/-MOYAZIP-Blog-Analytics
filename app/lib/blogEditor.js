@@ -537,7 +537,8 @@ async function verifyPlainBody(frame, bodyText) {
   return { ok: true };
 }
 
-async function insertTableAtPlaceholder(frame, page, tableIndex, rows) {
+// tableIndex: 자리표시 줄 번호([[TABLE_n]]) / docIndex: 문서 전체에서 그 표가 몇 번째 표인지 (템플릿에 이미 표가 있으면 둘이 다르다)
+async function insertTableAtPlaceholder(frame, page, tableIndex, rows, docIndex = tableIndex) {
   const rowCount = rows.length;
   const colCount = Math.max(...rows.map((r) => r.length));
 
@@ -555,7 +556,7 @@ async function insertTableAtPlaceholder(frame, page, tableIndex, rows) {
   // 행/열 추가 버튼은 표 안에 있지만, 누를 때마다 다시 그려져서 곧바로 다음 버튼을 누르면
   // 클릭이 씹힌다. 그래서 버튼 이름 대신 "실제 행/열 개수가 바뀌었는지"를 확인하며 한 번씩 누른다.
   // (다른 표의 버튼을 잘못 누르면 에디터 전체가 멈추므로 절대 표 밖에서 버튼을 찾지 않는다.)
-  const table = frame.locator(".se-component.se-table").nth(tableIndex);
+  const table = frame.locator(".se-component.se-table").nth(docIndex);
   const size = () =>
     table.locator("table").evaluate((t) => ({ rows: t.rows.length, cols: t.rows[0] ? t.rows[0].cells.length : 0 }));
 
@@ -737,7 +738,7 @@ async function saveDraftToNaver(post) {
       // 내 템플릿 모드: 제목을 넣고, 템플릿의 자리(인트로·목차 표·본문 ①~⑥·요약 표·소감)에 글을 채운다
       await replaceShortText(page, titleArea, post.title);
       await page.waitForTimeout(500);
-      await require("./myTemplate").fillMyTemplate(frame, page, post.tpl, { replaceShortText, replaceWrappedText });
+      await require("./myTemplate").fillMyTemplate(frame, page, post.tpl, { replaceShortText, replaceWrappedText, insertTable: insertTableAtPlaceholder });
     } else if (useTemplate && post.introLines && post.introLines.length && post.sections && post.sections.length) {
       await replaceShortText(page, titleArea, post.title);
       await page.waitForTimeout(500);
