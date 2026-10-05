@@ -112,10 +112,10 @@ function setGenState(o) {
   state = { count: 0, seq: (state && state.seq) || 0, ...o };
 }
 /** 다른 흐름에서 만든 이미지를 "복사됨" 상태로 알린다 */
-function adoptCopied({ chapter, file, quality, width, height }) {
+function adoptCopied({ chapter, file, quality, width, height, pasted, pasteNote }) {
   try { require("./usage").track("image"); } catch {}
-  state = { status: "copied", chapter, file, previewUrl: `/images/${file}`, quality, width, height, seq: ((state && state.seq) || 0) + 1, count: ((state && state.count) || 0) + 1 };
-  bringEditorToFront();
+  state = { status: "copied", chapter, file, previewUrl: `/images/${file}`, quality, width, height, seq: ((state && state.seq) || 0) + 1, count: ((state && state.count) || 0) + 1, pasted: !!pasted, pasteNote: pasteNote || "" };
+  if (!pasted) bringEditorToFront(); // 이미 붙여넣었으면 그 창이 이미 앞에 있다
 }
 
 function savePng(png) {

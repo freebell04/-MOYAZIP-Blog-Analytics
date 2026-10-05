@@ -646,7 +646,13 @@ function renderSectionImages(post) {
     };
   });
 
+  const savedStyle = (() => { try { return localStorage.getItem("nbh-ai-style") || "auto"; } catch { return "auto"; } })();
   box.innerHTML = `<p class="hint" id="si-summary" style="margin:0 0 6px"></p>
+    <p style="margin:0 0 8px;font-size:13px">🎨 <b>AI 이미지 스타일</b>
+      <select id="ai-style" style="margin-left:6px;padding:4px 8px;border:1px solid var(--line,#e5e7eb);border-radius:8px;font:inherit;font-size:13px">
+        ${[["auto", "자동 (내용에 어울리게)"], ["photo", "실제 사진처럼"], ["illust", "깔끔한 일러스트"], ["watercolor", "수채화"], ["cartoon", "귀여운 3D 카툰"], ["flat", "미니멀 플랫"]].map(([v, l]) => `<option value="${v}"${v === savedStyle ? " selected" : ""}>${l}</option>`).join("")}
+      </select>
+      <small class="muted">[🎨 AI로 이미지 만들기]에 적용돼요. 한 장면으로 만들고, 만들어지면 글쓰기 창에 바로 붙여넣어요.</small></p>
     <div class="si-guide">
       <b>이렇게 하세요</b>
       <ol>
@@ -702,10 +708,11 @@ function paintThumb(i) {
   th.style.cursor = it.file ? "pointer" : "default";
 }
 
+const aiStyle = () => { const el = $("#ai-style"); const v = el ? el.value : "auto"; try { localStorage.setItem("nbh-ai-style", v); } catch {} return v; };
 async function startGenFor(i) {
   const body = (currentPost && currentPost.sections && currentPost.sections[i]) || "";
   pickState(i, "🎨 ChatGPT에 이미지를 요청하는 중이에요...");
-  const r = await fetch("/api/images/generate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ chapter: i, heading: pickItems[i].heading, body }) })
+  const r = await fetch("/api/images/generate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ chapter: i, heading: pickItems[i].heading, body, style: aiStyle() }) })
     .then((x) => x.json())
     .catch((e) => ({ error: e.message }));
   if (r.error) return pickState(i, `<span class="error">⚠ ${esc(netMsg(r.error))}</span>`);
@@ -757,6 +764,8 @@ async function pollPick() {
     }
   }
   else if (st.status === "working") pickState(i, "⏳ 이미지를 복사하는 중이에요...");
+  else if (st.status === "copied" && st.pasted) pickState(i, `✅ 글쓰기 창의 이 블록 아래에 이미지를 붙여넣었어요 (${esc(st.quality)}) · 마음에 안 들면 다시 눌러 만들 수 있어요`);
+  else if (st.status === "copied" && st.pasteNote) pickState(i, `✅ 이미지를 복사했어요 (${esc(st.quality)}) · ${how}<br><small class="muted">자동 붙여넣기는 못 했어요: ${esc(st.pasteNote)}</small>`);
   else if (st.status === "copied") pickState(i, `✅ 복사됐어요 (${esc(st.quality)}) · ${how} · 다른 이미지로 바꾸려면 크롬의 초록 줄을 누른 뒤 클릭하세요`);
   else if (st.status === "closed" || st.status === "error") {
     pickState(i, st.file ? `✅ 복사했던 이미지예요 · 누르면 다시 복사돼요` : st.status === "error" ? `<span class="error">⚠ ${esc(st.error)}</span>` : "크롬의 이미지 검색 창이 닫혔어요. 다시 하려면 검색 버튼을 눌러주세요.");

@@ -124,7 +124,8 @@ app.get("/api/images/pick/status", (req, res) => res.json(imagePick.getState()))
 app.post("/api/images/generate", async (req, res) => {
   try {
     const b = req.body || {};
-    res.json(await require("./lib/imageGen").start({ chapter: Number(b.chapter) || 0, heading: String(b.heading || "").slice(0, 200), body: String(b.body || "").slice(0, 3000) }));
+    const gen = require("./lib/imageGen");
+    res.json(await gen.start({ chapter: Number(b.chapter) || 0, heading: String(b.heading || "").slice(0, 200), body: String(b.body || "").slice(0, 3000), style: gen.STYLES[b.style] ? b.style : "auto", paste: b.paste !== false }));
   } catch (e) {
     res.status(400).json({ error: e.message });
   }
