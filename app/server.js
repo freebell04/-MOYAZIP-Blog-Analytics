@@ -501,6 +501,16 @@ app.post("/api/neighbors/visited", (req, res) => {
   res.json({ visited });
 });
 
+// 이웃 최신 글에 내가 이미 공감·댓글을 남겼는지 확인한다 (네이버에서 직접 한 것도 알아내서 답방 목록에서 뺀다)
+app.post("/api/neighbors/my-reaction", async (req, res) => {
+  try {
+    const posts = Array.isArray(req.body.posts) ? req.body.posts : [];
+    res.json({ done: await require("./lib/myReaction").check(posts, config.blogId()) });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
 // 이웃 글을 새 창으로 열고, 사용자가 직접 공감을 누르는지 지켜본다 (진행은 GET /api/neighbors의 likeWatch)
 app.post("/api/neighbors/like", async (req, res) => {
   const { blogId, logNo } = req.body;

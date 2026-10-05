@@ -258,7 +258,7 @@
 const $ = (s) => document.querySelector(s);
 const BLOG = "https://blog.naver.com/";
 let S = {
-  data: null, visited: {}, blogId: "", suggestions: {}, suggestState: {}, help: {}, helpState: {}, liked: {}, likeWatch: {},
+  data: null, visited: {}, blogId: "", suggestions: {}, suggestState: {}, help: {}, helpState: {}, mine: {}, liked: {}, likeWatch: {},
   tab: "visit", visitCat: "realtime", visitFilter: "todo", visitSort: "score",
   nbFilter: "all", nbSearch: "", nbSort: "activity", nbDir: -1,
 };
@@ -293,7 +293,9 @@ const REL = { mutual: "서로이웃", iAdded: "이웃", addedMe: "나를 추가"
 const relBadge = (r) => r ? `<span class="badge b-${r}">${REL[r]}</span>` : "";
 const relOf = (n) => n.mutual ? "mutual" : n.iAdded ? "iAdded" : n.addedMe ? "addedMe" : "none";
 const lastActivity = (p) => Math.max(0, ...[...p.likes, ...p.comments].map((x) => ts(x.date)));
-const isDone = (p) => p.latestPost ? S.visited[p.blogId] === p.latestPost.logNo : !!S.visited[p.blogId];
+const mineOf = (p) => (p.latestPost && S.mine[`${p.blogId}:${p.latestPost.logNo}`]) || null;
+// 답방 완료: 직접 체크했거나, 네이버에서 이미 그 글에 공감·댓글을 남긴 경우
+const isDone = (p) => (p.latestPost ? S.visited[p.blogId] === p.latestPost.logNo : !!S.visited[p.blogId]) || !!(mineOf(p) && (mineOf(p).liked || mineOf(p).commented));
 const isFresh = (post) => post && Date.now() - ts(post.date) < 24 * 3600000;
 
 // ---------- data ----------
@@ -319,6 +321,25 @@ function visitFallback(p) {
   return lv ? lv.list : templateVisit(p);
 }
 
+/** 이웃 최신 글에 내가 이미 공감·댓글을 남겼는지 알아본다 (처음 보는 글만, 30개씩) */
+let mineBusy = false;
+async function loadMine() {
+  if (mineBusy || !S.data) return;
+  const need = visitPool().filter((p) => p.latestPost && !S.mine[`${p.blogId}:${p.latestPost.logNo}`]).map((p) => ({ blogId: p.blogId, logNo: p.latestPost.logNo }));
+  if (!need.length) return;
+  mineBusy = true;
+  try {
+    for (let i = 0; i < need.length; i += 30) {
+      const r = await fetch("/api/neighbors/my-reaction", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ posts: need.slice(i, i + 30) }) }).then((x) => x.json()).catch(() => ({}));
+      if (r.error) break;
+      Object.assign(S.mine, r.done || {});
+      render();
+    }
+  } finally {
+    mineBusy = false;
+  }
+}
+
 async function load() {
   const r = await fetch("/api/neighbors").then((r) => r.json());
   if (r.data && !r.data.unanswered) r.data = null; // 예전 형식 캐시는 버리고 새로 불러온다
@@ -338,6 +359,7 @@ async function load() {
   if (busy && !pollTimer) pollTimer = setInterval(load, 1500);
   if (!busy && pollTimer) { clearInterval(pollTimer); pollTimer = null; }
   S.state = r.state;
+  if (r.data && !r.state.running) loadMine();
   maybeAutoRefresh();
 }
 
