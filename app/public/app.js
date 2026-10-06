@@ -667,7 +667,7 @@ function renderSectionImages(post) {
         (it, i) => `<div class="si-row" data-i="${i}">
       <div class="si-head">${i + 1}. ${esc(it.heading)}</div>
       <div class="si-body">
-        <div class="si-thumb"><div class="si-empty">아직 없음</div></div>
+        <div class="si-thumb"><div class="si-empty">아직 없음<br><small>눌러서 이미지 찾기</small></div></div>
         <div class="si-info">
           ${it.note ? `<div class="si-alt">${esc(it.note)}</div>` : ""}
           <div class="si-tag">검색어: <b>${esc(it.ko)}</b>${it.tag ? ` · 영어 태그: <b>${esc(it.tag)}</b>` : ""}</div>
@@ -681,7 +681,12 @@ function renderSectionImages(post) {
   updatePickSummary();
 
   box.querySelectorAll(".si-link").forEach((btn) => btn.addEventListener("click", () => startPickFor(Number(btn.closest(".si-row").dataset.i), btn.dataset.engine)));
-  box.querySelectorAll(".si-thumb").forEach((th) => th.addEventListener("click", () => copyPicked(Number(th.closest(".si-row").dataset.i))));
+  box.querySelectorAll(".si-thumb").forEach((th) => th.addEventListener("click", () => {
+    const i = Number(th.closest(".si-row").dataset.i);
+    // 이미지가 아직 없으면 카드를 누르는 것만으로 네이버 이미지 검색을 열고, 있으면 그 이미지를 다시 복사한다
+    if (!pickItems[i].file) startPickFor(i, "naver");
+    else copyPicked(i);
+  }));
 }
 
 const pickRow = (i) => document.querySelector(`.si-row[data-i="${i}"]`);
@@ -704,8 +709,8 @@ function updatePickSummary() {
 function paintThumb(i) {
   const it = pickItems[i];
   const th = pickRow(i).querySelector(".si-thumb");
-  th.innerHTML = it.file ? `<img class="si-img" src="${esc(it.previewUrl)}" alt="${esc(it.note || it.heading)}" title="누르면 이 이미지가 복사돼요" style="cursor:pointer">` : `<div class="si-empty">아직 없음</div>`;
-  th.style.cursor = it.file ? "pointer" : "default";
+  th.innerHTML = it.file ? `<img class="si-img" src="${esc(it.previewUrl)}" alt="${esc(it.note || it.heading)}" title="누르면 이 이미지가 복사돼요" style="cursor:pointer">` : `<div class="si-empty">아직 없음<br><small>눌러서 이미지 찾기</small></div>`;
+  th.style.cursor = "pointer";
 }
 
 const aiStyle = () => { const el = $("#ai-style"); const v = el ? el.value : "auto"; try { localStorage.setItem("nbh-ai-style", v); } catch {} return v; };
