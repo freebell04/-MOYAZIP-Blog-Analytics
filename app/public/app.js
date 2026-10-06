@@ -754,8 +754,7 @@ async function pollPick() {
   if (st.status === "opening") pickState(i, "⏳ 크롬에 이미지 검색을 여는 중이에요...");
   else if (st.status === "waiting") {
     const err = st.error ? `<br><span class="error">⚠ ${esc(st.error)}</span>` : "";
-    if (st.file) pickState(i, `✅ 복사됐어요 (${esc(st.quality)}) · ${how} · 다른 이미지로 바꾸려면 크롬의 초록 줄을 누른 뒤 클릭하세요${err}`);
-    else if (st.armed && st.autoAt && !st.autoTried) pickState(i, `🟢 준비됐어요! 크롬의 이미지 검색에서 마음에 드는 이미지를 <b>클릭</b>하세요. <b>${Math.max(0, Math.ceil((st.autoAt - Date.now()) / 1000))}초</b> 안에 안 고르면 맨 앞 이미지를 자동으로 골라 복사해요.`);
+    if (st.file) pickState(i, `✅ 복사됐어요 (${esc(st.quality)}) · ${how} · 다른 이미지로 바꾸려면 마음에 드는 이미지를 다시 클릭하세요${err}`);
     else if (st.armed) pickState(i, `🟢 준비됐어요! 크롬의 이미지 검색에서 마음에 드는 이미지를 <b>클릭</b>하면 자동으로 복사돼요 (크롬 위쪽에 초록 안내줄이 보여요)${err}`);
     else {
       pickWait[i] = pickWait[i] || Date.now();
@@ -766,7 +765,7 @@ async function pollPick() {
   else if (st.status === "working") pickState(i, "⏳ 이미지를 복사하는 중이에요...");
   else if (st.status === "copied" && st.pasted) pickState(i, `✅ 글쓰기 창의 이 블록 아래에 이미지를 붙여넣었어요 (${esc(st.quality)}) · 마음에 안 들면 다시 눌러 만들 수 있어요`);
   else if (st.status === "copied" && st.pasteNote) pickState(i, `✅ 이미지를 복사했어요 (${esc(st.quality)}) · ${how}<br><small class="muted">자동 붙여넣기는 못 했어요: ${esc(st.pasteNote)}</small>`);
-  else if (st.status === "copied") pickState(i, `✅ 복사됐어요 (${esc(st.quality)}) · ${how} · 다른 이미지로 바꾸려면 크롬의 초록 줄을 누른 뒤 클릭하세요`);
+  else if (st.status === "copied") pickState(i, `✅ 복사됐어요 (${esc(st.quality)}) · ${how} · 다른 이미지로 바꾸려면 마음에 드는 이미지를 다시 클릭하세요`);
   else if (st.status === "closed" || st.status === "error") {
     pickState(i, st.file ? `✅ 복사했던 이미지예요 · 누르면 다시 복사돼요` : st.status === "error" ? `<span class="error">⚠ ${esc(st.error)}</span>` : "크롬의 이미지 검색 창이 닫혔어요. 다시 하려면 검색 버튼을 눌러주세요.");
     clearInterval(pickPoll);

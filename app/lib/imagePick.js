@@ -149,7 +149,6 @@ function copyImageToClipboard(file) {
 // ---------------------------------------------------------------------------
 let state = { status: "idle" };
 let current = null; // {client, targetId}
-const AUTO_PICK_MS = 40000; // 이 시간 동안 직접 고르지 않으면 자동으로 하나 골라 복사한다
 const openedTabs = new Set(); // 이미지 검색으로 열었던 크롬 탭들 (모두 끝나면 닫는다)
 
 /** 이미지 검색으로 열었던 탭을 모두 닫는다 */
@@ -259,22 +258,12 @@ async function startPick({ chapter, query, engine = "naver", openUrl }) {
           s.armed = !!(await client.eval(`!!document.getElementById("__nbh_bar")`).catch(() => false));
           s.pageUrl = String((await client.eval("location.href").catch(() => "")) || "").slice(0, 120);
         }
-        // 직접 고르기 시작(클릭 감지 켜짐)부터 40초가 지나도록 아무것도 안 골랐으면 자동으로 하나 고른다
-        if (s.armed && !s.armedAt) s.armedAt = Date.now();
-        if (s.armedAt && !s.count && !s.autoTried) {
-          s.autoAt = s.armedAt + AUTO_PICK_MS;
-          if (Date.now() >= s.autoAt) {
-            s.autoTried = true;
-            const ok = await client.eval("window.__nbhAutoPick && window.__nbhAutoPick()").catch(() => false);
-            if (!ok) { s.error = "자동으로 고를 이미지를 못 찾았어요. 직접 클릭해주세요."; await client.eval(`window.__nbhToast(${JSON.stringify("⚠ " + s.error)}, false)`).catch(() => {}); }
-          }
-        }
         const clicks = await client.eval("(window.__nbhPicks || []).splice(0)").catch(() => []);
         if (clicks && clicks.length) {
           const last = clicks[clicks.length - 1]; // 여러 번 눌렀으면 마지막 것
           try {
             await handlePick(s, last);
-            await client.eval(`window.__nbhLock(true); window.__nbhToast(${JSON.stringify("✅ 복사했어요 (" + s.quality + ") → 블로그 글쓰기 창에서 넣을 자리를 누르고 Ctrl+V · 다른 이미지로 바꾸려면 이 줄을 눌러 잠금을 풀어주세요")})`).catch(() => {});
+            await client.eval(`window.__nbhCooldown = Date.now() + 2000; window.__nbhToast(${JSON.stringify("✅ 복사했어요 (" + s.quality + ") → 블로그 글쓰기 창에서 넣을 자리를 누르고 Ctrl+V · 다른 이미지로 바꾸려면 마음에 드는 이미지를 다시 클릭하세요")})`).catch(() => {});
             bringEditorToFront(); // 붙여넣을 블로그 글쓰기 창을 바로 앞으로 (자동 입력 중이면 건드리지 않음)
           } catch (e) {
             s.status = "waiting";

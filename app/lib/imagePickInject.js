@@ -61,7 +61,7 @@
     return true;
   };
   const handler = (e) => {
-    if (window.__nbhLocked) return; // 한 장 복사한 뒤에는 (네이버가 클릭으로 다음 이미지로 넘겨도) 더 복사하지 않는다
+    if (window.__nbhCooldown && Date.now() < window.__nbhCooldown) return; // 복사 직후 2초 동안의 클릭은 무시 (네이버가 클릭으로 다음 이미지로 넘기는 것 방지). 그 뒤엔 언제든 다시 골라 복사할 수 있다
     try {
       const f = findImage(e);
       if (!f || !f.src) return;
