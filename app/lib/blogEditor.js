@@ -525,6 +525,9 @@ async function verifyStyledBody(frame, page, blocks) {
     const want = plain(quotes[i].lines.join(" "));
     if (!actual.quotes[i].includes(want)) return { ok: false, reason: `${i + 1}번째 인용구가 다름: 원문 "${want}" / 에디터 "${actual.quotes[i]}"` };
   }
+  // 같은 내용이 두 번 들어갔는지(이전 내용이 안 지워진 경우): 에디터 글자 수가 원문보다 훨씬 많으면 실패로 보고 다시 쓴다
+  const expectLen = blocks.filter((b) => b.type === "para").reduce((n, p) => n + plain(p.text).length, 0);
+  if (expectLen > 200 && actual.text.length > expectLen * 1.6) return { ok: false, reason: `내용이 중복돼 보여요 (원문 ${expectLen}자 / 에디터 ${actual.text.length}자)` };
   for (const p of blocks.filter((b) => b.type === "para")) {
     if (!actual.text.includes(plain(p.text))) return { ok: false, reason: `본문 줄이 빠짐: "${plain(p.text).slice(0, 30)}"` };
   }

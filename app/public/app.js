@@ -863,8 +863,54 @@ function legacyToTpl(post) {
   };
 }
 
+/**
+ * 글이 여러 번 수정되면서 같은 내용이 두 번 들어간 경우를 정리한다:
+ *  - 같은 소제목/같은 내용의 섹션은 처음 것만 남긴다
+ *  - 한 섹션 본문(또는 인트로)이 같은 글을 두 번 이어 붙인 모양이면 한 번만 남긴다
+ *  - 인트로 줄·같은 줄이 연달아 반복되면 한 번만 남긴다
+ */
+function dedupePost(post) {
+  if (!post || typeof post !== "object") return post;
+  const norm = (t) => String(t || "").replace(/\*\*/g, "").replace(/\s+/g, " ").trim();
+  const halve = (t) => {
+    const s = String(t || "");
+    const n = norm(s);
+    if (n.length < 40) return s;
+    const h = Math.floor(n.length / 2);
+    for (const d of [0, 1, -1]) { // 가운데 공백 한두 글자 차이는 허용
+      const a = n.slice(0, h + d).trim(), b = n.slice(h + d).trim();
+      if (a.length > 20 && a === b) { const lines = s.split("\n"); return lines.slice(0, Math.ceil(lines.length / 2)).join("\n"); }
+    }
+    return s;
+  };
+  const dedupLines = (arr) => { const out = []; for (const l of arr) if (!out.length || norm(out[out.length - 1]) !== norm(l)) out.push(l); return out; };
+  if (Array.isArray(post.introLines)) post.introLines = dedupLines(post.introLines);
+  if (typeof post.intro === "string") post.intro = halve(post.intro);
+  if (Array.isArray(post.sections)) {
+    const keep = [];
+    const seen = new Set();
+    post.sections.forEach((sec, i) => {
+      const isObj = sec && typeof sec === "object";
+      const body = isObj ? [sec.title, sec.short, sec.explain].join("|") : String(sec);
+      const head = isObj ? norm(sec.title) : norm(((post.sectionHeadingLines || [])[i] || []).join(" "));
+      const key = norm(body).slice(0, 120);
+      if (seen.has(key) || (head && seen.has("h:" + head))) return; // 이미 나온 섹션
+      seen.add(key); if (head) seen.add("h:" + head);
+      if (isObj) { sec.explain = halve(sec.explain); } else sec = halve(sec);
+      keep.push(i);
+      post.__sec = (post.__sec || []); post.__sec.push(sec);
+    });
+    const secs = post.__sec || [];
+    delete post.__sec;
+    if (Array.isArray(post.sectionHeadingLines)) post.sectionHeadingLines = keep.map((i) => post.sectionHeadingLines[i]).filter(Boolean);
+    for (const k of ["sectionImageKeywords", "sectionImageTags", "sectionImageNotes"]) if (Array.isArray(post[k])) post[k] = keep.map((i) => post[k][i]).filter((x) => x !== undefined);
+    post.sections = secs;
+  }
+  return post;
+}
+
 function loadPost(post, opts = {}) {
-  post = cleanPostText(post); // AI가 \n 을 글자 그대로 준 경우를 정리
+  post = dedupePost(cleanPostText(post)); // AI가 \n 을 글자 그대로 준 경우를 정리
   // 내 블로그 글 형식 칸(내 템플릿)에서 시작했는데 예전 구조의 글이 오면 템플릿 구조로 바꿔서 쓴다
   if (opts.mytpl && formatInfo && formatInfo.myTemplateAvailable && post && !post.tpl && Array.isArray(post.introLines) && Array.isArray(post.sections) && typeof post.sections[0] === "string") {
     const tpl = legacyToTpl(post);
