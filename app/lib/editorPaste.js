@@ -3,6 +3,7 @@
 //  - 이미지는 미리 윈도우 클립보드에 복사돼 있어야 한다 (imagePick.copyImageToClipboard).
 const session = require("./session");
 
+const pastedChapters = new Set(); // 이미 이미지를 붙여넣은 챕터 (다시 붙이면 앞의 것을 지우고 바꾼다)
 const CIRCLED = ["①", "②", "③", "④", "⑤", "⑥"];
 
 // 에디터 프레임 안에서: 해당 번호의 블록을 찾아 "그 블록의 마지막 글 문단"에 표시(data-nbh-paste)를 단다.
@@ -41,6 +42,24 @@ async function pasteImageAtChapter(chapter) {
     const f = page.frames().find((x) => x.url().includes("PostWriteForm"));
     const mark = await f.evaluate(MARK_JS(n));
     if (mark !== "ok") return { ok: false, reason: mark === "block-not-found" ? `글쓰기 창에서 ꒰${n}꒱ 블록을 찾지 못했어요 (내 템플릿으로 쓴 글이 맞는지 확인해주세요).` : "그 블록의 글 칸을 찾지 못했어요." };
+    // 이 챕터에 앞서 붙여넣은 이미지가 있으면 먼저 지운다 (다른 이미지로 바꿀 때) — 블록 맨 아래 글 칸 바로 다음 칸이 이미지일 때만
+    if (pastedChapters.has(chapter)) {
+      const removed = await f.evaluate(() => {
+        const p = document.querySelector('[data-nbh-paste="1"]');
+        const next = p && p.closest(".se-component") && p.closest(".se-component").nextElementSibling;
+        if (!next || !next.classList.contains("se-image")) return false;
+        next.scrollIntoView({ block: "center" });
+        next.setAttribute("data-nbh-del", "1");
+        return true;
+      });
+      if (removed) {
+        await f.locator('[data-nbh-del="1"]').first().click({ timeout: 5000 }).catch(() => {});
+        await page.keyboard.press("Delete");
+        await page.waitForTimeout(400);
+        await f.evaluate(() => document.querySelectorAll("[data-nbh-del]").forEach((e) => e.removeAttribute("data-nbh-del")));
+        await f.evaluate(MARK_JS(n)); // 표시가 지워졌을 수 있어 다시 단다
+      }
+    }
     const before = await f.evaluate(IMG_COUNT_JS);
     await page.bringToFront().catch(() => {});
     const para = f.locator('[data-nbh-paste="1"]').first();
@@ -52,7 +71,7 @@ async function pasteImageAtChapter(chapter) {
     // 이미지가 올라와서 새 이미지 칸이 생길 때까지 기다린다 (최대 25초)
     for (let i = 0; i < 50; i++) {
       await page.waitForTimeout(500);
-      if ((await f.evaluate(IMG_COUNT_JS)) > before) return { ok: true };
+      if ((await f.evaluate(IMG_COUNT_JS)) > before - 0 && (await f.evaluate(IMG_COUNT_JS)) !== before) { pastedChapters.add(chapter); return { ok: true }; }
     }
     return { ok: false, reason: "붙여넣기를 했지만 이미지가 올라오지 않았어요. 글쓰기 창에서 Ctrl+V를 직접 눌러보세요." };
   } catch (e) {

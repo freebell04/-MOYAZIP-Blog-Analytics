@@ -93,10 +93,10 @@ const findResultJs = (marker) => `(() => {
   if (marker) msgs.forEach((m, i) => { if ((m.innerText || "").includes(marker)) mi = i; });
   const anchor = mi >= 0 ? msgs[mi] : null;
   const after = (el) => !anchor || (anchor !== el && !anchor.contains(el) && !!(anchor.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING));
-  const sources = [
-    ...pres.filter(after).map((el) => el.innerText || el.textContent || ""),
-    ...(anchor ? msgs.slice(mi + 1) : msgs).map((el) => el.innerText || ""),
-  ];
+  // 화면 순서(위→아래)로 정렬해서, 수정본이 여러 개 있어도 "가장 아래(마지막)" 글을 쓴다
+  const els = [...pres.filter(after), ...(anchor ? msgs.slice(mi + 1) : msgs)];
+  els.sort((a, b) => (a === b ? 0 : a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1));
+  const sources = els.map((el) => el.innerText || el.textContent || "");
   let count = 0, found = null;
   for (let i = sources.length - 1; i >= 0; i--) {
     for (const o of objects(sources[i]).reverse()) {

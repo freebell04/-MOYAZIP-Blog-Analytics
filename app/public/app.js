@@ -340,7 +340,7 @@ $("#save-draft-btn").addEventListener("click", async () => {
 
   busyOff();
   setAiButtons(false);
-  if (!r.error) { savedDraftOnce = true; maybeCloseImageTabs(); }
+  if (!r.error) { savedDraftOnce = true; fetch("/api/images/pick/close-tabs", { method: "POST" }).catch(() => {}); } // 임시저장하면 이미지 검색으로 열었던 탭을 닫는다
   $("#save-draft-btn").disabled = false;
   $("#save-status").textContent = r.error
     ? "오류: " + r.error
