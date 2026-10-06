@@ -86,7 +86,7 @@ const findResultJs = (marker) => `(() => {
     return out;
   };
   const marker = ${JSON.stringify("MARKER")};
-  const msgs = [...document.querySelectorAll('[data-message-author-role], user-query, model-response, .query-text, [data-testid*="message"]')];
+  const msgs = [...document.querySelectorAll('[data-message-author-role], [class*="group/user-message"], user-query, model-response, .query-text, [data-testid*="message"]')];
   const pres = [...document.querySelectorAll("pre, code")];
   // 우리가 보낸 요청문(표식이 든 말풍선)을 찾으면, 그 뒤에 나온 말풍선·코드블록만 본다 → 이 대화에 예전부터 있던 JSON에는 반응하지 않는다
   let mi = -1;

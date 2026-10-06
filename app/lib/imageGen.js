@@ -56,7 +56,14 @@ const LIST_IMGS = `[...document.querySelectorAll("img")].filter((i) => {
   return i.complete && i.naturalWidth >= 500 && r.width >= 250 && r.height >= 150 && !/avatar|profile|logo|favicon|sprite/i.test(u);
 }).map((i) => i.currentSrc || i.src)`;
 // 사용자가 보낸 메시지 중 "완성"(만) 쓴 것의 개수
-const DONE_COUNT = `[...document.querySelectorAll('[data-message-author-role="user"]')].filter((e) => /^\\s*완성[\\s.!~]*$/.test((e.innerText || "").trim())).length`;
+// (ChatGPT 화면 구조가 바뀌어서 예전 이름표(data-message-author-role) 대신 새 이름표(group/user-message)도 함께 본다. 안쪽에 겹쳐 있는 같은 말풍선은 한 번만 센다)
+const USER_SEL = '[data-message-author-role="user"], [class*="group/user-message"], user-query';
+const DONE_COUNT = `(() => {
+  const sel = ${JSON.stringify(USER_SEL)};
+  return [...document.querySelectorAll(sel)]
+    .filter((e) => !(e.parentElement && e.parentElement.closest(sel)))
+    .filter((e) => /^\\s*(내가 한 말:?\\s*)?완성[\\s.!~]*$/.test((e.innerText || "").trim())).length;
+})()`;
 const GENERATING = `!!document.querySelector('button[data-testid="stop-button"], button[aria-label*="중지"], button[aria-label*="Stop"]')`;
 const FETCH_DATAURL = (src) => `(async () => {
   const r = await fetch(${JSON.stringify(src)}, { credentials: "include" });
