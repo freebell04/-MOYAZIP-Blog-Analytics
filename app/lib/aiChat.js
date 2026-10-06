@@ -109,7 +109,14 @@ const findResultJs = (marker) => `(() => {
       } catch {}
     }
   }
-  return JSON.stringify({ count, found, sigs, markerFound: !!anchor });
+  // 마지막 JSON 덩어리가 끝까지 안 와서(답변이 중간에 끊김) 읽을 수 없는지
+  let broken = false;
+  const cands = sources.filter((t) => /\{\s*"(title|formatName)"/.test(t));
+  if (cands.length) {
+    const lastC = cands[cands.length - 1];
+    broken = !objects(lastC).some((o) => { try { const j = JSON.parse(o); return isPost(j) || isFormat(j); } catch { return false; } });
+  }
+  return JSON.stringify({ count, found, sigs, broken, markerFound: !!anchor });
 })()`;
 
 /**
@@ -347,7 +354,8 @@ async function start(ai, prompt, kind = "post", mode = "default") {
       // 사용자가 대화를 마치고 "완성"이라고 하면 나오는 JSON을 기다린다 (스트리밍 중엔 JSON이 깨져 있어 통과 못 함,
       // 그래도 혹시 모르니 같은 결과가 두 번 연속 보일 때 확정)
       const chatDeadline = Date.now() + CHAT_WAIT_MS;
-      let last = null;
+      let last = null, brokenSince = 0, recovers = 0;
+      const STOPBTN = `!!document.querySelector('button[data-testid="stop-button"], button[aria-label*="중지"], button[aria-label*="Stop"]')`;
       while (s === state) {
         if (client.closed || !(await targetAlive(targetId).catch(() => true))) return void (s.status = "closed");
         if (Date.now() > chatDeadline) return void (s.status = "timeout");
@@ -365,6 +373,20 @@ async function start(ai, prompt, kind = "post", mode = "default") {
           return;
         }
         last = found;
+        // 마지막 JSON이 중간에 끊겨 있고 답변이 이미 멈춰 있으면(Gemini "대답이 중지되었습니다" 등), 자동으로 한 번 더 요청한다
+        if (!found && cur && cur.broken && !(await client.eval(STOPBTN).catch(() => false))) {
+          brokenSince = brokenSince || Date.now();
+          if (Date.now() - brokenSince > 5000 && recovers < 3) {
+            recovers++;
+            brokenSince = 0;
+            s.note = `AI가 보낸 JSON이 중간에 끊겨 있어서, 처음부터 끝까지 다시 보내달라고 자동으로 요청했어요 (${recovers}/3).`;
+            try {
+              const selNow = await client.eval(firstMatch(site.input));
+              await putPrompt(client, selNow, "방금 JSON이 중간에 끊겼어. 내용은 그대로 두고, 처음({)부터 끝(})까지 빠짐없이 코드블록 하나로 다시 보내줘. 다른 설명은 붙이지 마.");
+              await pressSend(client, site, selNow);
+            } catch {}
+          }
+        } else brokenSince = 0;
         await sleep(2000);
       }
     } catch (e) {
