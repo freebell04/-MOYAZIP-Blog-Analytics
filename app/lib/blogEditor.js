@@ -337,7 +337,13 @@ function parseBody(bodyText) {
 function composeStyledBlocks(post) {
   const blocks = [];
   const intro = (post.introLines || []).map((l) => l.trim()).filter(Boolean);
-  if (intro.length) blocks.push({ type: "quote", style: "default", lines: intro, bold: false });
+  if (intro.length) {
+    // 맨 위 인용구에는 "오늘 주제"만 짧게(첫 줄이 길면 제목을 쓴다), 그 아래 일반 글로 주제에 대한 간단한 설명을 쓴다
+    const first = intro[0].length <= 40 ? intro[0] : String(post.title || intro[0]).slice(0, 60);
+    const rest = intro[0].length <= 40 ? intro.slice(1) : intro;
+    blocks.push({ type: "quote", style: "default", lines: [first], bold: false });
+    for (const l of rest) blocks.push({ type: "para", text: l });
+  }
   const sections = post.sections || [];
   const headings = post.sectionHeadingLines || [];
   sections.forEach((body, i) => {
