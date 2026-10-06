@@ -211,7 +211,14 @@ function rememberTab(ai, id) {
  *  2) 없으면 이미 열려 있는 새 대화 탭 → 3) 그것도 없으면 새 탭 (처음 한 번)
  * @returns {Promise<{id, client, continued:boolean, reused:boolean}>}
  */
-async function acquireTab(ai, site) {
+// 같은 AI의 탭을 동시에 두 번 만들지 않게 순서대로 처리한다 (미리 열기와 실제 시작이 겹칠 때)
+let tabLock = Promise.resolve();
+function acquireTab(ai, site) {
+  const run = tabLock.then(() => acquireTabInner(ai, site), () => acquireTabInner(ai, site));
+  tabLock = run.catch(() => {});
+  return run;
+}
+async function acquireTabInner(ai, site) {
   const port = new URL(session.CDP_URL).port || "9222";
   const id = readTabs()[ai];
   if (id) {
@@ -223,9 +230,9 @@ async function acquireTab(ai, site) {
         if (client && client.eval) {
           // 그 탭에 요청문을 넣을 입력창이 실제로 있어야 이어서 쓴다 (캔버스 화면·로딩 중·내용이 비워진 탭이면 쓰지 않고 새 대화를 만든다)
           let usable = false;
-          for (let i = 0; i < 8 && !usable; i++) {
+          for (let i = 0; i < 12 && !usable; i++) {
             usable = !!(await client.eval(firstMatch(site.input)).catch(() => null));
-            if (!usable) await sleep(400);
+            if (!usable) await sleep(250);
           }
           if (usable) return { id, client, continued: true, reused: true };
           try { client.close(); } catch {}
@@ -290,7 +297,7 @@ async function start(ai, prompt, kind = "post", mode = "default") {
 
   (async () => {
     try {
-      await session.ensureDebugChrome();
+      await session.ensureDebugChrome({ quick: true });
       const tab = await acquireTab(ai, site);
       let targetId = tab.id;
       let client = tab.client;
@@ -342,7 +349,7 @@ async function start(ai, prompt, kind = "post", mode = "default") {
         if (c !== null && c === prevCount) break;
         prevCount = c === null ? prevCount : c;
         baseline = prevCount < 0 ? 0 : prevCount;
-        await sleep(600);
+        await sleep(300);
       }
       const marker = "req" + Math.random().toString(36).slice(2, 7);
       s.status = "sending";
@@ -419,4 +426,14 @@ function stop() {
   state = { status: "idle" };
 }
 
-module.exports = { freshTab, lastWriteAi, showTab, acquireTab, _h: { firstMatch, putPrompt, pressSend, targetAlive, within, sleep, SITES, LOGIN_URL }, start, getState, markTaken, focus, stop, SITES, findReusableTab };
+/** AI 창을 미리 준비한다 (글감 본문을 모으는 동안 크롬·탭을 먼저 열어 둔다) */
+async function prewarm(ai) {
+  const site = SITES[ai];
+  if (!site) return;
+  await session.ensureDebugChrome({ quick: true });
+  const tab = await acquireTab(ai, site);
+  try { tab.client.close(); } catch {}
+  fetch(`${session.CDP_URL}/json/activate/${tab.id}`).catch(() => {});
+}
+
+module.exports = { prewarm, freshTab, lastWriteAi, showTab, acquireTab, _h: { firstMatch, putPrompt, pressSend, targetAlive, within, sleep, SITES, LOGIN_URL }, start, getState, markTaken, focus, stop, SITES, findReusableTab };

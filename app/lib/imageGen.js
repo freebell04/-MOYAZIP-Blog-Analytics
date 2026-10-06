@@ -133,7 +133,7 @@ async function start({ chapter, heading, body, style = "auto", paste = true, ai 
   (async () => {
     let client;
     try {
-      await session.ensureDebugChrome();
+      await session.ensureDebugChrome({ quick: true });
       const site = SITES[key];
       // 글을 쓰던 그 AI의 대화 탭을 그대로 이어서 쓴다 (없을 때만 새 대화를 만든다)
       const tab = await aiChat.acquireTab(key, site);

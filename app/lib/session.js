@@ -201,11 +201,11 @@ async function ensureWindow() {
   await sleep(1500);
 }
 
-async function ensureDebugChrome() {
+async function ensureDebugChrome(opts = {}) {
   if (await isCdpUp()) {
     await ensureWindow();
     if (await isCdpUp()) {
-      await closeHungTabs();
+      if (!opts.quick) await closeHungTabs(); // Playwright로 붙을 때만 필요한 정리 (AI 창 열기에는 건너뛰어 빠르게)
       return { alreadyRunning: true };
     }
   }

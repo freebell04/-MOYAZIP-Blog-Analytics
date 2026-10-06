@@ -325,7 +325,8 @@ async function makeHandoff(keyword, selected, context) {
       while (nextItem < selected.length) {
         const i = nextItem++;
         const it = selected[i];
-        const text = await fetchArticleText(it.link).catch(() => "");
+        // 한 글이 오래 걸려도 전체가 늦어지지 않게 최대 8초만 기다린다
+        const text = await Promise.race([fetchArticleText(it.link).catch(() => ""), new Promise((r) => setTimeout(() => r(""), 8000))]);
         items[i] = { title: it.title, link: it.link, snippet: it.snippet || "", text: (text || "").slice(0, 4000) };
       }
     };
@@ -364,6 +365,7 @@ app.post("/api/ai-chat", async (req, res) => {
   // 글감이 없어도(검색 결과가 없는 지점·가게 후기 등) 키워드만으로 시작할 수 있다 — AI가 먼저 내게 질문해서 정보를 받아 쓴다
   if ((!selected || !selected.length) && !String(keyword || "").trim()) return res.status(400).json({ error: "검색어나 글감이 필요해요. 위 입력칸에 주제를 적어주세요." });
   try {
+    aiChat.prewarm(ai).catch(() => {}); // 글감 본문을 모으는 동안 AI 창(크롬·대화 탭)을 먼저 열어 둔다
     const data = await makeHandoff(keyword, selected || [], context);
     const prompt = blogFormat.buildPostPrompt(data, { myTemplate: mode === "mytpl" });
     const st = await aiChat.start(ai, prompt, "post", mode);
