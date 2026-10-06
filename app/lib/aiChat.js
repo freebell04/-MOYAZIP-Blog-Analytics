@@ -97,19 +97,19 @@ const findResultJs = (marker) => `(() => {
   const els = [...pres.filter(after), ...(anchor ? msgs.slice(mi + 1) : msgs)];
   els.sort((a, b) => (a === b ? 0 : a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1));
   const sources = els.map((el) => el.innerText || el.textContent || "");
-  let count = 0, found = null;
+  let count = 0, found = null; const sigs = [];
   for (let i = sources.length - 1; i >= 0; i--) {
     for (const o of objects(sources[i]).reverse()) {
       try {
         const j = JSON.parse(o);
         const kind = isPost(j) ? "post" : isFormat(j) ? "format" : "";
         if (!kind) continue;
-        count++;
+        count++; sigs.push(o.length + ":" + o.slice(0, 40) + o.slice(-40));
         if (!found) found = { kind, json: j };
       } catch {}
     }
   }
-  return JSON.stringify({ count, found, markerFound: !!anchor });
+  return JSON.stringify({ count, found, sigs, markerFound: !!anchor });
 })()`;
 
 /**
@@ -328,10 +328,10 @@ async function start(ai, prompt, kind = "post", mode = "default") {
 
       // 이어 쓰는 대화에는 예전 결과가 남아 있어서, 지금 보내기 전의 개수를 기억해 두고 "새로 늘어난" 결과만 받는다
       // 기준 개수: 대화가 다 그려져서 값이 안정될 때까지 (예전 글이 늦게 그려지는 걸 새 결과로 착각하지 않게)
-      let baseline = 0, prevCount = -1;
+      let baseline = 0, prevCount = -1, baseSigs = [];
       for (let t = 0; t < 8; t++) {
         let c = null;
-        try { c = JSON.parse(await client.eval(findResult(""))).count; } catch {}
+        try { const r0 = JSON.parse(await client.eval(findResult(""))); c = r0.count; baseSigs = r0.sigs || []; } catch {}
         if (c !== null && c === prevCount) break;
         prevCount = c === null ? prevCount : c;
         baseline = prevCount < 0 ? 0 : prevCount;
@@ -354,7 +354,9 @@ async function start(ai, prompt, kind = "post", mode = "default") {
         let cur = null;
         try { cur = JSON.parse(await client.eval(findResult(marker))); } catch {}
         // 요청문이 보이면 그 뒤에 나온 결과만 / 아직 안 보이면(보내기 전·전송 실패) 기준 개수보다 늘어난 결과만
-        const found = cur && cur.found && (cur.markerFound || cur.count > baseline) ? JSON.stringify(cur.found) : null;
+        // (긴 대화는 위쪽 말풍선이 화면에서 빠져 개수가 안 늘 수 있어서, 보내기 전에 없던 새 내용의 JSON이면 새 결과로 본다)
+        const isNew = cur && cur.found && (cur.sigs || []).some((g) => !baseSigs.includes(g));
+        const found = cur && cur.found && (cur.markerFound || cur.count > baseline || isNew) ? JSON.stringify(cur.found) : null;
         if (found && found === last) {
           const r = JSON.parse(found);
           s.kind = r.kind; // 글감으로 시작했는데 형식(분석) 결과가 온 경우 등, 실제로 받은 종류를 따른다
