@@ -714,7 +714,9 @@ function paintThumb(i) {
 }
 
 const aiStyle = () => { const el = $("#ai-style"); const v = el ? el.value : "auto"; try { localStorage.setItem("nbh-ai-style", v); } catch {} return v; };
+let genWaitingChapter = null;
 async function startGenFor(i) {
+  genWaitingChapter = i;
   const body = (currentPost && currentPost.sections && currentPost.sections[i]) || "";
   pickState(i, "🎨 ChatGPT 입력창에 이미지 요청문을 넣는 중이에요...");
   const r = await fetch("/api/images/generate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ chapter: i, heading: pickItems[i].heading, body, style: aiStyle() }) })
@@ -741,6 +743,13 @@ async function startPickFor(i, engine) {
 
 async function pollPick() {
   const st = await fetch("/api/images/pick/status").then((r) => r.json()).catch(() => null);
+  if (st && st.status === "idle" && genWaitingChapter !== null && pickRow(genWaitingChapter)) {
+    // 프로그램이 다시 켜져서(업데이트·재시작) 이미지 기다림이 끝났는데 화면은 계속 기다리는 것처럼 보이는 경우
+    pickState(genWaitingChapter, "⚠ 프로그램이 다시 시작돼서 이미지 기다림이 끝났어요. [AI로 이미지 만들기]를 다시 눌러주세요 (같은 대화에서 이어서 만들 수 있어요).");
+    genWaitingChapter = null;
+    clearInterval(pickPoll);
+    return;
+  }
   if (!st || st.status === "idle" || st.chapter === undefined) return;
   const i = st.chapter;
   const it = pickItems[i];
@@ -768,7 +777,7 @@ async function pollPick() {
     }
   }
   else if (st.status === "working") pickState(i, "⏳ 이미지를 복사하는 중이에요...");
-  else if (st.status === "copied" && st.pasted) pickState(i, `✅ 글쓰기 창의 이 블록 아래에 이미지를 붙여넣었어요 (${esc(st.quality)}) · 마음에 안 들면 다시 눌러 만들 수 있어요`);
+  else if (st.status === "copied" && (genWaitingChapter = null, st.pasted)) pickState(i, `✅ 글쓰기 창의 이 블록 아래에 이미지를 붙여넣었어요 (${esc(st.quality)}) · 마음에 안 들면 다시 눌러 만들 수 있어요`);
   else if (st.status === "copied" && st.pasteNote) pickState(i, `✅ 이미지를 복사했어요 (${esc(st.quality)}) · ${how}<br><small class="muted">자동 붙여넣기는 못 했어요: ${esc(st.pasteNote)}</small>`);
   else if (st.status === "copied") pickState(i, `✅ 복사됐어요 (${esc(st.quality)}) · ${how} · 다른 이미지로 바꾸려면 마음에 드는 이미지를 다시 클릭하세요`);
   else if (st.status === "closed" || st.status === "error") {
