@@ -645,13 +645,14 @@ function renderSectionImages(post) {
     };
   });
 
+  fetch("/api/images/ai").then((r) => r.json()).then((r) => { const el = $("#ai-img-name"); if (el && r.name) el.textContent = r.name; }).catch(() => {});
   const savedStyle = (() => { try { return localStorage.getItem("nbh-ai-style") || "auto"; } catch { return "auto"; } })();
   box.innerHTML = `<p class="hint" id="si-summary" style="margin:0 0 6px"></p>
     <p style="margin:0 0 8px;font-size:13px">🎨 <b>AI 이미지 스타일</b>
       <select id="ai-style" style="margin-left:6px;padding:4px 8px;border:1px solid var(--line,#e5e7eb);border-radius:8px;font:inherit;font-size:13px">
         ${[["auto", "자동 (내용에 어울리게)"], ["photo", "실제 사진처럼"], ["illust", "깔끔한 일러스트"], ["watercolor", "수채화"], ["cartoon", "귀여운 3D 카툰"], ["flat", "미니멀 플랫"]].map(([v, l]) => `<option value="${v}"${v === savedStyle ? " selected" : ""}>${l}</option>`).join("")}
       </select>
-      <small class="muted">[🎨 AI로 이미지 만들기]에 적용돼요. 요청문을 ChatGPT 입력창에 넣어 두기만 해요 → 고쳐서 보내고 대화로 다듬은 뒤 <b>"완성"</b>이라고 보내면 글쓰기 창에 붙여넣어요.</small></p>
+      <small class="muted">[🎨 AI로 이미지 만들기]는 <b id="ai-img-name">ChatGPT</b>에서 해요 (마지막으로 글 쓴 AI 기준, Claude로 썼으면 ChatGPT). 요청문을 입력창에 넣어 두기만 해요 → 고쳐서 보내고 대화로 다듬은 뒤 <b>"완성"</b>이라고 보내면 글쓰기 창에 붙여넣어요.</small></p>
     <div class="si-guide">
       <b>이렇게 하세요</b>
       <ol>

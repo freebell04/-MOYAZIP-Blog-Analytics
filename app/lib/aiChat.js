@@ -183,6 +183,15 @@ const TABS_PATH = require("path").join(__dirname, "..", "data", "ai-tabs.json");
 function readTabs() {
   try { return JSON.parse(require("fs").readFileSync(TABS_PATH, "utf-8")); } catch { return {}; }
 }
+const LAST_PATH = require("path").join(__dirname, "..", "data", "ai-last.json");
+/** 마지막으로 글을 쓴 AI (이미지는 그 AI로 만든다). 모르면 chatgpt */
+function lastWriteAi() {
+  try { return JSON.parse(require("fs").readFileSync(LAST_PATH, "utf-8")).ai || "chatgpt"; } catch { return "chatgpt"; }
+}
+function rememberLast(ai) {
+  try { require("fs").mkdirSync(require("path").dirname(LAST_PATH), { recursive: true }); require("fs").writeFileSync(LAST_PATH, JSON.stringify({ ai, at: Date.now() })); } catch {}
+}
+
 function rememberTab(ai, id) {
   const t = readTabs();
   t[ai] = id;
@@ -256,6 +265,7 @@ async function start(ai, prompt, kind = "post", mode = "default") {
   const site = SITES[ai];
   if (!site) throw new Error("알 수 없는 AI예요: " + ai);
   if (state.client) state.client.close(); // 이전 대화 지켜보기는 그만둔다 (탭은 그대로 둠)
+  if (kind === "post") rememberLast(ai); // 글쓰기로 쓴 AI를 기억해 둔다 (이미지 만들기에 쓴다)
   const s = (state = { status: "opening", ai, kind, mode, name: site.name, startedAt: Date.now() });
 
   (async () => {
@@ -363,4 +373,4 @@ function stop() {
   state = { status: "idle" };
 }
 
-module.exports = { showTab, acquireTab, _h: { firstMatch, putPrompt, pressSend, targetAlive, within, sleep, SITES, LOGIN_URL }, start, getState, markTaken, focus, stop, SITES, findReusableTab };
+module.exports = { lastWriteAi, showTab, acquireTab, _h: { firstMatch, putPrompt, pressSend, targetAlive, within, sleep, SITES, LOGIN_URL }, start, getState, markTaken, focus, stop, SITES, findReusableTab };
