@@ -348,7 +348,7 @@ function composeStyledBlocks(post) {
   const headings = post.sectionHeadingLines || [];
   sections.forEach((body, i) => {
     if (i > 0 || intro.length) blocks.push({ type: "hr" });
-    const heading = (headings[i] || []).map((l) => l.trim()).filter(Boolean).join(" ");
+    const heading = (headings[i] || []).map((l) => l.replace(/[꒰ε]\s*[①-⑩➀-➉1-9]\s*[꒱з]\s*/g, "").replace(/^\s*[①-⑩➀-➉]\s*/, "").trim()).filter(Boolean).join(" ");
     if (heading) blocks.push({ type: "quote", style: "quotation_line", lines: [heading], bold: true });
     const src = String(body || "").split("\n");
     for (let li = 0; li < src.length; li++) {

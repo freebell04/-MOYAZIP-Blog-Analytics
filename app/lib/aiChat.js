@@ -239,6 +239,19 @@ async function acquireTab(ai, site) {
   return { id: targetId, client, continued: false, reused: false };
 }
 
+/** 대화 탭이 안 풀릴 때: 기억해 둔 탭을 버리고 새 탭을 하나 연다 */
+async function freshTab(ai, site) {
+  const port = new URL(session.CDP_URL).port || "9222";
+  const version = await (await fetch(`${session.CDP_URL}/json/version`)).json();
+  const browserWs = await connectPage(version.webSocketDebuggerUrl);
+  const { targetId } = await browserWs.send("Target.createTarget", { url: "about:blank", newWindow: false });
+  browserWs.close();
+  const client = await connectPage(`ws://localhost:${port}/devtools/page/${targetId}`);
+  await within(client.send("Page.navigate", { url: site.url }), 3000);
+  rememberTab(ai, targetId);
+  return { id: targetId, client };
+}
+
 async function findReusableTab(ai, site) {
   try {
     const list = await (await fetch(`${session.CDP_URL}/json/list`)).json();
@@ -272,8 +285,8 @@ async function start(ai, prompt, kind = "post", mode = "default") {
     try {
       await session.ensureDebugChrome();
       const tab = await acquireTab(ai, site);
-      const targetId = tab.id;
-      const client = tab.client;
+      let targetId = tab.id;
+      let client = tab.client;
       s.reused = tab.reused;
       if (tab.continued) s.note = `이전에 쓰던 ${site.name} 대화 창에 이어서 보냈어요 (새 대화를 만들지 않았어요).`;
       else if (tab.reused) s.note = `이미 열려 있던 ${site.name} 탭(로그인 상태)을 이어서 썼어요.`;
@@ -291,6 +304,15 @@ async function start(ai, prompt, kind = "post", mode = "default") {
         if (!(await targetAlive(targetId).catch(() => true))) return void (s.status = "closed");
         if (Date.now() > loginDeadline) return void Object.assign(s, { status: "timeout", error: "로그인을 기다리다 시간이 지났어요." });
         sel = await client.eval(firstMatch(site.input)).catch(() => null);
+        if (!sel && i === 40) await within(client.send("Page.reload"), 2000); // 20초 동안 입력창이 없으면 한 번 새로고침
+        if (!sel && i === 80 && s.status !== "needLogin") {
+          // 40초가 지나도 안 되면 이 탭은 버리고 새 대화 탭으로 다시 시도한다
+          try { client.close(); } catch {}
+          const fresh = await freshTab(ai, site);
+          targetId = fresh.id; client = fresh.client; s.targetId = targetId; s.client = client;
+          s.note = `${site.name} 탭이 응답하지 않아 새 대화 탭으로 다시 열었어요.`;
+          await showTab(targetId, client, site);
+        }
         if (!sel) {
           // 주소가 로그인 화면이면 바로 알린다 (아니면 10초 넘게 입력창이 없을 때 로그인 화면으로 본다)
           let onLogin = false;
@@ -373,4 +395,4 @@ function stop() {
   state = { status: "idle" };
 }
 
-module.exports = { lastWriteAi, showTab, acquireTab, _h: { firstMatch, putPrompt, pressSend, targetAlive, within, sleep, SITES, LOGIN_URL }, start, getState, markTaken, focus, stop, SITES, findReusableTab };
+module.exports = { freshTab, lastWriteAi, showTab, acquireTab, _h: { firstMatch, putPrompt, pressSend, targetAlive, within, sleep, SITES, LOGIN_URL }, start, getState, markTaken, focus, stop, SITES, findReusableTab };

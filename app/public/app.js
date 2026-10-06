@@ -264,7 +264,7 @@ function renderPostPreview(r) {
   const parts = [`<h4>INTRO</h4><p>${escapeHtml(intro)}</p>`];
   (r.sections || []).forEach((body, i) => {
     const headingLines = (r.sectionHeadingLines && r.sectionHeadingLines[i]) || [];
-    const heading = headingLines.length ? headingLines.join(" / ") : `${i + 1}번`;
+    const heading = headingLines.length ? headingLines.map(stripMarks).join(" / ") : `${i + 1}번`;
     parts.push(`<h4>${i + 1}. ${escapeHtml(heading)}</h4><p>${previewText(body)}</p>`);
   });
   el.innerHTML = parts.join("");
@@ -632,7 +632,7 @@ function renderSectionImages(post) {
   // 장소(카페 등) 글이면 이미지 검색어를 "장소 이름 + 소제목 내용"으로 맞춘다 (이미 이름이 들어 있으면 그대로)
   const withPlace = (q, p) => (p && !q.replace(/\s/g, "").includes(p.replace(/\s/g, "")) ? `${p} ${q}`.slice(0, 50) : q);
   pickItems = Array.from({ length: n }, (_, i) => {
-    const heading = ((post.sectionHeadingLines || [])[i] || []).join(" ").trim() || `${i + 1}번 챕터`;
+    const heading = stripMarks(((post.sectionHeadingLines || [])[i] || []).join(" ")) || `${i + 1}번 챕터`;
     const oldAlt = (String(oldImgs[i] || "").match(/alt\s*=\s*["']([^"']*)["']/i) || [])[1] || "";
     return {
       heading,
@@ -815,6 +815,10 @@ function cleanPostText(v) {
  * 예전 구조의 글({introLines, sectionHeadingLines, sections: ["본문", …]})을 내 템플릿 자리에 맞는 구조로 바꾼다.
  * (이미 받아 둔 JSON을 내 템플릿 모드에서 쓸 때) 본문의 | 표 | 는 "칸: 칸" 줄로 풀어 쓴다.
  */
+// 소제목 앞의 ꒰⑤꒱ · ε②з · ① 같은 번호 장식은 지운다
+function stripMarks(t) {
+  return String(t || "").replace(/[꒰ε]\s*[①-⑩➀-➉1-9]\s*[꒱з]\s*/g, "").replace(/^\s*[①-⑩➀-➉]\s*/, "").trim();
+}
 function legacyToTpl(post) {
   const clean = (t) => String(t || "").replace(/\*\*/g, "").trim();
   const firstSentence = (t) => (clean(t).split(/(?<=[.!?요다])\s+/)[0] || "").slice(0, 60);

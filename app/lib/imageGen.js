@@ -149,6 +149,13 @@ async function start({ chapter, heading, body, style = "auto", paste = true, ai 
         if (Date.now() > loginDeadline) throw new Error(`${cfg.name} 로그인을 기다리다 시간이 지났어요.`);
         if (!(await targetAlive(tab.id).catch(() => true))) throw new Error(`${cfg.name} 창이 닫혀서 멈췄어요.`);
         sel = await client.eval(firstMatch(site.input)).catch(() => null);
+        if (!sel && i === 40) await aiChat._h.within(client.send("Page.reload"), 2000);
+        if (!sel && i === 80 && !LOGIN_URL.test(String(await client.eval("location.href").catch(() => "")))) {
+          try { client.close(); } catch {}
+          const fresh = await aiChat.freshTab(key, site); // 응답 없는 탭은 버리고 새 대화 탭으로
+          tab.id = fresh.id; client = fresh.client;
+          await aiChat.showTab(fresh.id, client, site);
+        }
         if (!sel) {
           if (i >= 3 && i % 2 === 1 && LOGIN_URL.test(String(await client.eval("location.href").catch(() => "")))) {
             set({ status: "generating", note: `${cfg.name}에 로그인해주세요 (처음 한 번만). 로그인하면 이미지 요청이 자동으로 들어가요.` });
