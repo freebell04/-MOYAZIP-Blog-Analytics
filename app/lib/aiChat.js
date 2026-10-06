@@ -361,7 +361,7 @@ async function start(ai, prompt, kind = "post", mode = "default") {
       // 사용자가 대화를 마치고 "완성"이라고 하면 나오는 JSON을 기다린다 (스트리밍 중엔 JSON이 깨져 있어 통과 못 함,
       // 그래도 혹시 모르니 같은 결과가 두 번 연속 보일 때 확정)
       const chatDeadline = Date.now() + CHAT_WAIT_MS;
-      let last = null, brokenSince = 0, recovers = 0;
+      let last = null, brokenSince = 0, recovers = 0, lastRecoverAt = 0, lastBodyLen = -1;
       const STOPBTN = `!!document.querySelector('button[data-testid="stop-button"], button[aria-label*="중지"], button[aria-label*="Stop"]')`;
       while (s === state) {
         if (client.closed || !(await targetAlive(targetId).catch(() => true))) return void (s.status = "closed");
@@ -381,16 +381,23 @@ async function start(ai, prompt, kind = "post", mode = "default") {
         }
         last = found;
         // 마지막 JSON이 중간에 끊겨 있고 답변이 이미 멈춰 있으면(Gemini "대답이 중지되었습니다" 등), 자동으로 한 번 더 요청한다
-        if (!found && cur && cur.broken && !(await client.eval(STOPBTN).catch(() => false))) {
-          brokenSince = brokenSince || Date.now();
-          if (Date.now() - brokenSince > 5000 && recovers < 3) {
+        if (!found && cur && cur.broken) {
+          // 화면이 8초 넘게 그대로이고(AI가 쓰는 중이 아님), 마지막 재요청 뒤 90초가 지났을 때만 다시 요청한다 (생각 중인 AI에게 계속 보내지 않게)
+          const bodyLen = (await client.eval("document.body.innerText.length").catch(() => 0)) || 0;
+          if (bodyLen !== lastBodyLen) { lastBodyLen = bodyLen; brokenSince = Date.now(); }
+          const stopBtn = await client.eval(STOPBTN).catch(() => false);
+          if (!stopBtn && Date.now() - brokenSince > 8000 && Date.now() - lastRecoverAt > 90000 && recovers < 3) {
             recovers++;
-            brokenSince = 0;
+            lastRecoverAt = Date.now();
+            brokenSince = Date.now();
             s.note = `AI가 보낸 JSON이 중간에 끊겨 있어서, 처음부터 끝까지 다시 보내달라고 자동으로 요청했어요 (${recovers}/3).`;
             try {
               const selNow = await client.eval(firstMatch(site.input));
-              await putPrompt(client, selNow, "방금 JSON이 중간에 끊겼어. 내용은 그대로 두고, 처음({)부터 끝(})까지 빠짐없이 코드블록 하나로 다시 보내줘. 다른 설명은 붙이지 마.");
-              await pressSend(client, site, selNow);
+              const left = (await client.eval(`((document.querySelector(${JSON.stringify(selNow)}) || {}).innerText || "").trim().length`).catch(() => 0)) || 0;
+              if (left < 3) { // 입력창에 사용자가 쓰던 글이 있으면 건드리지 않는다
+                await putPrompt(client, selNow, "방금 JSON이 중간에 끊겼어. 내용은 그대로 두고, 처음({)부터 끝(})까지 빠짐없이 코드블록 하나로 다시 보내줘. 다른 설명은 붙이지 마.");
+                await pressSend(client, site, selNow);
+              }
             } catch {}
           }
         } else brokenSince = 0;
