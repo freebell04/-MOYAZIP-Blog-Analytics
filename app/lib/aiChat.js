@@ -213,12 +213,13 @@ function rememberTab(ai, id) {
  */
 // 같은 AI의 탭을 동시에 두 번 만들지 않게 순서대로 처리한다 (미리 열기와 실제 시작이 겹칠 때)
 let tabLock = Promise.resolve();
-function acquireTab(ai, site) {
-  const run = tabLock.then(() => acquireTabInner(ai, site), () => acquireTabInner(ai, site));
+const newChatAt = {}; // AI별로 마지막에 새 대화를 연 시각
+function acquireTab(ai, site, opts = {}) {
+  const run = tabLock.then(() => acquireTabInner(ai, site, opts), () => acquireTabInner(ai, site, opts));
   tabLock = run.catch(() => {});
   return run;
 }
-async function acquireTabInner(ai, site) {
+async function acquireTabInner(ai, site, opts = {}) {
   const port = new URL(session.CDP_URL).port || "9222";
   const id = readTabs()[ai];
   if (id) {
@@ -234,7 +235,18 @@ async function acquireTabInner(ai, site) {
             usable = !!(await client.eval(firstMatch(site.input)).catch(() => null));
             if (!usable) await sleep(250);
           }
-          if (usable) return { id, client, continued: true, reused: true };
+          if (usable && opts.newChat && Date.now() - (newChatAt[ai] || 0) > 90000) {
+            // 글쓰기를 새로 시작할 때는 긴 예전 대화가 아니라 새 대화에서 시작한다 (대화가 길면 AI가 느려지고 JSON이 끊긴다)
+            await within(client.send("Page.navigate", { url: site.url }), 4000);
+            await sleep(1200);
+            usable = false;
+            for (let i = 0; i < 20 && !usable; i++) {
+              usable = !!(await client.eval(firstMatch(site.input)).catch(() => null));
+              if (!usable) await sleep(300);
+            }
+            newChatAt[ai] = Date.now();
+          }
+          if (usable) return { id, client, continued: !opts.newChat, reused: true };
           try { client.close(); } catch {}
         }
       }
@@ -250,6 +262,7 @@ async function acquireTabInner(ai, site) {
   const client = await connectPage(`ws://localhost:${port}/devtools/page/${targetId}`);
   await within(client.send("Page.navigate", { url: site.url }), 3000);
   rememberTab(ai, targetId);
+  newChatAt[ai] = Date.now();
   return { id: targetId, client, continued: false, reused: false };
 }
 
@@ -298,7 +311,7 @@ async function start(ai, prompt, kind = "post", mode = "default") {
   (async () => {
     try {
       await session.ensureDebugChrome({ quick: true });
-      const tab = await acquireTab(ai, site);
+      const tab = await acquireTab(ai, site, { newChat: kind === "post" || kind === "format" }); // 글쓰기·형식 분석은 새 대화에서 시작
       let targetId = tab.id;
       let client = tab.client;
       s.reused = tab.reused;
@@ -438,7 +451,7 @@ async function prewarm(ai) {
   const site = SITES[ai];
   if (!site) return;
   await session.ensureDebugChrome({ quick: true });
-  const tab = await acquireTab(ai, site);
+  const tab = await acquireTab(ai, site, { newChat: true });
   try { tab.client.close(); } catch {}
   fetch(`${session.CDP_URL}/json/activate/${tab.id}`).catch(() => {});
 }
