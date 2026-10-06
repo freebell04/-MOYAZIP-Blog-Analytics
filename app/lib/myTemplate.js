@@ -161,3 +161,47 @@ async function fillMyTemplate(frame, page, tpl, helpers) {
 }
 
 module.exports = { BLOCKS, splitTables, planFill, planFillFull, leftover, fillMyTemplate, READ_PARAS };
+
+// ---------------------------------------------------------------------------
+// 4단계: 이미 쓴 글(내 템플릿)에서 "본문 인용구(소제목)"를 읽어 목차 표와 요약 표를 채운다
+// ---------------------------------------------------------------------------
+const READ_QUOTES = `[...document.querySelectorAll(".se-quotation")].map((q) => { const p = q.querySelector(".se-text-paragraph"); return p ? p.textContent.replace(/\u200b/g, "").trim() : ""; }).filter(Boolean)`;
+const HAS_TOC = `[...document.querySelectorAll(".se-table .se-text-paragraph")].some((p) => /본문 내용$/.test(p.textContent.replace(/\u200b/g, "").trim()))`;
+
+/** 글 안의 인용구 소제목들 ("1. 소제목" 형태가 있으면 그것만, 앞의 번호는 뗀다) */
+const headingsOf = (quotes) => {
+  const numbered = quotes.filter((q) => /^\d+\.\s*\S/.test(q));
+  return (numbered.length ? numbered : quotes).map((q) => q.replace(/^\d+\.\s*/, "").trim()).filter(Boolean);
+};
+
+/**
+ * 목차 표: ①~⑤ 칸의 "본문 내용"을 각 본문 인용구 소제목으로 바꾼다.
+ * 요약 표: 1~5 칸에 소제목을 바탕으로 쓴 한 줄 요약을 덧붙인다 (summarize(headings) → [5줄], 실패하면 소제목 그대로).
+ */
+async function fillTocFromQuotes(frame, page, helpers, summarize) {
+  const f = page.frames().find((x) => x.url().includes("PostWriteForm")) || frame;
+  const heads = headingsOf(await f.evaluate(READ_QUOTES));
+  if (!heads.length) throw new Error("글에서 본문 인용구(소제목)를 찾지 못했어요. 인용구로 쓴 소제목이 있는 글인지 확인해주세요.");
+  let sums = [];
+  try { sums = (await summarize(heads)) || []; } catch {}
+  const paras = await f.evaluate(READ_PARAS);
+  const cells = paras.filter((p) => p.table);
+  const toc = cells.filter((p) => /^ε.{1,2}з 본문 내용$/.test(p.t));
+  const sumCells = cells.filter((p) => /^[1-9]\.$/.test(p.t));
+  const ops = [];
+  toc.forEach((p, k) => { if (heads[k]) ops.push({ i: p.i, mode: "suffix", old: "본문 내용", text: heads[k] }); });
+  sumCells.forEach((p, k) => { const line = String(sums[k] || heads[k] || "").replace(/\s+/g, " ").trim(); if (line) ops.push({ i: p.i, mode: "append", text: " " + line }); });
+  if (!ops.length) throw new Error("목차·요약 표의 자리를 찾지 못했어요 (내 템플릿 글인지 확인해주세요).");
+  const all = f.locator(".se-text-paragraph");
+  for (const op of ops.sort((a, b) => b.i - a.i)) {
+    const loc = all.nth(op.i);
+    if (op.mode === "suffix") await helpers.replaceWrappedText(page, loc, op.old, op.text);
+    else { await loc.click({ timeout: 10000 }); await page.keyboard.press("End"); await page.keyboard.type(op.text, { delay: 10 }); }
+    await page.waitForTimeout(120);
+  }
+  return { headings: heads, summaries: sums, filled: ops.length };
+}
+
+module.exports.fillTocFromQuotes = fillTocFromQuotes;
+module.exports.HAS_TOC = HAS_TOC;
+module.exports.headingsOf = headingsOf;
