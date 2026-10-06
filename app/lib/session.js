@@ -19,6 +19,10 @@ const CDP_PORT = 9222;
 const CHROME_PATHS = [
   "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
   "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
+  (process.env.LOCALAPPDATA || "") + "\\Google\\Chrome\\Application\\chrome.exe", // 내 계정에만 설치한 크롬
+  // 크롬이 없으면 같은 엔진인 Edge로 대신한다 (윈도우에 기본으로 들어 있음)
+  "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
+  "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe",
 ];
 
 if (!fs.existsSync(SESSION_DIR)) fs.mkdirSync(SESSION_DIR, { recursive: true });
@@ -33,7 +37,17 @@ function clearSession() {
 }
 
 function findChromePath() {
-  return CHROME_PATHS.find((p) => fs.existsSync(p));
+  const hit = CHROME_PATHS.find((p) => fs.existsSync(p));
+  if (hit) return hit;
+  // 설치 정보(레지스트리)에 적힌 경로도 확인한다
+  try {
+    for (const key of ["HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\chrome.exe", "HKCU\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\chrome.exe"]) {
+      const out = require("child_process").execFileSync("reg", ["query", key, "/ve"], { timeout: 4000, windowsHide: true, stdio: ["ignore", "pipe", "ignore"] }).toString();
+      const m = out.match(/REG_SZ\s+(.+\.exe)/i);
+      if (m && fs.existsSync(m[1].trim())) return m[1].trim();
+    }
+  } catch {}
+  return undefined;
 }
 
 async function isCdpUp() {
@@ -211,7 +225,7 @@ async function ensureDebugChrome(opts = {}) {
   }
 
   const chromePath = findChromePath();
-  if (!chromePath) throw new Error("크롬 실행 파일을 찾을 수 없습니다 (C:\\Program Files\\Google\\Chrome\\...).");
+  if (!chromePath) throw new Error("크롬(또는 Edge)을 찾을 수 없어요. 구글 크롬을 설치한 뒤 다시 시도해주세요: https://www.google.com/chrome");
 
   for (let attempt = 0; attempt < 2; attempt++) {
     if (attempt === 1) {
