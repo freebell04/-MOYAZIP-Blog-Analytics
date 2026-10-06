@@ -25,7 +25,7 @@ const AIS = {
   gemini: {
     name: "Gemini",
     userSel: "user-query",
-    imgSel: "model-response img, generated-image img, single-image img",
+    imgSel: 'img[alt*="AI로 생성"], model-response img, generated-image img, single-image img', // Gemini가 만든 이미지는 alt가 ", AI로 생성" (직접 확인한 구조)
   },
 };
 /** 마지막으로 글 쓴 AI → 이미지를 만들 AI. Gemini면 Gemini, 그 밖(ChatGPT·Claude·모름)은 ChatGPT */
@@ -78,7 +78,11 @@ const DONE_COUNT = (userSel) => `(() => {
   const sel = ${JSON.stringify(userSel)};
   return [...document.querySelectorAll(sel)]
     .filter((e) => !(e.parentElement && e.parentElement.closest(sel)))
-    .filter((e) => /^\\s*(?:(?:내가 한 말|말씀하신 내용)[:\\s]*)?완성[\\s.!~]*$/.test((e.innerText || "").trim())).length;
+    // 말풍선 글에서 안 보이는 앞머리("내가 한 말", "말씀하신 내용")를 빼고, Gemini처럼 같은 글이 두 번 겹쳐 들어 있어도(줄마다) 전부 "완성"이면 센다
+    .filter((e) => {
+      const lines = (e.innerText || "").trim().replace(/^(?:내가 한 말|말씀하신 내용)[:\\s]*/, "").split("\\n").map((s) => s.trim()).filter(Boolean);
+      return lines.length > 0 && lines.every((s) => /^완성[\\s.!~]*$/.test(s));
+    }).length;
 })()`;
 const GENERATING = `!!document.querySelector('button[data-testid="stop-button"], button[aria-label*="중지"], button[aria-label*="Stop"]')`;
 const FETCH_DATAURL = (src) => `(async () => {
