@@ -14,7 +14,7 @@ const SITES = {
   chatgpt: {
     name: "ChatGPT",
     url: "https://chatgpt.com/",
-    input: ['#prompt-textarea[contenteditable="true"]', "#prompt-textarea", 'div.ProseMirror[contenteditable="true"]'],
+    input: ['#prompt-textarea[contenteditable="true"]', "#prompt-textarea", 'form div.ProseMirror[contenteditable="true"]', 'div.ProseMirror[contenteditable="true"]:not([class*="leading-relaxed"])'], // 캔버스(문서) 편집창은 제외하고 아래 채팅 입력창을 고른다
     send: ['button[data-testid="send-button"]', "#composer-submit-button"],
   },
   gemini: {
