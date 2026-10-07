@@ -545,7 +545,7 @@ async function askWebInner(ai, prompt, accept, timeoutMs, background) {
     await client.send("Input.insertText", { text: `\n\n(요청 번호: ${marker})` });
     await sleep(500);
     const sentOk = await pressSend(client, site, sel);
-    if (prevTab) { await sleep(1500); try { await fetch(`${session.CDP_URL}/json/activate/${prevTab}`, { signal: AbortSignal.timeout(3000) }); } catch {} }
+    if (!sentOk && prevTab) try { await fetch(`${session.CDP_URL}/json/activate/${prevTab}`, { signal: AbortSignal.timeout(3000) }); } catch {}
     if (!sentOk) throw new Error(`${site.name}에 요청을 보내지 못했어요.`);
     // 요청 번호 뒤에 나온 글자에서, 중괄호가 맞게 닫힌 마지막 JSON을 찾는다. 답이 다 끝나고(중지 버튼 없음) 두 번 연속 같으면 확정
     const READ = `(() => {
@@ -556,7 +556,8 @@ async function askWebInner(ai, prompt, accept, timeoutMs, background) {
     })()`;
     const deadline = Date.now() + timeoutMs;
     const sentAt = Date.now();
-    let last = "", shown = false;
+    // Gemini는 탭이 화면에 보일 때만 답을 그려서, 답이 다 올 때까지는 이 탭을 앞에 둔다 (끝나면 원래 보던 탭으로)
+    let last = "", shown = true;
     const backToPrev = async () => {
       if (shown && prevTab) try { await fetch(`${session.CDP_URL}/json/activate/${prevTab}`, { signal: AbortSignal.timeout(3000) }); } catch {}
     };
@@ -568,9 +569,8 @@ async function askWebInner(ai, prompt, accept, timeoutMs, background) {
       const sig = j ? JSON.stringify(j) : "";
       if (j && !r.busy && sig === last && accept(j)) { await backToPrev(); return j; }
       last = sig;
-      // Gemini는 탭이 화면에 보일 때만 답을 그린다 — 뒤에서 10초가 지나도 답이 안 보이면 탭을 앞으로 가져온다 (끝나면 원래 탭으로)
-      if (!j && !shown && Date.now() - sentAt > 10000 && (await client.eval("document.visibilityState").catch(() => "")) !== "visible") {
-        shown = true;
+      // 그사이 다른 탭으로 바뀌어 답이 안 그려지고 있으면 다시 앞으로
+      if (!j && Date.now() - sentAt > 8000 && (await client.eval("document.visibilityState").catch(() => "")) !== "visible") {
         try { await fetch(`${session.CDP_URL}/json/activate/${id}`, { signal: AbortSignal.timeout(3000) }); } catch {}
       }
     }
