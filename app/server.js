@@ -495,9 +495,25 @@ app.post("/api/finalize-toc", async (req, res) => {
 // (성과 통계를 아직 안 불러왔어도 동작한다 — 그땐 '내가 이미 쓴 주제' 비교만 빠진다)
 app.get("/api/neighbor-trends", (req, res) => {
   try {
-    res.json({ trends: trendsLib.buildTrends(stats.getCached() || { posts: [] }, neighbors.getCached()) });
+    const ti = require("./lib/topicIdeas");
+    res.json({ trends: trendsLib.buildTrends(stats.getCached() || { posts: [] }, neighbors.getCached()), ai: ti.getSaved(), aiState: ti.getState() });
   } catch (e) {
     res.status(500).json({ error: e.message });
+  }
+});
+// [🔄 새 주제 추천]: 내 글 + 이웃 글을 AI가 보고 매번 다른 주제 (백그라운드, 진행은 GET /api/neighbor-trends 의 aiState)
+app.post("/api/neighbor-trends/ai", (req, res) => {
+  try {
+    const d = stats.getCached() || { posts: [] };
+    require("./lib/topicIdeas").generate({
+      myPosts: (d.posts || []).map((p) => p.title),
+      nb: neighbors.getCached(),
+      blogName: require("./lib/config").blogName(),
+      done: Array.isArray(req.body && req.body.done) ? req.body.done.map(String).slice(0, 60) : [],
+    });
+    res.json({ started: true });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
   }
 });
 
