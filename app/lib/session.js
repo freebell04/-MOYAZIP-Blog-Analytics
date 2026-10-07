@@ -313,6 +313,17 @@ async function startLoginWatch() {
   // 이미 로그인돼 있으면 탭을 열지 않고 바로 끝낸다 (화면이 불필요하게 뜨거나 연결이 꼬이는 일이 없게)
   if (await isReallyLoggedIn(context)) {
     await saveNaverSession(context);
+    // 로그인돼 있어도 버튼을 눌렀다면 네이버 창이 보여야 한다 (크롬 창을 다 닫았다면 빈 창만 남아 있다)
+    try {
+      const pages = context.pages();
+      let np = pages.find((p) => /naver\.com/.test(p.url()));
+      if (!np) {
+        const blank = pages.find((p) => p.url() === "about:blank" || /^chrome:\/\/newtab/.test(p.url()));
+        np = blank || (await context.newPage());
+        await np.goto("https://www.naver.com", { waitUntil: "domcontentloaded" }).catch(() => {});
+      }
+      await np.bringToFront().catch(() => {});
+    } catch {}
     await browser.close().catch(() => {});
     return { alreadyLoggedIn: true };
   }
