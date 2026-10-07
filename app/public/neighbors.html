@@ -98,6 +98,7 @@
   .cat.on .cnt { background: rgba(255,255,255,.25); color: #fff; }
   .b-new { background: #eafbe7; color: #2f8a1f; }
   .sugg-wrap { margin-top: 6px; }
+  .pager { display: flex; gap: 6px; align-items: center; justify-content: center; flex-wrap: wrap; margin: 14px 0 6px; }
   .sugg-wrap > summary { color: #9a6200; font-weight: 500; }
   .sugg { margin-top: 8px; border: 1px solid #ffe2a8; background: #fffbf0; border-radius: 10px; padding: 8px 10px; }
   .sugg-head { font-size: 12px; font-weight: 700; color: #9a6200; margin-bottom: 4px; display: flex; gap: 6px; align-items: baseline; flex-wrap: wrap; }
@@ -179,7 +180,7 @@
       <button class="chip" data-v="recent">최근 순</button>
     </div>
     <span class="spacer"></span>
-    <button class="chip" data-suggest-all="visit">✨ 이 목록 AI 추천 만들기</button>
+    <button class="chip" data-suggest-all="visit">✨ 이 페이지 AI 추천 만들기</button>
   </div>
   <div class="list" id="visit-list"></div>
 </section>
@@ -469,8 +470,8 @@ const autoAsked = new Set();
 function autoSuggest() {
   if (!S.data || (S.state && S.state.running) || S.suggestState.running || S.suggestState.error) return;
   if (S.tab && S.tab !== "visit") return;
-  const keys = visitPool().filter(currentCat().test).filter((p) => !isDone(p) && p.latestPost).map(visitKey)
-    .filter((k) => !S.suggestions[k] && !autoAsked.has(k)).slice(0, 16);
+  const keys = visitPageData().items.filter((p) => !isDone(p) && p.latestPost).map(visitKey)
+    .filter((k) => !S.suggestions[k] && !autoAsked.has(k)); // 지금 보고 있는 페이지(10명)만
   if (!keys.length) return;
   keys.forEach((k) => autoAsked.add(k));
   fetch("/api/neighbors/suggest", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ keys, auto: true }) })
@@ -580,13 +581,30 @@ function renderVisit() {
   $("#visit-progress").style.width = inCat.length ? `${(doneN / inCat.length) * 100}%` : "0";
   $("#visit-progress-label").textContent = cat.v === "done" ? `${cat.label.replace(/^\S+\s/, "")} · ${inCat.length}개` : `${cat.label.replace(/^\S+\s/, "")} · ${doneN} / ${inCat.length}명 답방 완료`;
 
+  const { list, items, page, pages } = visitPageData();
+  const pager = pages > 1
+    ? `<div class="pager">${page > 0 ? `<button class="chip" data-vpage="${page - 1}">← 이전</button>` : ""}
+        ${Array.from({ length: pages }, (_, i) => `<button class="chip ${i === page ? "on" : ""}" data-vpage="${i}">${i + 1}</button>`).join("")}
+        ${page < pages - 1 ? `<button class="chip" data-vpage="${page + 1}">다음 →</button>` : ""}
+        <span class="muted" style="font-size:12px">${list.length}명 중 ${page * VISIT_PAGE + 1}~${page * VISIT_PAGE + items.length}</span></div>`
+    : "";
+  $("#visit-list").innerHTML = list.length ? items.map(visitRow).join("") + pager
+    : `<div class="empty">${S.visitFilter === "todo" && inCat.length ? "여기는 답방 다 했어요 🎉" : "해당하는 사람이 없어요."}</div>`;
+}
+
+// 답방 목록은 10명씩 페이지로 보여준다 (AI 추천 댓글도 지금 보는 페이지만 만든다 — 한꺼번에 만들면 AI 창이 많이 떠서 무겁다)
+const VISIT_PAGE = 10;
+function visitPageData() {
+  const cat = currentCat();
+  const inCat = visitPool().filter(cat.test);
   const vf = cat.v === "done" ? "all" : S.visitFilter; // "완료한 글" 칸에서는 완료/할일 구분 없이 모두 보여준다
   const list = inCat.filter((p) => vf === "all" || (vf === "done") === isDone(p));
   list.sort((a, b) =>
     S.visitSort === "recent" ? postTime(b) - postTime(a) : visitScore(b) - visitScore(a) || postTime(b) - postTime(a));
-
-  $("#visit-list").innerHTML = list.length ? list.map(visitRow).join("")
-    : `<div class="empty">${S.visitFilter === "todo" && inCat.length ? "여기는 답방 다 했어요 🎉" : "해당하는 사람이 없어요."}</div>`;
+  const pages = Math.max(1, Math.ceil(list.length / VISIT_PAGE));
+  const page = Math.min(S.visitPage || 0, pages - 1);
+  S.visitPage = page;
+  return { list, items: list.slice(page * VISIT_PAGE, (page + 1) * VISIT_PAGE), page, pages };
 }
 
 function visitRow(p) {
@@ -844,6 +862,7 @@ document.addEventListener("click", (e) => {
   const chip = e.target.closest(".chips .chip");
   if (chip) {
     S[chip.parentElement.dataset.key] = chip.dataset.v;
+    S.visitPage = 0;
     syncChips();
     return render();
   }
@@ -858,9 +877,18 @@ document.addEventListener("click", (e) => {
   const cat = e.target.closest("[data-cat]");
   if (cat) {
     S.visitCat = cat.dataset.cat;
+    S.visitPage = 0;
     setTimeout(autoSuggest, 0);
     try { localStorage.setItem("nb.cat", S.visitCat); } catch {}
     return renderVisit();
+  }
+
+  const pg = e.target.closest("[data-vpage]");
+  if (pg) {
+    S.visitPage = Number(pg.dataset.vpage) || 0;
+    renderVisit();
+    $("#visit-cats").scrollIntoView({ behavior: "smooth", block: "start" });
+    return autoSuggest(); // 넘긴 페이지의 글만 AI가 댓글을 쓴다
   }
 
   const likeEl = e.target.closest("[data-like]");
@@ -872,7 +900,7 @@ document.addEventListener("click", (e) => {
   const allBtn = e.target.closest("[data-suggest-all]");
   if (allBtn) {
     const keys = allBtn.dataset.suggestAll === "visit"
-      ? visitPool().filter(currentCat().test).filter((p) => !isDone(p) && p.latestPost).map(visitKey)
+      ? visitPageData().items.filter((p) => !isDone(p) && p.latestPost).map(visitKey)
       : S.data.unanswered.map(replyKey);
     return requestSuggest(keys.filter((k) => !S.suggestions[k]), false);
   }

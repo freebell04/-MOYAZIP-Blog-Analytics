@@ -11,7 +11,7 @@ const { keywordsOf } = require("./trends");
 const neighbors = require("./neighbors");
 
 const SUGGEST_PATH = path.join(__dirname, "..", "data", "neighbors-suggest.json");
-const BATCH_SIZE = 8;
+const BATCH_SIZE = 10; // 답방 한 페이지(10명) = AI 한 번
 // buildPrompt()의 규칙(이모지 금지, 핵심 내용 파악 등)을 바꿀 때마다 올린다.
 // 예전 버전으로 만들어둔 결과는 업데이트해도 파일에 남아 재사용되므로, 여기서 버전이 다르면
 // "없는 것"으로 취급해 다시 만들게 한다 (사용자가 일일이 [다시 만들기]를 누를 필요 없이).
