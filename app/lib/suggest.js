@@ -20,10 +20,25 @@ const PROMPT_VERSION = 9;
 // Claude(터미널용 CLI)가 없거나 로그인·사용량 문제로 안 되면, 로그인 크롬의 ChatGPT/Gemini로 대신 만든다.
 // (대부분의 사용자는 Claude CLI가 없다) 한 번 실패하면 이 서버가 켜져 있는 동안은 바로 웹 AI로 간다.
 let claudeDown = false;
+// AI가 키를 줄여 쓰는 경우가 있다 (Gemini: "visit:abc:123" → "abc"). 정확한 키가 없으면 블로그 아이디가 든 키로 찾는다
+function pick(json, it) {
+  if (!json || typeof json !== "object") return undefined;
+  if (Array.isArray(json[it.key])) return json[it.key];
+  const id = it.kind === "visit" ? it.p.blogId : it.u.blogId;
+  const extra = it.kind === "visit" ? it.p.latestPost.logNo : it.u.logNo;
+  const ks = Object.keys(json).filter((k) => Array.isArray(json[k]) && k.includes(id));
+  return json[ks.find((k) => k.includes(extra)) || ks[0]];
+}
+function remap(json, batch) {
+  const out = {};
+  for (const it of batch) { const v = pick(json, it); if (v) out[it.key] = v; }
+  return out;
+}
+
 async function askAi(prompt, keys, background = false) {
   if (!claudeDown) {
     try {
-      return { json: extractJson(await askClaude(prompt, { timeoutMs: 240000 })), via: "Claude" };
+      return { json: remap(extractJson(await askClaude(prompt, { timeoutMs: 240000 })), keys), via: "Claude" };
     } catch (e) {
       if (/timeout/i.test(e.message)) throw e;
       claudeDown = true;
@@ -32,9 +47,9 @@ async function askAi(prompt, keys, background = false) {
   const aiChat = require("./aiChat");
   let ai = aiChat.lastWriteAi();
   if (!aiChat.SITES[ai] || ai === "claude") ai = "chatgpt";
-  state.progress = `${aiChat.SITES[ai].name}에게 추천 댓글을 부탁하는 중... (오른쪽 크롬 탭)`;
-  const json = await aiChat.askWeb(ai, prompt, (j) => keys.some((k) => Array.isArray(j[k])), { background });
-  return { json, via: aiChat.SITES[ai].name };
+  state.progress = `${aiChat.SITES[ai].name}가 글을 읽고 추천 댓글을 쓰는 중... (크롬 탭, 30초쯤 걸려요)`;
+  const json = await aiChat.askWeb(ai, prompt, (j) => keys.some((it) => pick(j, it)), { background });
+  return { json: remap(json, keys), via: aiChat.SITES[ai].name };
 }
 
 function readRaw() {
@@ -153,7 +168,7 @@ async function generate(keys, { force = false, auto = false } = {}) {
         while (nextBatch < batches.length) {
           const batch = batches[nextBatch++];
           state.progress = `추천 문구 만드는 중 (${doneBatches}/${batches.length}묶음 끝)... 1분 정도 걸려요`;
-          const result = (await askAi(buildPrompt(batch, cache.myComments || []), batch.map((it) => it.key), auto)).json;
+          const result = (await askAi(buildPrompt(batch, cache.myComments || []), batch, auto)).json;
           // 검사: 본문의 구체적인 내용이 안 들어갔거나 뻔한 문장이면 버리고, 하나도 못 건진 글만 한 번 더 만든다
           const lists = {};
           const retry = [];
@@ -165,7 +180,7 @@ async function generate(keys, { force = false, auto = false } = {}) {
           if (retry.length) {
             state.progress = `더 구체적으로 다시 만드는 중 (${retry.length}명)...`;
             try {
-              const again = (await askAi(buildPrompt(retry, cache.myComments || [], true), retry.map((it) => it.key), auto)).json;
+              const again = (await askAi(buildPrompt(retry, cache.myComments || [], true), retry, auto)).json;
               for (const it of retry) {
                 const good = filterGood(again[it.key], it);
                 // 그래도 기준에 못 미치면, 첫 결과 중 뻔한 인사만 뺀 것이라도 남긴다 (빈 칸보다는 낫다)
