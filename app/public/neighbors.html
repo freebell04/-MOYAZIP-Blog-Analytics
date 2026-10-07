@@ -570,7 +570,6 @@ function visitRow(p) {
       <div class="meta">${meta}</div>
       ${comments[0] ? cmt(comments[0]) : ""}
       ${lp ? `<details class="sugg-wrap" data-sugg-key="${esc(key)}" ${S.openSugg[key] ? "open" : ""}><summary>💡 추천 댓글 보기</summary>${suggestBlock(key, "추천 댓글", visitFallback(p))}</details>` : ""}
-      ${comments.slice(0, 3).map((c) => helpBlock({ logNo: c.logNo, blogId: p.blogId, date: c.date })).join("")}
       ${comments.length > 1 || p.likes.length ? `<details><summary>자세히 (댓글 ${comments.length} · 공감한 글 ${p.likes.length})</summary>
         ${comments.slice(1).map(cmt).join("")}
         ${p.likes.length ? `<ul>${p.likes.map((l) => `<li>❤️ ${esc(l.title)} <small>${md(l.date)}</small></li>`).join("")}</ul>` : ""}
