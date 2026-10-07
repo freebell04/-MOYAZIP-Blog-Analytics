@@ -68,7 +68,7 @@ async function refresh({ full = false } = {}) {
     const prev = full ? null : readJson(STATS_PATH, null); // 이전 결과 (확정된 값 재사용)
     const ctx = await session.openVisibleContext();
     browser = ctx.browser;
-    page = await ctx.context.newPage();
+    page = await session.newBackgroundPage(ctx.context);
     const postsP = fetchMyPosts(); // 내 글 목록(RSS)은 통계 화면을 여는 동안 같이 가져온다
     postsP.catch(() => {});
     await page.goto(`https://blog.stat.naver.com/blog/daily/daily/cv?blogId=${BLOG_ID}`, { waitUntil: "domcontentloaded" });

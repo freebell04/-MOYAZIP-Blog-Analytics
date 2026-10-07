@@ -219,7 +219,7 @@ async function ensureDebugChrome(opts = {}) {
   if (await isCdpUp()) {
     await ensureWindow();
     if (await isCdpUp()) {
-      if (!opts.quick) await closeHungTabs(); // Playwright로 붙을 때만 필요한 정리 (AI 창 열기에는 건너뛰어 빠르게)
+      // (멈춘 탭 정리는 미리 하지 않는다 — 탭을 하나씩 앞으로 가져와서 크롬 화면이 깜빡였다. 연결이 실패할 때만 한다: connectCdp)
       return { alreadyRunning: true };
     }
   }
@@ -256,6 +256,13 @@ async function ensureDebugChrome(opts = {}) {
 async function isReallyLoggedIn(context) {
   try {
     const cookies = await context.cookies(["https://m.blog.naver.com", "https://nid.naver.com", "https://www.naver.com"]);
+    return await loggedInWith(cookies);
+  } catch {
+    return false;
+  }
+}
+async function loggedInWith(cookies) {
+  try {
     if (!cookies.some((c) => c.name === "NID_AUT")) return false; // 로그인 쿠키가 아직 없으면 물어볼 필요도 없다
     const cookie = cookies.map((c) => `${c.name}=${c.value}`).join("; ");
     // referer가 없으면 403이 난다
@@ -301,12 +308,39 @@ async function watchLoop(context, timeoutMs) {
  * 아니면 로그인 폼으로 이동시킨 뒤 백그라운드로 로그인 완료를 감지한다.
  * (즉시 반환 — 이후 진행 상태는 클라이언트가 /api/session-status 로 폴링)
  */
+/** 크롬에 Playwright로 붙는다. 멈춘 탭 때문에 실패하면 그때만 멈춘 탭을 정리하고 한 번 더 */
+async function connectCdp() {
+  try {
+    return await chromium.connectOverCDP(CDP_URL, { timeout: 15000 });
+  } catch {
+    await closeHungTabs();
+    return chromium.connectOverCDP(CDP_URL);
+  }
+}
+
+/**
+ * 크롬 화면을 바꾸지 않는 뒤쪽 탭을 만든다 (통계·이웃 새로 불러오기용).
+ * context.newPage()는 새 탭을 맨 앞에 띄워서, 자동으로 불러올 때마다 크롬 화면이 켜졌다 꺼지는 것처럼 보였다.
+ */
+async function newBackgroundPage(context) {
+  try {
+    const cdp = await context.browser().newBrowserCDPSession();
+    const pageP = context.waitForEvent("page", { timeout: 8000 });
+    await cdp.send("Target.createTarget", { url: "about:blank", background: true });
+    const page = await pageP;
+    cdp.detach().catch(() => {});
+    return page;
+  } catch {
+    return context.newPage();
+  }
+}
+
 async function startLoginWatch() {
   if (watchState.watching) return { watching: true }; // 이미 감지 중이면 중복 실행 방지
 
   await ensureDebugChrome();
 
-  const browser = await chromium.connectOverCDP(CDP_URL);
+  const browser = await connectCdp();
   let context = browser.contexts()[0];
   if (!context) context = await browser.newContext();
 
@@ -366,19 +400,21 @@ async function liveLoggedIn() {
   if (!hasSession()) return false;
   if (Date.now() - liveCache.at < 10000 && liveCache.ok !== null) return liveCache.ok;
   if (!(await isCdpUp())) return true;
-  let browser;
+  // Playwright로 붙으면 크롬의 모든 탭에 붙었다 떨어지기를 10초마다 반복해서 무겁다 → 쿠키만 바로 꺼낸다
+  let ws;
   try {
-    browser = await chromium.connectOverCDP(CDP_URL);
-    const ctx = browser.contexts()[0];
-    if (!ctx) return true;
-    const ok = await isReallyLoggedIn(ctx);
+    const v = await (await fetch(`${CDP_URL}/json/version`, { signal: AbortSignal.timeout(3000) })).json();
+    ws = await require("./like").connectPage(v.webSocketDebuggerUrl);
+    const r = await ws.send("Storage.getCookies");
+    const cookies = (r.cookies || []).filter((c) => /naver\.com$/.test(c.domain.replace(/^\./, "")));
+    const ok = await loggedInWith(cookies);
     liveCache = { at: Date.now(), ok };
     if (!ok && !watchState.watching) clearSession();
     return ok;
   } catch {
     return true;
   } finally {
-    if (browser) await browser.close().catch(() => {});
+    try { ws && ws.close(); } catch {}
   }
 }
 
@@ -403,7 +439,7 @@ async function openLoggedInContext() {
  */
 async function openVisibleContext() {
   await ensureDebugChrome();
-  const browser = await chromium.connectOverCDP(CDP_URL);
+  const browser = await connectCdp();
   let context = browser.contexts()[0];
   if (!context) context = await browser.newContext();
   return { browser, context };
@@ -418,6 +454,7 @@ module.exports = {
   openLoggedInContext,
   openVisibleContext,
   ensureDebugChrome,
+  newBackgroundPage,
   notifyChrome,
   getChromeNotice,
   SESSION_PATH,

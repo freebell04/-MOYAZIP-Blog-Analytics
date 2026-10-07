@@ -288,7 +288,7 @@ async function refresh({ days = 7, postDays = 30, maxPosts = 15, full = false } 
 
     const ctx = await session.openVisibleContext();
     browser = ctx.browser;
-    page = await ctx.context.newPage();
+    page = await session.newBackgroundPage(ctx.context);
     // 내 글 목록(RSS)과 이웃들의 최신 글(RSS)은 로그인 화면을 여는 동안 미리 가져오기 시작한다
     const allPostsP = fetchRss(BLOG_ID);
     allPostsP.catch(() => {});
@@ -308,7 +308,7 @@ async function refresh({ days = 7, postDays = 30, maxPosts = 15, full = false } 
     let buddyP = null;
     if (!listFresh) {
       buddyP = (async () => {
-        buddyPage = await ctx.context.newPage();
+        buddyPage = await session.newBackgroundPage(ctx.context);
         const myAdded = await fetchBuddyList(buddyPage, "");
         const addedMe = await fetchBuddyList(buddyPage, "addedList");
         return { myAdded, addedMe };
