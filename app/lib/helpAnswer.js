@@ -8,7 +8,7 @@ const { keywordsOf } = require("./trends");
 const scraper = require("./scraper");
 
 const HELP_PATH = path.join(__dirname, "..", "data", "neighbors-help.json");
-const HELP_VERSION = 3;
+const HELP_VERSION = 4;
 
 const stripEmoji = (s) =>
   String(s || "")
@@ -193,7 +193,7 @@ function composeVisit(p, text) {
   const Q = q ? `“${q}”` : "";
   const t = topicTitle(title);
   // 글 종류(후기형 / 제품 추천형 / 정보형)에 맞춰 짧고 자연스럽게
-  const shortQ = q ? (q.length > 18 ? q.slice(0, 18).replace(/\s+\S*$/, "") : q) : "";
+  const shortQ = ""; // 글 속 문장을 아무거나 집어 오면 문맥과 안 맞는 경우가 많아서 쓰지 않는다 (맞춤 댓글은 AI가 만든다)
   const PRODUCT = /내돈내산|협찬|제품|리뷰|사용 ?후기|써보|구매|추천템|언박싱|가성비|화장품|세럼|크림|청소기|이어폰/;
   let list;
   if (solve || (!story && !PRODUCT.test(title) && /방법|꿀팁|팁|정리|가이드|하는 ?법|총정리|설정|해결|비교/.test(title))) {

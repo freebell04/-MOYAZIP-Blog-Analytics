@@ -456,4 +456,98 @@ async function prewarm(ai) {
   fetch(`${session.CDP_URL}/json/activate/${tab.id}`).catch(() => {});
 }
 
-module.exports = { prewarm, freshTab, lastWriteAi, showTab, acquireTab, _h: { firstMatch, putPrompt, pressSend, targetAlive, within, sleep, SITES, LOGIN_URL }, start, getState, markTaken, focus, stop, SITES, findReusableTab };
+/**
+ * 한 번 묻고 답(JSON)만 받아 온다 — 이웃 추천 댓글처럼 프로그램이 알아서 쓰는 짧은 요청용.
+ * 글쓰기 대화 탭과 섞이지 않게 따로 탭을 하나 두고, 매번 새 대화에서 묻는다.
+ * @param {(j:any)=>boolean} accept 받은 JSON이 쓸 만한지 (예: 요청한 키가 다 있는지)
+ * @returns {Promise<any>} 파싱된 JSON
+ */
+let askLock = Promise.resolve();
+function askWeb(ai, prompt, accept = () => true, { timeoutMs = 240000 } = {}) {
+  const run = askLock.then(() => askWebInner(ai, prompt, accept, timeoutMs), () => askWebInner(ai, prompt, accept, timeoutMs));
+  askLock = run.catch(() => {});
+  return run;
+}
+async function askWebInner(ai, prompt, accept, timeoutMs) {
+  const site = SITES[ai];
+  if (!site) throw new Error("알 수 없는 AI예요: " + ai);
+  await session.ensureDebugChrome({ quick: true });
+  const port = new URL(session.CDP_URL).port || "9222";
+  const key = "ask-" + ai;
+  let id = readTabs()[key];
+  let client = null;
+  if (id) {
+    const list = await (await fetch(`${session.CDP_URL}/json/list`)).json().catch(() => []);
+    if (list.some((t) => t.id === id && t.type === "page")) client = await within(connectPage(`ws://localhost:${port}/devtools/page/${id}`), 3000);
+    if (!client || !client.eval) client = null;
+  }
+  if (!client) {
+    const version = await (await fetch(`${session.CDP_URL}/json/version`)).json();
+    const browserWs = await connectPage(version.webSocketDebuggerUrl);
+    const t = await browserWs.send("Target.createTarget", { url: "about:blank", newWindow: false });
+    browserWs.close();
+    id = t.targetId;
+    client = await connectPage(`ws://localhost:${port}/devtools/page/${id}`);
+    rememberTab(key, id);
+  }
+  try {
+    await within(client.send("Page.navigate", { url: site.url }), 4000); // 매번 새 대화
+    try { await fetch(`${session.CDP_URL}/json/activate/${id}`, { signal: AbortSignal.timeout(3000) }); } catch {}
+    require("./windowLayout").splitSoon([1500]);
+    let sel = null;
+    for (let i = 0; i < 60 && !sel; i++) {
+      await sleep(500);
+      sel = await client.eval(firstMatch(site.input)).catch(() => null);
+      if (!sel && i >= 6 && LOGIN_URL.test(String(await client.eval("location.href").catch(() => "")))) {
+        throw new Error(`${site.name}에 로그인이 필요해요. 열린 ${site.name} 탭에서 로그인한 뒤 다시 눌러주세요.`);
+      }
+    }
+    if (!sel) throw new Error(`${site.name} 입력창을 찾지 못했어요. ${site.name} 탭을 확인해주세요.`);
+    await sleep(700);
+    const marker = "req" + Math.random().toString(36).slice(2, 7);
+    await putPrompt(client, sel, `${prompt}\n\n(요청 번호: ${marker})`);
+    if (!(await pressSend(client, site, sel))) throw new Error(`${site.name}에 요청을 보내지 못했어요.`);
+    // 요청 번호 뒤에 나온 글자에서, 중괄호가 맞게 닫힌 마지막 JSON을 찾는다. 답이 다 끝나고(중지 버튼 없음) 두 번 연속 같으면 확정
+    const READ = `(() => {
+      const t = document.body.innerText || "";
+      const at = t.lastIndexOf(${JSON.stringify(marker)});
+      const busy = !!document.querySelector('button[data-testid="stop-button"], button[aria-label*="중지"], button[aria-label*="Stop"]');
+      return JSON.stringify({ text: at >= 0 ? t.slice(at + ${marker.length}) : "", busy });
+    })()`;
+    const deadline = Date.now() + timeoutMs;
+    let last = "";
+    while (Date.now() < deadline) {
+      await sleep(2500);
+      let r;
+      try { r = JSON.parse(await client.eval(READ)); } catch { continue; }
+      const j = lastJson(r.text);
+      const sig = j ? JSON.stringify(j) : "";
+      if (j && !r.busy && sig === last && accept(j)) return j;
+      last = sig;
+    }
+    throw new Error(`${site.name} 답을 기다리다 시간이 지났어요.`);
+  } finally {
+    try { client.close(); } catch {}
+  }
+}
+/** 글자 속에서 중괄호가 맞게 닫히는 마지막 JSON 객체 */
+function lastJson(text) {
+  let found = null;
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] !== "{") continue;
+    let depth = 0, inStr = false, esc = false;
+    for (let k = i; k < text.length; k++) {
+      const c = text[k];
+      if (inStr) { if (esc) esc = false; else if (c === "\\") esc = true; else if (c === '"') inStr = false; continue; }
+      if (c === '"') inStr = true;
+      else if (c === "{") depth++;
+      else if (c === "}" && --depth === 0) {
+        try { found = JSON.parse(text.slice(i, k + 1)); i = k; } catch {}
+        break;
+      }
+    }
+  }
+  return found;
+}
+
+module.exports = { askWeb, prewarm, freshTab, lastWriteAi, showTab, acquireTab, _h: { firstMatch, putPrompt, pressSend, targetAlive, within, sleep, SITES, LOGIN_URL }, start, getState, markTaken, focus, stop, SITES, findReusableTab };
