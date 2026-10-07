@@ -319,8 +319,7 @@ function helpBlock(c) {
 
 /** 이웃 글에 남길 댓글: Claude AI가 만든 게 있으면 그것, 없으면 글 속 문구를 집어 프로그램이 만든 것, 그것도 없으면 기본 문구 */
 function visitFallback(p) {
-  const lv = S.help[`lv:${p.blogId}:${p.latestPost.logNo}`];
-  return lv ? lv.list : templateVisit(p);
+  return []; // 틀에 박힌 기본 문구는 보여주지 않는다 — AI가 글을 읽고 쓴 것만
 }
 
 /** 이웃 최신 글에 내가 이미 공감·댓글을 남겼는지 알아본다 (처음 보는 글만, 30개씩) */
@@ -438,6 +437,7 @@ function suggestBlock(key, label, fallback) {
   return `<div class="sugg">
     <div class="sugg-head">💡 ${label} ${ai ? "<span class=\"ai-tag\">AI</span>" : ""}<small>예시예요. 내 말로 고쳐서 써주세요</small>
       <button class="link-btn" data-suggest="${esc(key)}" ${ai ? "data-force=\"1\"" : ""} ${busy ? "disabled" : ""}>${ai ? "AI로 다시 만들기" : "✨ AI로 만들기"}</button></div>
+    ${list.length ? "" : `<div class="sugg-item"><span class="muted">[✨ AI로 만들기]를 누르면 AI가 이 글을 읽고 어울리는 댓글을 써줘요.</span></div>`}
     ${list.map((t) => `<div class="sugg-item"><span>${esc(t)}</span><button class="copy-btn" data-copy="${esc(t)}">복사</button></div>`).join("")}
   </div>`;
 }
