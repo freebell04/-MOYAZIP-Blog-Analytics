@@ -357,6 +357,31 @@ async function startLoginWatch() {
   return { watching: true };
 }
 
+/**
+ * 화면의 "로그인됨" 표시용: 로그인 크롬이 켜져 있으면 실제 쿠키로 확인하고(10초 캐시),
+ * 로그아웃된 걸 알게 되면 옛 세션 파일도 지운다. 크롬이 꺼져 있으면 파일 유무로만 판단.
+ */
+let liveCache = { at: 0, ok: null };
+async function liveLoggedIn() {
+  if (!hasSession()) return false;
+  if (Date.now() - liveCache.at < 10000 && liveCache.ok !== null) return liveCache.ok;
+  if (!(await isCdpUp())) return true;
+  let browser;
+  try {
+    browser = await chromium.connectOverCDP(CDP_URL);
+    const ctx = browser.contexts()[0];
+    if (!ctx) return true;
+    const ok = await isReallyLoggedIn(ctx);
+    liveCache = { at: Date.now(), ok };
+    if (!ok && !watchState.watching) clearSession();
+    return ok;
+  } catch {
+    return true;
+  } finally {
+    if (browser) await browser.close().catch(() => {});
+  }
+}
+
 function getLoginWatchState() {
   return watchState;
 }
@@ -386,6 +411,7 @@ async function openVisibleContext() {
 
 module.exports = {
   hasSession,
+  liveLoggedIn,
   clearSession,
   startLoginWatch,
   getLoginWatchState,

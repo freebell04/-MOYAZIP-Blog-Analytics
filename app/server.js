@@ -208,9 +208,9 @@ app.use(express.static(path.join(__dirname, "public"), { setHeaders: (res) => re
 app.use("/images", express.static(path.join(__dirname, "data", "images")));
 
 // --- 로그인 세션 ---
-app.get("/api/session-status", (req, res) => {
+app.get("/api/session-status", async (req, res) => {
   const watch = session.getLoginWatchState();
-  res.json({ loggedIn: session.hasSession(), watching: watch.watching, watchError: watch.error });
+  res.json({ loggedIn: await session.liveLoggedIn(), watching: watch.watching, watchError: watch.error });
 });
 
 app.post("/api/login", async (req, res) => {
