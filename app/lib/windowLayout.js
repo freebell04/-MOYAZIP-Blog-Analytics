@@ -35,13 +35,16 @@ $dash = Get-Process | Where-Object { $p = $_; $_.MainWindowHandle -ne 0 -and ($k
 $half = [int]($wa.Width / 2)
 if ($Mode -eq 'info') { "dash=" + [bool]$dash + " chrome=" + [bool]($chr -and $chr.MainWindowHandle -ne 0); exit }
 if ($Mode -eq 'dashboard') { if ($dash) { Raise $dash.MainWindowHandle }; exit }
+$left = ($Mode -eq 'splitleft')
+$cx = if ($left) { $wa.X } else { $wa.X + $half }
+$dx = if ($left) { $wa.X + $half } else { $wa.X }
 if ($chr -and $chr.MainWindowHandle -ne 0) {
   [NbhWin]::ShowWindow($chr.MainWindowHandle, 9) | Out-Null
-  [NbhWin]::SetWindowPos($chr.MainWindowHandle, [IntPtr]::Zero, $wa.X + $half, $wa.Y, $wa.Width - $half, $wa.Height, 0x0040) | Out-Null
+  [NbhWin]::SetWindowPos($chr.MainWindowHandle, [IntPtr]::Zero, $cx, $wa.Y, $wa.Width - $half, $wa.Height, 0x0040) | Out-Null
 }
 if ($dash) {
   [NbhWin]::ShowWindow($dash.MainWindowHandle, 9) | Out-Null
-  [NbhWin]::SetWindowPos($dash.MainWindowHandle, [IntPtr]::Zero, $wa.X, $wa.Y, $half, $wa.Height, 0x0040) | Out-Null
+  [NbhWin]::SetWindowPos($dash.MainWindowHandle, [IntPtr]::Zero, $dx, $wa.Y, $half, $wa.Height, 0x0040) | Out-Null
 }
 # 둘 다 보이게 한 뒤, 작업할 쪽(크롬)을 맨 앞으로
 if ($chr -and $chr.MainWindowHandle -ne 0) { Raise $chr.MainWindowHandle }
@@ -76,16 +79,18 @@ function run(mode) {
 
 let lastSplit = 0;
 /** 대시보드(왼쪽)와 자동화 크롬(오른쪽)을 반반으로 나란히 놓는다. 너무 자주 하지 않게 2초 간격 */
-async function split() {
+async function split(mode = "split") {
   if (Date.now() - lastSplit < 2000) return;
   lastSplit = Date.now();
-  await run("split");
+  await run(mode);
 }
 /** 이 프로그램 화면을 앞으로 */
 const dashboardToFront = () => run("dashboard");
 /** 몇 초 뒤(크롬 창이 뜬 다음)에 한 번씩 배치한다 */
-function splitSoon(delays = [2500, 9000]) {
-  for (const d of delays) setTimeout(() => split().catch(() => {}), d);
+function splitSoon(delays = [2500, 9000], mode = "split") {
+  for (const d of delays) setTimeout(() => split(mode).catch(() => {}), d);
 }
+/** 이웃 글 보러 갈 때: 이웃 글(크롬)은 왼쪽, 이 프로그램 화면은 오른쪽 */
+const splitLeftSoon = (delays = [800, 3500]) => splitSoon(delays, "splitleft");
 
-module.exports = { split, splitSoon, dashboardToFront, info: () => run("info") };
+module.exports = { split, splitSoon, splitLeftSoon, dashboardToFront, info: () => run("info") };

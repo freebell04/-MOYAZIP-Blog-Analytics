@@ -102,7 +102,7 @@ async function openAndWatch(blogId, logNo) {
   if (cur && cur.status === "watching" && cur.client) {
     await cur.client.send("Page.bringToFront").catch(() => {}); // 이미 열려 있으면 그 창을 앞으로
     session.notifyChrome("이웃 글 창");
-    require("./windowLayout").splitSoon([800, 3500]); // 왼쪽: 이웃 소통 화면, 오른쪽: 이웃 글 (반반)
+    require("./windowLayout").splitLeftSoon([800, 3500]); // 왼쪽: 이웃 소통 화면, 오른쪽: 이웃 글 (반반)
     return;
   }
   if (cur && cur.status === "opening") return;
@@ -124,7 +124,7 @@ async function openAndWatch(blogId, logNo) {
     w.client = client;
     await client.send("Page.bringToFront").catch(() => {});
     session.notifyChrome("이웃 글 창");
-    require("./windowLayout").splitSoon([800, 3500]); // 왼쪽: 이웃 소통 화면, 오른쪽: 이웃 글 (반반)
+    require("./windowLayout").splitLeftSoon([800, 3500]); // 왼쪽: 이웃 소통 화면, 오른쪽: 이웃 글 (반반)
 
     // 공감 버튼은 스크롤해야 늦게 불러와져서, 아래로 내려가며 버튼이 생길 때까지 기다린 뒤 그 위치로 맞춘다
     let ready = false;
@@ -220,7 +220,7 @@ async function openUrl(url, tag) {
   if (tag) tabs[tag] = targetId;
   fetch(`${session.CDP_URL}/json/activate/${targetId}`).catch(() => {});
   session.notifyChrome("네이버 글 창");
-  require("./windowLayout").splitSoon([800, 3500]);
+  require("./windowLayout").splitLeftSoon([800, 3500]);
   return { targetId };
 }
 
