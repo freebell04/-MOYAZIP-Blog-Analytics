@@ -389,7 +389,7 @@ function maybeAutoRefresh() {
   if (stale && Date.now() - lastAutoAt > STALE_MS) { lastAutoAt = Date.now(); startRefresh(); }
 }
 let lastAutoAt = 0;
-setInterval(() => { if (S.state) renderStatus(S.state); maybeAutoRefresh(); }, 30000); // "N분 전" 표시도 계속 갱신
+setInterval(() => { if (S.state) renderStatus(S.state); }, 30000); // "N분 전" 표시만 갱신 (자동 새로 불러오기는 화면을 열거나 다시 볼 때만 — 켜두고 자리를 비운 동안 크롬이 혼자 움직이지 않게)
 document.addEventListener("visibilitychange", maybeAutoRefresh);
 window.addEventListener("focus", maybeAutoRefresh);
 
