@@ -319,7 +319,8 @@ function helpBlock(c) {
 
 /** 이웃 글에 남길 댓글: Claude AI가 만든 게 있으면 그것, 없으면 글 속 문구를 집어 프로그램이 만든 것, 그것도 없으면 기본 문구 */
 function visitFallback(p) {
-  return []; // 틀에 박힌 기본 문구는 보여주지 않는다 — AI가 글을 읽고 쓴 것만
+  const lv = S.help[`lv:${p.blogId}:${p.latestPost.logNo}`];
+  return lv ? lv.list : templateVisit(p);
 }
 
 /** 이웃 최신 글에 내가 이미 공감·댓글을 남겼는지 알아본다 (처음 보는 글만, 30개씩) */
