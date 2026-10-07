@@ -555,16 +555,26 @@ async function askWebInner(ai, prompt, accept, timeoutMs, background) {
       return JSON.stringify({ text: at >= 0 ? t.slice(at + ${marker.length}) : "", busy });
     })()`;
     const deadline = Date.now() + timeoutMs;
-    let last = "";
+    const sentAt = Date.now();
+    let last = "", shown = false;
+    const backToPrev = async () => {
+      if (shown && prevTab) try { await fetch(`${session.CDP_URL}/json/activate/${prevTab}`, { signal: AbortSignal.timeout(3000) }); } catch {}
+    };
     while (Date.now() < deadline) {
       await sleep(2500);
       let r;
       try { r = JSON.parse(await client.eval(READ)); } catch { continue; }
       const j = lastJson(r.text);
       const sig = j ? JSON.stringify(j) : "";
-      if (j && !r.busy && sig === last && accept(j)) return j;
+      if (j && !r.busy && sig === last && accept(j)) { await backToPrev(); return j; }
       last = sig;
+      // Gemini는 탭이 화면에 보일 때만 답을 그린다 — 뒤에서 10초가 지나도 답이 안 보이면 탭을 앞으로 가져온다 (끝나면 원래 탭으로)
+      if (!j && !shown && Date.now() - sentAt > 10000 && (await client.eval("document.visibilityState").catch(() => "")) !== "visible") {
+        shown = true;
+        try { await fetch(`${session.CDP_URL}/json/activate/${id}`, { signal: AbortSignal.timeout(3000) }); } catch {}
+      }
     }
+    await backToPrev();
     throw new Error(`${site.name} 답을 기다리다 시간이 지났어요.`);
   } finally {
     try { client.close(); } catch {}
