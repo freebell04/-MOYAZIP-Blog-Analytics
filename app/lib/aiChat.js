@@ -15,7 +15,7 @@ const SITES = {
     name: "ChatGPT",
     url: "https://chatgpt.com/",
     input: ['#prompt-textarea[contenteditable="true"]', "#prompt-textarea", 'form div.ProseMirror[contenteditable="true"]', 'div.ProseMirror[contenteditable="true"]:not([class*="leading-relaxed"])'], // 캔버스(문서) 편집창은 제외하고 아래 채팅 입력창을 고른다
-    send: ['button[data-testid="send-button"]', "#composer-submit-button"],
+    send: ['button[data-testid="send-button"]', "#composer-submit-button", 'button[aria-label="보내기"]', 'button[aria-label="Send prompt"]'],
   },
   gemini: {
     name: "Gemini",
@@ -147,6 +147,8 @@ async function targetAlive(targetId) {
   return list.some((t) => t.id === targetId);
 }
 
+// 입력창에 붙어 있는 "붙여넣은 텍스트" 첨부의 [제거] 버튼 (보내고 나면 사라진다)
+const PASTED_CHIP = 'button[aria-label*="붙여넣은 텍스트 첨부 제거"], button[aria-label*="Remove pasted"]';
 /** 요청문을 입력창에 넣는다. 붙여넣기 이벤트를 먼저 쓰고(줄바꿈이 그대로 살아서), 안 되면 직접 입력한다. */
 async function putPrompt(client, sel, prompt) {
   await client.eval(`(() => {
@@ -158,7 +160,9 @@ async function putPrompt(client, sel, prompt) {
   })()`);
   await sleep(600);
   const len = await client.eval(`(document.querySelector(${JSON.stringify(sel)}).innerText || "").trim().length`);
-  if (len < 20) {
+  // 긴 글을 붙여넣으면 ChatGPT는 입력창 대신 "붙여넣은 텍스트" 첨부로 바꿔 넣는다 — 그것도 들어간 것
+  const attached = await client.eval(`!!document.querySelector('${PASTED_CHIP}')`).catch(() => false);
+  if (len < 20 && !attached) {
     await client.eval(`document.querySelector(${JSON.stringify(sel)}).focus()`);
     await client.send("Input.insertText", { text: prompt });
     await sleep(600);
@@ -176,9 +180,20 @@ async function pressSend(client, site, sel) {
     await client.send("Input.dispatchKeyEvent", { type: "keyUp", ...key });
   }
   await sleep(1500);
-  // 입력창이 비었으면 보내진 것
-  const left = await client.eval(`((document.querySelector(${JSON.stringify(sel)}) || {}).innerText || "").trim().length`).catch(() => 0);
-  return left < 20;
+  // 입력창이 비었고 붙여넣은 첨부도 없어졌으면 보내진 것
+  const sentNow = async () => {
+    const left = await client.eval(`((document.querySelector(${JSON.stringify(sel)}) || {}).innerText || "").trim().length`).catch(() => 0);
+    const chip = await client.eval(`!!document.querySelector('${PASTED_CHIP}')`).catch(() => false);
+    return left < 3 && !chip;
+  };
+  // 붙여넣은 첨부를 처리하는 동안은 [보내기]가 안 먹을 수 있어서 몇 번 더 눌러본다
+  for (let i = 0; i < 4; i++) {
+    if (await sentNow()) return true;
+    const b = await client.eval(firstMatch(site.send)).catch(() => null);
+    if (b) await client.eval(`document.querySelector(${JSON.stringify(b)}).click()`).catch(() => {});
+    await sleep(1500);
+  }
+  return sentNow();
 }
 
 /**
@@ -463,12 +478,13 @@ async function prewarm(ai) {
  * @returns {Promise<any>} 파싱된 JSON
  */
 let askLock = Promise.resolve();
-function askWeb(ai, prompt, accept = () => true, { timeoutMs = 240000 } = {}) {
-  const run = askLock.then(() => askWebInner(ai, prompt, accept, timeoutMs), () => askWebInner(ai, prompt, accept, timeoutMs));
+function askWeb(ai, prompt, accept = () => true, { timeoutMs = 240000, background = false } = {}) {
+  const go = () => askWebInner(ai, prompt, accept, timeoutMs, background);
+  const run = askLock.then(go, go);
   askLock = run.catch(() => {});
   return run;
 }
-async function askWebInner(ai, prompt, accept, timeoutMs) {
+async function askWebInner(ai, prompt, accept, timeoutMs, background) {
   const site = SITES[ai];
   if (!site) throw new Error("알 수 없는 AI예요: " + ai);
   await session.ensureDebugChrome({ quick: true });
@@ -492,8 +508,19 @@ async function askWebInner(ai, prompt, accept, timeoutMs) {
   }
   try {
     await within(client.send("Page.navigate", { url: site.url }), 4000); // 매번 새 대화
+    // 보이지 않는 탭에서는 입력·전송이 안 돼서 탭을 앞으로 가져온다.
+    // 자동으로 만들 때(background)는 보내자마자 원래 보던 탭으로 되돌리고, 창 배치도 건드리지 않는다
+    let prevTab = null;
+    if (background) {
+      try { prevTab = ((await (await fetch(`${session.CDP_URL}/json/list`)).json()).find((t) => t.type === "page" && t.id !== id) || {}).id || null; } catch {}
+    }
     try { await fetch(`${session.CDP_URL}/json/activate/${id}`, { signal: AbortSignal.timeout(3000) }); } catch {}
-    require("./windowLayout").splitSoon([1500]);
+    await within(client.send("Page.bringToFront"), 2000);
+    for (let i = 0; i < 15; i++) {
+      if ((await client.eval("document.visibilityState").catch(() => "")) === "visible") break;
+      await sleep(200);
+    }
+    if (!background) require("./windowLayout").splitSoon([1500]);
     let sel = null;
     for (let i = 0; i < 60 && !sel; i++) {
       await sleep(500);
@@ -504,9 +531,22 @@ async function askWebInner(ai, prompt, accept, timeoutMs) {
     }
     if (!sel) throw new Error(`${site.name} 입력창을 찾지 못했어요. ${site.name} 탭을 확인해주세요.`);
     await sleep(700);
+    // 지난번에 못 보내고 남은 입력·첨부가 있으면 지운다 (같이 보내지지 않게)
+    await client.eval(`(() => {
+      document.querySelectorAll('button[aria-label*="첨부 제거"], button[aria-label*="Remove"]').forEach((b) => b.click());
+      const el = document.querySelector(${JSON.stringify(sel)});
+      if (el && (el.innerText || "").trim()) { el.focus(); document.execCommand("selectAll"); document.execCommand("delete"); }
+    })()`).catch(() => {});
+    await sleep(400);
     const marker = "req" + Math.random().toString(36).slice(2, 7);
-    await putPrompt(client, sel, `${prompt}\n\n(요청 번호: ${marker})`);
-    if (!(await pressSend(client, site, sel))) throw new Error(`${site.name}에 요청을 보내지 못했어요.`);
+    await putPrompt(client, sel, prompt);
+    // 요청 번호는 따로 입력한다 (긴 글은 첨부로 접혀서 화면 글자에 안 보이므로, 번호는 입력창 글자로 남겨야 답을 찾을 수 있다)
+    await client.eval(`(() => { const el = document.querySelector(${JSON.stringify(sel)}); el.focus(); const r = document.createRange(); r.selectNodeContents(el); r.collapse(false); const s = getSelection(); s.removeAllRanges(); s.addRange(r); })()`).catch(() => {});
+    await client.send("Input.insertText", { text: `\n\n(요청 번호: ${marker})` });
+    await sleep(500);
+    const sentOk = await pressSend(client, site, sel);
+    if (prevTab) { await sleep(1500); try { await fetch(`${session.CDP_URL}/json/activate/${prevTab}`, { signal: AbortSignal.timeout(3000) }); } catch {} }
+    if (!sentOk) throw new Error(`${site.name}에 요청을 보내지 못했어요.`);
     // 요청 번호 뒤에 나온 글자에서, 중괄호가 맞게 닫힌 마지막 JSON을 찾는다. 답이 다 끝나고(중지 버튼 없음) 두 번 연속 같으면 확정
     const READ = `(() => {
       const t = document.body.innerText || "";

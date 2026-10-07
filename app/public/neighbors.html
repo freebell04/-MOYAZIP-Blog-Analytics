@@ -363,6 +363,7 @@ async function load() {
   S.state = r.state;
   if (r.data && !r.state.running) loadMine();
   maybeAutoRefresh();
+  autoSuggest();
 }
 
 // 실시간에 가깝게: 마지막 업데이트가 3분 넘게 지났으면 (열 때 · 창으로 돌아올 때 · 열어두는 동안 주기적으로) 조용히 새로 가져온다
@@ -433,16 +434,34 @@ const replyKey = (u) => `reply:${u.logNo}:${u.blogId}:${u.date}`;
 
 function suggestBlock(key, label, fallback) {
   const ai = S.suggestions[key];
-  const list = ai || fallback;
   const busy = S.suggestState.running;
+  // 이웃 글 댓글은 AI가 글을 읽고 쓴 것만 보여준다 (프로그램 기본 문구는 글 내용을 모르고 써서 엉뚱하다).
+  // AI가 아직이면 "쓰는 중" 안내, AI가 안 될 때(오류)만 기본 문구를 대신 보여준다
+  const waiting = !ai && key.startsWith("visit:") && !S.suggestState.error;
+  const list = ai || (waiting ? [] : fallback);
+  const note = busy && !ai ? `⏳ ${S.suggestState.progress || "AI가 글을 읽고 댓글을 쓰는 중..."}`
+    : waiting ? "⏳ AI가 이 글을 읽고 댓글을 쓸 차례를 기다리는 중이에요."
+    : !ai && S.suggestState.error ? "" : "";
   return `<div class="sugg">
     <div class="sugg-head">💡 ${label} ${ai ? "<span class=\"ai-tag\">AI</span>" : ""}<small>예시예요. 내 말로 고쳐서 써주세요</small>
       <button class="link-btn" data-suggest="${esc(key)}" ${ai ? "data-force=\"1\"" : ""} ${busy ? "disabled" : ""}>${ai ? "AI로 다시 만들기" : "✨ AI로 만들기"}</button></div>
-    ${busy ? `<div class="sugg-item"><span class="muted">⏳ ${esc(S.suggestState.progress || "AI가 글을 읽고 댓글을 쓰는 중...")}</span></div>`
-      : !ai && S.suggestState.error ? `<div class="sugg-item"><span class="error">⚠ ${esc(S.suggestState.error)}</span></div>`
-      : ai ? "" : `<div class="sugg-item"><span class="muted">아래는 프로그램이 만든 기본 예시예요. [✨ AI로 만들기]를 누르면 AI가 글을 읽고 맞춤 댓글을 써줘요.</span></div>`}
+    ${note ? `<div class="sugg-item"><span class="muted">${esc(note)}</span></div>` : ""}
+    ${!ai && S.suggestState.error ? `<div class="sugg-item"><span class="error">⚠ AI로 못 만들었어요: ${esc(S.suggestState.error)} (아래는 기본 예시)</span></div>` : ""}
     ${list.map((t) => `<div class="sugg-item"><span>${esc(t)}</span><button class="copy-btn" data-copy="${esc(t)}">복사</button></div>`).join("")}
   </div>`;
+}
+
+// 답방 목록을 열면, 아직 AI 댓글이 없는 글은 AI에게 알아서 부탁한다 (크롬 뒤쪽 탭에서 조용히, 한 번만)
+const autoAsked = new Set();
+function autoSuggest() {
+  if (!S.data || (S.state && S.state.running) || S.suggestState.running || S.suggestState.error) return;
+  if (S.tab && S.tab !== "visit") return;
+  const keys = visitPool().filter(currentCat().test).filter((p) => !isDone(p) && p.latestPost).map(visitKey)
+    .filter((k) => !S.suggestions[k] && !autoAsked.has(k)).slice(0, 16);
+  if (!keys.length) return;
+  keys.forEach((k) => autoAsked.add(k));
+  fetch("/api/neighbors/suggest", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ keys, auto: true }) })
+    .then(() => load()).catch(() => {});
 }
 
 // 댓글 답글·내 글 현황의 "답방 완료" 체크 (이 컴퓨터에만 저장)
@@ -756,6 +775,7 @@ function setTab(tab) {
   S.tab = tab;
   try { localStorage.setItem("nb.tab", tab); } catch {}
   render();
+  autoSuggest();
 }
 
 // '이 주제로 글감 찾기': 바로 이동하지 않고, 이 주제가 잘 나오는 검색어를 먼저 찾은 뒤 글감 찾기 화면으로 넘어간다
@@ -802,6 +822,7 @@ document.addEventListener("click", (e) => {
   const cat = e.target.closest("[data-cat]");
   if (cat) {
     S.visitCat = cat.dataset.cat;
+    setTimeout(autoSuggest, 0);
     try { localStorage.setItem("nb.cat", S.visitCat); } catch {}
     return renderVisit();
   }

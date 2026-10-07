@@ -20,7 +20,7 @@ const PROMPT_VERSION = 9;
 // Claude(터미널용 CLI)가 없거나 로그인·사용량 문제로 안 되면, 로그인 크롬의 ChatGPT/Gemini로 대신 만든다.
 // (대부분의 사용자는 Claude CLI가 없다) 한 번 실패하면 이 서버가 켜져 있는 동안은 바로 웹 AI로 간다.
 let claudeDown = false;
-async function askAi(prompt, keys) {
+async function askAi(prompt, keys, background = false) {
   if (!claudeDown) {
     try {
       return { json: extractJson(await askClaude(prompt, { timeoutMs: 240000 })), via: "Claude" };
@@ -33,7 +33,7 @@ async function askAi(prompt, keys) {
   let ai = aiChat.lastWriteAi();
   if (!aiChat.SITES[ai] || ai === "claude") ai = "chatgpt";
   state.progress = `${aiChat.SITES[ai].name}에게 추천 댓글을 부탁하는 중... (오른쪽 크롬 탭)`;
-  const json = await aiChat.askWeb(ai, prompt, (j) => keys.some((k) => Array.isArray(j[k])));
+  const json = await aiChat.askWeb(ai, prompt, (j) => keys.some((k) => Array.isArray(j[k])), { background });
   return { json, via: aiChat.SITES[ai].name };
 }
 
@@ -113,7 +113,7 @@ function getState() {
 /**
  * keys로 지정한 항목들의 추천 문구를 만든다 (백그라운드). force면 이미 있어도 다시 만든다.
  */
-async function generate(keys, { force = false } = {}) {
+async function generate(keys, { force = false, auto = false } = {}) {
   if (state.running) return;
   const cache = neighbors.getCached();
   if (!cache) throw new Error("먼저 [새로 불러오기]를 해주세요.");
@@ -153,7 +153,7 @@ async function generate(keys, { force = false } = {}) {
         while (nextBatch < batches.length) {
           const batch = batches[nextBatch++];
           state.progress = `추천 문구 만드는 중 (${doneBatches}/${batches.length}묶음 끝)... 1분 정도 걸려요`;
-          const result = (await askAi(buildPrompt(batch, cache.myComments || []), batch.map((it) => it.key))).json;
+          const result = (await askAi(buildPrompt(batch, cache.myComments || []), batch.map((it) => it.key), auto)).json;
           // 검사: 본문의 구체적인 내용이 안 들어갔거나 뻔한 문장이면 버리고, 하나도 못 건진 글만 한 번 더 만든다
           const lists = {};
           const retry = [];
@@ -165,7 +165,7 @@ async function generate(keys, { force = false } = {}) {
           if (retry.length) {
             state.progress = `더 구체적으로 다시 만드는 중 (${retry.length}명)...`;
             try {
-              const again = (await askAi(buildPrompt(retry, cache.myComments || [], true), retry.map((it) => it.key))).json;
+              const again = (await askAi(buildPrompt(retry, cache.myComments || [], true), retry.map((it) => it.key), auto)).json;
               for (const it of retry) {
                 const good = filterGood(again[it.key], it);
                 // 그래도 기준에 못 미치면, 첫 결과 중 뻔한 인사만 뺀 것이라도 남긴다 (빈 칸보다는 낫다)

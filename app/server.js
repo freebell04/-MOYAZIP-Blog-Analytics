@@ -580,10 +580,10 @@ app.post("/api/neighbors/help", (req, res) => {
 
 // 추천 댓글/답글 예시 만들기 (백그라운드, 진행 상황은 GET /api/neighbors의 suggestState)
 app.post("/api/neighbors/suggest", async (req, res) => {
-  const { keys, force } = req.body;
+  const { keys, force, auto } = req.body;
   if (!Array.isArray(keys) || !keys.length) return res.status(400).json({ error: "keys가 필요합니다." });
   try {
-    await suggest.generate(keys, { force: force === true });
+    await suggest.generate(keys, { force: force === true, auto: auto === true });
     res.json({ started: true });
   } catch (e) {
     res.status(400).json({ error: e.message });
