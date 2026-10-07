@@ -503,13 +503,13 @@ function likeButton(blogId, logNo, compact = false) {
   const btn = (label, extra = "") =>
     `<button class="btn like-btn ${extra}" data-like="${esc(blogId)}" data-logno="${esc(logNo)}">${label}</button>`;
   if (w.status === "opening") return `<button class="btn like-btn" disabled>창 여는 중...</button>`;
-  if (w.status === "watching") return btn("👀 새 탭에서 하트를 눌러주세요", "waiting") + `<small class="muted">누르면 여기서 자동으로 체크돼요 (클릭하면 탭을 다시 앞으로)</small>`;
+  if (w.status === "watching") return btn("👀 열린 탭에서 하트를 눌러주세요", "waiting") + `<small class="muted">누르면 여기서 자동으로 체크돼요 (클릭하면 탭을 다시 앞으로)</small>`;
   const note =
     w.status === "closed" ? `<small class="muted">공감 없이 창을 닫았어요</small>`
     : w.status === "timeout" ? `<small class="muted">15분이 지나 확인을 멈췄어요</small>`
     : w.status === "error" ? `<small class="error">⚠ ${esc(w.error || "창을 열지 못했어요")}</small>`
     : "";
-  return btn(compact ? "🤍 공감" : "🤍 공감하러 가기 (새 탭)") + note;
+  return btn(compact ? "🤍 공감" : "🤍 공감하러 가기") + note;
 }
 
 async function doLike(blogId, logNo) {

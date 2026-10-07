@@ -79,16 +79,26 @@ function run(mode) {
 
 let lastSplit = 0;
 /** 대시보드(왼쪽)와 자동화 크롬(오른쪽)을 반반으로 나란히 놓는다. 너무 자주 하지 않게 2초 간격 */
+// 창 배치는 PowerShell을 띄워야 해서 무겁다: 같은 배치를 방금(1분 안에) 했으면 다시 하지 않는다
+// (이웃 글을 연달아 누를 때마다 배치하면 컴퓨터가 버벅인다)
+let lastMode = "";
 async function split(mode = "split") {
-  if (Date.now() - lastSplit < 2000) return;
+  const gap = mode === lastMode ? 60000 : 2000;
+  if (Date.now() - lastSplit < gap) return;
   lastSplit = Date.now();
+  lastMode = mode;
   await run(mode);
 }
 /** 이 프로그램 화면을 앞으로 */
 const dashboardToFront = () => run("dashboard");
 /** 몇 초 뒤(크롬 창이 뜬 다음)에 한 번씩 배치한다 */
+let soonUntil = 0, soonMode = "";
 function splitSoon(delays = [2500, 9000], mode = "split") {
-  for (const d of delays) setTimeout(() => split(mode).catch(() => {}), d);
+  // 같은 배치를 1분 안에 이미 예약·실행했으면 건너뛴다 (연달아 누를 때 PowerShell이 계속 뜨지 않게)
+  if (mode === soonMode && Date.now() < soonUntil) return;
+  soonMode = mode;
+  soonUntil = Date.now() + 60000;
+  for (const d of delays) setTimeout(() => { lastSplit = 0; run(mode).catch(() => {}); }, d);
 }
 /** 이웃 글 보러 갈 때: 이웃 글(크롬)은 왼쪽, 이 프로그램 화면은 오른쪽 */
 const splitLeftSoon = (delays = [800, 3500]) => splitSoon(delays, "splitleft");

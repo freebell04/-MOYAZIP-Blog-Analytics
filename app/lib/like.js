@@ -95,6 +95,38 @@ async function targetAlive(targetId) {
   return list.some((t) => t.id === targetId);
 }
 
+// 이웃 글은 탭 하나에서 돌려 본다: 누를 때마다 새 탭을 열면 탭이 수십 개 쌓여 컴퓨터가 버벅인다.
+// (이미 열어 둔 "이웃 글 탭"이 있으면 그 탭에서 주소만 바꾼다. 글쓰기 탭은 절대 쓰지 않는다)
+const visitTab = { id: null, tag: "" };
+async function openInVisitTab(url, tag = "") {
+  const port = new URL(session.CDP_URL).port || "9222";
+  if (visitTab.id) {
+    try {
+      const list = await (await fetch(`${session.CDP_URL}/json/list`, { signal: AbortSignal.timeout(3000) })).json();
+      const t = list.find((x) => x.id === visitTab.id && x.type === "page");
+      if (t && !/postwrite|PostWriteForm|Redirect=Write/i.test(t.url)) {
+        // 이 탭에서 공감을 지켜보던 글이 있으면 그만 지켜본다 (다른 글로 바뀌니까)
+        let stopped = false;
+        for (const w of Object.values(watches)) if (w.targetId === visitTab.id && (w.status === "watching" || w.status === "opening")) { w.status = "replaced"; stopped = true; }
+        if (stopped) await sleep(900);
+        const c = await connectPage(`ws://localhost:${port}/devtools/page/${visitTab.id}`);
+        await c.send("Page.navigate", { url }).catch(() => {});
+        c.close();
+        visitTab.tag = tag;
+        fetch(`${session.CDP_URL}/json/activate/${visitTab.id}`).catch(() => {});
+        return visitTab.id;
+      }
+    } catch {}
+  }
+  const version = await (await fetch(`${session.CDP_URL}/json/version`)).json();
+  const browserWs = await connectPage(version.webSocketDebuggerUrl);
+  const { targetId } = await browserWs.send("Target.createTarget", { url, newWindow: false });
+  browserWs.close();
+  Object.assign(visitTab, { id: targetId, tag });
+  fetch(`${session.CDP_URL}/json/activate/${targetId}`).catch(() => {});
+  return targetId;
+}
+
 /** 새 탭으로 글을 열고 공감 여부를 지켜보기 시작한다 (바로 반환, 진행은 getWatches()로 확인). */
 async function openAndWatch(blogId, logNo) {
   const key = `${blogId}:${logNo}`;
@@ -109,14 +141,11 @@ async function openAndWatch(blogId, logNo) {
   const w = (watches[key] = { status: "opening" });
 
   try {
-    await session.ensureDebugChrome();
+    await session.ensureDebugChrome({ quick: true });
     const url = `https://m.blog.naver.com/PostView.naver?blogId=${blogId}&logNo=${logNo}`;
 
-    // 로그인된 디버그 크롬 창에 새 탭으로 연다 (별도 창이 아니라 같은 창 안 탭)
-    const version = await (await fetch(`${session.CDP_URL}/json/version`)).json();
-    const browserWs = await connectPage(version.webSocketDebuggerUrl);
-    const { targetId } = await browserWs.send("Target.createTarget", { url, newWindow: false });
-    browserWs.close();
+    // 이웃 글 탭 하나에서 연다 (누를 때마다 새 탭을 만들지 않는다)
+    const targetId = await openInVisitTab(url, `like:${key}`);
     w.targetId = targetId;
 
     const port = new URL(session.CDP_URL).port || "9222";
@@ -200,6 +229,9 @@ async function closeTag(tag) {
   const id = tabs[tag];
   delete tabs[tag];
   if (!id) return false;
+  // 같은 탭이 이미 다른 글로 바뀌었으면 닫지 않는다 (지금 보고 있는 다른 이웃 글이 닫히지 않게)
+  if (id === visitTab.id && visitTab.tag !== tag) return false;
+  if (id === visitTab.id) visitTab.id = null;
   try {
     const r = await fetch(`${session.CDP_URL}/json/close/${id}`, { signal: AbortSignal.timeout(3000) });
     return r.ok;
@@ -211,14 +243,9 @@ async function closeTag(tag) {
 /** 네이버 블로그 주소를 자동화 크롬에서 연다 (왼쪽: 이 프로그램, 오른쪽: 네이버 반반 화면). 같은 태그로 열었던 탭은 먼저 닫는다 */
 async function openUrl(url, tag) {
   if (!/^https:\/\/(m\.)?blog\.naver\.com\//.test(String(url || ""))) throw new Error("네이버 블로그 주소만 열 수 있어요.");
-  await session.ensureDebugChrome();
-  if (tag) await closeTag(tag);
-  const version = await (await fetch(`${session.CDP_URL}/json/version`)).json();
-  const browserWs = await connectPage(version.webSocketDebuggerUrl);
-  const { targetId } = await browserWs.send("Target.createTarget", { url, newWindow: false });
-  browserWs.close();
+  await session.ensureDebugChrome({ quick: true });
+  const targetId = await openInVisitTab(url, tag); // 이웃 글 탭 하나를 돌려 쓴다
   if (tag) tabs[tag] = targetId;
-  fetch(`${session.CDP_URL}/json/activate/${targetId}`).catch(() => {});
   session.notifyChrome("네이버 글 창");
   require("./windowLayout").splitLeftSoon([800, 3500]);
   return { targetId };
