@@ -154,8 +154,8 @@
 </section>
 
 <nav class="tabs" id="tabs">
-  <button class="tab on" data-tab="visit">🏃 답방 <span class="cnt" id="cnt-visit">0</span></button>
-  <button class="tab" data-tab="reply">💬 댓글 답글 <span class="cnt" id="cnt-reply">0</span></button>
+  <button class="tab on" data-tab="visit" title="남의 블로그 새 글에 공감·댓글 쓰러 가기">🏃 답방 <span class="cnt" id="cnt-visit">0</span></button>
+  <button class="tab" data-tab="reply" title="내 글에 달린 댓글에 답글 달기">💬 댓글 답글 <span class="cnt" id="cnt-reply">0</span></button>
   <button class="tab" data-tab="neighbors">👥 이웃 목록 <span class="cnt" id="cnt-neighbors">0</span></button>
   <button class="tab" data-tab="posts">📝 내 글 현황 <span class="cnt" id="cnt-posts">0</span></button>
   <button class="tab" data-tab="trends">💡 주제 추천 <span class="cnt" id="cnt-trends">-</span></button>
@@ -163,6 +163,7 @@
 
 <!-- 답방 -->
 <section class="panel" id="panel-visit">
+  <p class="hint" style="margin-bottom:8px">🏃 <b>남의 블로그</b>의 새 글·추천 글에 <b>공감하고 댓글을 쓰러 가는</b> 곳이에요. (이웃·이웃 아닌 분·새 친구·공감/댓글 준 사람)</p>
   <div class="cats" id="visit-cats"></div>
   <p class="hint" id="visit-hint" style="margin:8px 0 10px"></p>
   <div class="progress-label" id="visit-progress-label"></div>
@@ -185,7 +186,7 @@
 
 <!-- 댓글 답글 -->
 <section class="panel" id="panel-reply" hidden>
-  <p class="hint" style="margin-bottom:12px">내 글에 달린 댓글 중 <b>마지막 말이 상대방</b>인 것들이에요. 답글을 달고 [새로 불러오기]하면 목록에서 빠져요.
+  <p class="hint" style="margin-bottom:12px">💬 <b>내 블로그</b>에 달린 댓글에 <b>답글을 다는</b> 곳이에요. 내 글에 달린 댓글 중 <b>마지막 말이 상대방</b>인 것들이에요. 답글을 달고 [새로 불러오기]하면 목록에서 빠져요.
     <button class="chip" data-suggest-all="reply" style="margin-left:6px">✨ 추천 답글 모두 AI로 만들기</button></p>
   <div class="list" id="reply-list"></div>
 </section>
