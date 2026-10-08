@@ -523,8 +523,8 @@ const buddyDone = () => { try { return JSON.parse(localStorage.getItem("nb.buddy
 const lbDone = (x) => ((S.lbSrc || "likes") === "likes" ? likedBack(x.p) : !!buddyDone()[x.p.blogId]);
 function renderLikeback() {
   const src = S.lbSrc || "likes";
-  $("#lb-hours").hidden = src !== "likes";
-  $("#lb-find").hidden = src !== "find";
+  $("#lb-hours").style.display = src === "likes" ? "" : "none";
+  $("#lb-find").style.display = src === "find" ? "" : "none";
   $("#lb-hint").textContent = LB_HINT[src] || "";
   const ta = $("#lb-buddy-msg");
   if (ta && document.activeElement !== ta) ta.value = buddyMsg();
