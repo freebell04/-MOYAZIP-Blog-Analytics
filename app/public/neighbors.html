@@ -157,6 +157,7 @@
 <nav class="tabs" id="tabs">
   <button class="tab on" data-tab="visit" title="남의 블로그 새 글에 공감·댓글 쓰러 가기">🏃 답방 <span class="cnt" id="cnt-visit">0</span></button>
   <button class="tab" data-tab="reply" title="내 글에 달린 댓글에 답글 달기">💬 댓글 답글 <span class="cnt" id="cnt-reply">0</span></button>
+  <button class="tab" data-tab="likeback" title="내 글에 공감해준 사람에게 맞공감·이웃 신청하러 가기">💞 맞공감 <span class="cnt" id="cnt-likeback">0</span></button>
   <button class="tab" data-tab="neighbors">👥 이웃 목록 <span class="cnt" id="cnt-neighbors">0</span></button>
   <button class="tab" data-tab="posts">📝 내 글 현황 <span class="cnt" id="cnt-posts">0</span></button>
   <button class="tab" data-tab="trends">💡 주제 추천 <span class="cnt" id="cnt-trends">-</span></button>
@@ -190,6 +191,29 @@
   <p class="hint" style="margin-bottom:12px">💬 <b>내 블로그</b>에 달린 댓글에 <b>답글을 다는</b> 곳이에요. 내 글에 달린 댓글 중 <b>마지막 말이 상대방</b>인 것들이에요. 답글을 달고 [새로 불러오기]하면 목록에서 빠져요.
     <button class="chip" data-suggest-all="reply" style="margin-left:6px">✨ 추천 답글 모두 AI로 만들기</button></p>
   <div class="list" id="reply-list"></div>
+</section>
+
+<!-- 맞공감 -->
+<section class="panel" id="panel-likeback" hidden>
+  <p class="hint" style="margin-bottom:10px">💞 <b>내 글에 공감해준 사람</b>의 최신 글에 <b>맞공감</b>하러 가는 곳이에요. 버튼을 누르면 그 글이 열리고, 하트는 직접 눌러주세요 (누르면 여기서 자동으로 체크돼요).</p>
+  <div class="panel-bar">
+    <div class="chips" data-key="lbHours">
+      <button class="chip" data-v="12">최근 12시간</button>
+      <button class="chip on" data-v="24">최근 24시간</button>
+    </div>
+    <div class="chips" data-key="lbFilter">
+      <button class="chip on" data-v="todo">할 일</button>
+      <button class="chip" data-v="all">모두</button>
+    </div>
+  </div>
+  <details class="lb-msg" style="margin:6px 0 12px">
+    <summary style="cursor:pointer;font-weight:600;color:#475569">✉️ 이웃 신청 문구 정하기</summary>
+    <div style="margin-top:8px">
+      <textarea id="lb-buddy-msg" rows="2" maxlength="100" style="width:100%;font-size:13px" placeholder="예: 안녕하세요 {닉네임}님! 공감 감사해요. 앞으로 자주 소통해요 :)"></textarea>
+      <small class="muted">{닉네임}은 그 사람 이름으로 바뀌어요. 이웃 신청 화면을 열 때 이 문구를 미리 채워 둬요 (최대 100자). 신청 [확인]은 직접 눌러주세요.</small>
+    </div>
+  </details>
+  <div class="list" id="likeback-list"></div>
 </section>
 
 <!-- 이웃 목록 -->
@@ -266,7 +290,7 @@ const $ = (s) => document.querySelector(s);
 const BLOG = "https://blog.naver.com/";
 let S = {
   data: null, visited: {}, blogId: "", suggestions: {}, suggestState: {}, help: {}, helpState: {}, mine: {}, liked: {}, likeWatch: {},
-  tab: "visit", visitCat: "realtime", visitFilter: "todo", visitSort: "score",
+  tab: "visit", visitCat: "realtime", visitFilter: "todo", visitSort: "score", lbHours: "24", lbFilter: "todo",
   nbFilter: "all", nbSearch: "", nbSort: "activity", nbDir: -1,
 };
 try { S.tab = localStorage.getItem("nb.tab") || S.tab; } catch {}
@@ -440,8 +464,70 @@ function render() {
     check("posts", daysSincePost >= 3 ? "alert" : "good", daysSincePost === null ? "-" : daysSincePost === 0 ? "오늘" : `${daysSincePost}일 전`, "마지막 글", `최근 30일 ${d.posts.length}개`),
   ].join("");
 
-  renderVisit(); renderReply(); renderNeighbors(); renderPosts();
+  renderVisit(); renderReply(); renderLikeback(); renderNeighbors(); renderPosts();
 }
+
+// ---------- 맞공감 ----------
+const DEFAULT_BUDDY_MSG = "안녕하세요 {닉네임}님! 공감 남겨주셔서 감사해요. 앞으로 자주 소통해요 :)";
+const buddyMsg = () => { try { return localStorage.getItem("nb.buddyMsg") || DEFAULT_BUDDY_MSG; } catch { return DEFAULT_BUDDY_MSG; } };
+const buddyWant = () => { try { return JSON.parse(localStorage.getItem("nb.buddyWant") || "{}"); } catch { return {}; } };
+function likebackList() {
+  const since = Date.now() - Number(S.lbHours || 24) * 3600000;
+  return (S.data ? S.data.people : [])
+    .map((p) => ({ p, likes: p.likes.filter((l) => ts(l.date) >= since).sort((a, b) => ts(b.date) - ts(a.date)) }))
+    .filter((x) => x.likes.length)
+    .sort((a, b) => ts(b.likes[0].date) - ts(a.likes[0].date));
+}
+const likedBack = (p) => !!(p.latestPost && (S.liked[`${p.blogId}:${p.latestPost.logNo}`] || (mineOf(p) && mineOf(p).liked)));
+function renderLikeback() {
+  const all = likebackList();
+  const todo = all.filter((x) => !likedBack(x.p));
+  $("#cnt-likeback").textContent = todo.length;
+  const ta = $("#lb-buddy-msg");
+  if (ta && document.activeElement !== ta) ta.value = buddyMsg();
+  const list = (S.lbFilter || "todo") === "todo" ? todo : all;
+  const want = buddyWant();
+  $("#likeback-list").innerHTML = list.length ? list.map(({ p, likes }) => {
+    const lp = p.latestPost;
+    const isNb = p.relation === "mutual" || p.relation === "iAdded";
+    return `<div class="row ${likedBack(p) ? "done" : ""}">
+      ${avatar(p)}
+      <div style="min-width:0">
+        <a class="name" href="${BLOG}${esc(p.blogId)}" target="_blank" rel="noopener" data-split data-tag="visit:${esc(p.blogId)}">${esc(p.nickname)}</a>${relBadge(p.relation)}
+        <div class="meta">❤️ 내 글 ${likes.length}개에 공감 · ${ago(likes[0].date)}</div>
+        <ul class="ex" style="margin:4px 0 0">${likes.slice(0, 3).map((l) => `<li>${esc(l.title)}</li>`).join("")}</ul>
+      </div>
+      <div class="side">
+        ${lp ? `<div class="post-title">${isFresh(lp) ? "🆕 " : "📝 "}${esc(lp.title)}</div><small class="muted">${ago(lp.date)}</small>
+               ${likeButton(p.blogId, lp.logNo)}` : `<small class="muted">최신 글을 못 찾았어요</small>`}
+        ${isNb ? `<small class="muted">이미 이웃이에요</small>`
+          : `<label><input type="checkbox" data-buddy-want="${esc(p.blogId)}" ${want[p.blogId] ? "checked" : ""}> 이웃 신청할까요?</label>
+             ${want[p.blogId] ? `<button class="btn btn-outline" data-buddy-open="${esc(p.blogId)}" data-nick="${esc(p.nickname)}">👥 이웃 신청하러 가기</button>` : ""}`}
+      </div>
+    </div>`;
+  }).join("") : `<div class="empty">${all.length ? "최근 공감해준 분들께 모두 맞공감했어요 🎉" : `최근 ${S.lbHours || 24}시간 안에 공감해준 사람이 없어요. 위의 [새로 불러오기]로 최신 공감을 불러와 보세요.`}</div>`;
+}
+document.addEventListener("input", (e) => {
+  if (e.target.id === "lb-buddy-msg") { try { localStorage.setItem("nb.buddyMsg", e.target.value); } catch {} }
+});
+document.addEventListener("change", (e) => {
+  const b = e.target.closest && e.target.closest("[data-buddy-want]");
+  if (!b) return;
+  const w = buddyWant();
+  if (b.checked) w[b.dataset.buddyWant] = 1; else delete w[b.dataset.buddyWant];
+  try { localStorage.setItem("nb.buddyWant", JSON.stringify(w)); } catch {}
+  renderLikeback();
+});
+document.addEventListener("click", async (e) => {
+  const b = e.target.closest("[data-buddy-open]");
+  if (!b) return;
+  b.disabled = true;
+  const message = buddyMsg().replace(/\{닉네임\}/g, b.dataset.nick || "").slice(0, 100);
+  const r = await fetch("/api/neighbors/buddy-form", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ blogId: b.dataset.buddyOpen, message }) }).then((x) => x.json()).catch((er) => ({ error: er.message }));
+  b.disabled = false;
+  b.textContent = r.error ? "⚠ " + r.error : r.filled ? "✅ 문구를 채워뒀어요 — 열린 창에서 [확인]" : "창을 열었어요 — 문구를 붙여넣어 주세요";
+  if (!r.filled) navigator.clipboard.writeText(message).catch(() => {});
+});
 
 const visitKey = (p) => `visit:${p.blogId}:${p.latestPost.logNo}`;
 const replyKey = (u) => `reply:${u.logNo}:${u.blogId}:${u.date}`;

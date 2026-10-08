@@ -564,6 +564,14 @@ app.post("/api/neighbors/visited", (req, res) => {
 });
 
 // 네이버 글을 자동화 크롬에서 열기 (반반 화면) / 열어 둔 탭 닫기
+// 맞공감 탭의 [이웃 신청하러 가기]: 신청 화면을 열고 문구만 채워 둔다 (확인은 사용자가)
+app.post("/api/neighbors/buddy-form", async (req, res) => {
+  try {
+    res.json({ ok: true, ...(await like.openBuddyForm(String(req.body.blogId || ""), String(req.body.message || ""))) });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
 app.post("/api/neighbors/open", async (req, res) => {
   try {
     res.json({ ok: true, ...(await like.openUrl(String(req.body.url || ""), String(req.body.tag || "").slice(0, 120))) });

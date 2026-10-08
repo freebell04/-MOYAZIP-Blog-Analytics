@@ -251,4 +251,38 @@ async function openUrl(url, tag) {
   return { targetId };
 }
 
-module.exports = { openAndWatch, getWatches, getLiked, connectPage, closeFor, openUrl, closeTag };
+/**
+ * 이웃 신청 화면(네이버 모바일 BuddyAddForm)을 이웃 글 탭에 열고, 신청 문구만 미리 채워 둔다.
+ * [확인]은 사용자가 직접 누른다 (신청을 대신 보내지 않는다).
+ */
+async function openBuddyForm(blogId, message) {
+  if (!/^[\w-]+$/.test(String(blogId || ""))) throw new Error("블로그 아이디가 이상해요.");
+  await session.ensureDebugChrome({ quick: true });
+  const id = await openInVisitTab(`https://m.blog.naver.com/BuddyAddForm.naver?blogId=${blogId}`, `buddy:${blogId}`);
+  tabs[`buddy:${blogId}`] = id;
+  session.notifyChrome("이웃 신청 창");
+  require("./windowLayout").splitLeftSoon([800, 3500]);
+  if (!message) return { filled: false };
+  const port = new URL(session.CDP_URL).port || "9222";
+  const c = await connectPage(`ws://localhost:${port}/devtools/page/${id}`);
+  try {
+    for (let i = 0; i < 20; i++) {
+      await sleep(400);
+      const ok = await c.eval(`(() => {
+        const t = document.querySelector('textarea[name="inviteMessage"], textarea');
+        if (!t) return false;
+        const set = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value").set;
+        set.call(t, ${JSON.stringify(String(message).slice(0, 100))});
+        t.dispatchEvent(new Event("input", { bubbles: true }));
+        t.dispatchEvent(new Event("change", { bubbles: true }));
+        return true;
+      })()`).catch(() => false);
+      if (ok) return { filled: true };
+    }
+    return { filled: false };
+  } finally {
+    c.close();
+  }
+}
+
+module.exports = { openBuddyForm, openAndWatch, getWatches, getLiked, connectPage, closeFor, openUrl, closeTag };
