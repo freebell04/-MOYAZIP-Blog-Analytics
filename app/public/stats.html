@@ -654,7 +654,8 @@ function renderDwell() {
       <div style="width:100%;max-width:26px;height:${Math.max(4, (d.total / max) * 90)}px;background:${d.total >= w.mean ? "#10b981" : "#a7f3d0"};border-radius:4px 4px 0 0"></div>
       <small class="muted" style="font-size:10px">${md(d.date)}</small></div>`).join("");
   const seg = (label, v) => `<div class="kpi" style="flex:1;min-width:110px;background:#f8fafc;border-radius:10px;padding:8px 10px"><small class="muted">${label}</small><div style="font-weight:700;font-size:16px">${v ? mmss(v) : "-"}</div></div>`;
-  const best = w.posts.slice(0, 1)[0], worst = w.posts.length > 2 ? w.posts[w.posts.length - 1] : null;
+  const sure = w.posts.filter((p) => p.sure === "보통"); // 조회수가 적어 부정확한 글은 팁에서 뺀다
+  const best = sure[0], worst = sure.length > 2 ? sure[sure.length - 1] : null;
   const tips = [];
   if (w.friendAvg && w.etcAvg) tips.push(w.friendAvg > w.etcAvg
     ? `이웃은 평균 ${mmss(w.friendAvg)}, 검색 등 그 외 방문자는 ${mmss(w.etcAvg)} 머물러요. 검색으로 온 사람이 더 오래 읽게 글 첫머리에 결론·요약을 먼저 보여주세요.`
