@@ -384,6 +384,14 @@ app.post("/api/ai-chat/focus", async (req, res) => {
     res.status(400).json({ error: e.message });
   }
 });
+// 완성본이 자동으로 안 넘어올 때: 지금 AI 탭 화면에서 마지막 결과 JSON을 바로 가져온다
+app.post("/api/ai-chat/grab", async (req, res) => {
+  try {
+    res.json(await aiChat.grab());
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
 app.post("/api/ai-chat/stop", (req, res) => {
   aiChat.stop();
   res.json({ ok: true });

@@ -86,7 +86,7 @@ const findResultJs = (marker) => `(() => {
     return out;
   };
   const marker = ${JSON.stringify("MARKER")};
-  const msgs = [...document.querySelectorAll('[data-message-author-role], [class*="group/user-message"], user-query, model-response, .query-text, [data-testid*="message"]')];
+  const msgs = [...document.querySelectorAll('[data-message-author-role], [class*="group/user-message"], user-query, model-response, .query-text, [data-testid*="message"], .font-claude-response, [data-is-streaming]')];
   const pres = [...document.querySelectorAll("pre, code")];
   // 우리가 보낸 요청문(표식이 든 말풍선)을 찾으면, 그 뒤에 나온 말풍선·코드블록만 본다 → 이 대화에 예전부터 있던 JSON에는 반응하지 않는다
   let mi = -1;
@@ -100,6 +100,23 @@ const findResultJs = (marker) => `(() => {
   let count = 0, found = null; const sigs = [];
   for (let i = sources.length - 1; i >= 0; i--) {
     for (const o of objects(sources[i]).reverse()) {
+      try {
+        const j = JSON.parse(o);
+        const kind = isPost(j) ? "post" : isFormat(j) ? "format" : "";
+        if (!kind) continue;
+        count++; sigs.push(o.length + ":" + o.slice(0, 40) + o.slice(-40));
+        if (!found) found = { kind, json: j };
+      } catch {}
+    }
+  }
+  // 코드블록·말풍선에서 못 찾으면 화면 글자 전체에서 찾는다 (사이트마다 답변을 그리는 방식이 달라서 — 예: Claude는 긴 요청문을 첨부로 접어
+  // 요청 번호가 안 보이거나, 답변 말풍선이 위 목록에 안 잡힌다). 요청 번호가 보이면 그 뒤만, [가져오기]로 부르면(ALL) 화면 전체에서.
+  const ALL = false;
+  if (!found) {
+    const body = document.body.innerText || "";
+    const at = marker ? body.lastIndexOf(marker) : -1;
+    const seg = at >= 0 ? body.slice(at) : ALL ? body : "";
+    for (const o of objects(seg).reverse()) {
       try {
         const j = JSON.parse(o);
         const kind = isPost(j) ? "post" : isFormat(j) ? "format" : "";
@@ -443,6 +460,27 @@ async function start(ai, prompt, kind = "post", mode = "default") {
   return getState();
 }
 
+/**
+ * [완성본 가져오기]: 자동으로 안 넘어올 때 사용자가 누른다. 지금 AI 탭 화면 전체에서 마지막 결과 JSON을 바로 가져온다
+ * (요청 번호·이전 결과 개수 같은 조건 없이)
+ */
+async function grab() {
+  const id = state.targetId || readTabs()[state.ai || lastWriteAi()];
+  if (!id) throw new Error("열려 있는 AI 대화 탭이 없어요.");
+  const port = new URL(session.CDP_URL).port || "9222";
+  const c = await connectPage(`ws://localhost:${port}/devtools/page/${id}`);
+  try {
+    const r = JSON.parse(await c.eval(findResult("").replace("const ALL = false;", "const ALL = true;")));
+    if (!r.found) throw new Error(r.broken ? "AI 답의 JSON이 중간에 끊겨 있어요. AI에게 \"JSON을 처음부터 끝까지 다시 보내줘\"라고 한 뒤 다시 눌러주세요." : "AI 탭에서 완성된 JSON을 못 찾았어요. AI에게 \"완성\"이라고 보낸 뒤 JSON이 다 나오면 다시 눌러주세요.");
+    if (state.client) try { state.client.close(); } catch {}
+    state = { ...state, status: "done", kind: r.found.kind, result: r.found.json };
+    delete state.client;
+    return getState();
+  } finally {
+    c.close();
+  }
+}
+
 /** 앱이 결과를 가져간 뒤 다시 가져가지 않게 표시 */
 function markTaken() {
   if (state.status === "done") state.status = "taken";
@@ -600,4 +638,4 @@ function lastJson(text) {
   return found;
 }
 
-module.exports = { askWeb, prewarm, freshTab, lastWriteAi, showTab, acquireTab, _h: { firstMatch, putPrompt, pressSend, targetAlive, within, sleep, SITES, LOGIN_URL }, start, getState, markTaken, focus, stop, SITES, findReusableTab };
+module.exports = { _findResult: (m) => findResult(m), grab, askWeb, prewarm, freshTab, lastWriteAi, showTab, acquireTab, _h: { firstMatch, putPrompt, pressSend, targetAlive, within, sleep, SITES, LOGIN_URL }, start, getState, markTaken, focus, stop, SITES, findReusableTab };

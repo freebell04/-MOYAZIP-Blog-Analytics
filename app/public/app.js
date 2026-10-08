@@ -480,6 +480,18 @@ document.addEventListener("click", async (e) => {
   }
 });
 
+// [📥 완성본 가져오기]: AI 탭 화면에서 결과 JSON을 바로 가져온다 (자동 감지가 안 될 때)
+document.addEventListener("click", async (e) => {
+  const b = e.target.closest("#ai-grab-btn");
+  if (!b) return;
+  b.disabled = true;
+  $("#ai-grab-msg").textContent = "AI 탭에서 찾는 중...";
+  const r = await fetch("/api/ai-chat/grab", { method: "POST" }).then((x) => x.json()).catch((er) => ({ error: er.message }));
+  b.disabled = false;
+  $("#ai-grab-msg").textContent = r.error || "";
+  if (!r.error) pollAiChat(); // status가 done이 되어 평소처럼 다음 단계로 넘어간다
+});
+
 async function pollAiChat() {
   const st = await fetch("/api/ai-chat/status").then((r) => r.json()).catch(() => null);
   if (!st || st.status === "idle" || st.status === "taken") return;
