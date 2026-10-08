@@ -516,11 +516,28 @@ async function prewarm(ai) {
  * @returns {Promise<any>} 파싱된 JSON
  */
 let askLock = Promise.resolve();
+let askPending = 0;
+const askIdleTimers = {};
 function askWeb(ai, prompt, accept = () => true, { timeoutMs = 240000, background = false } = {}) {
   const go = () => askWebInner(ai, prompt, accept, timeoutMs, background);
+  askPending++;
+  clearTimeout(askIdleTimers[ai]);
   const run = askLock.then(go, go);
   askLock = run.catch(() => {});
+  run.finally(() => {
+    // 1분 동안 더 부탁할 게 없으면 추천 댓글용 AI 탭을 닫는다 (AI 사이트는 탭 하나만으로도 메모리를 많이 써서 느린 컴퓨터가 버벅인다)
+    if (--askPending === 0) askIdleTimers[ai] = setTimeout(() => closeAskTab(ai), 60000);
+  }).catch(() => {});
   return run;
+}
+async function closeAskTab(ai) {
+  if (askPending) return;
+  const t = readTabs();
+  const id = t["ask-" + ai];
+  if (!id) return;
+  try { await fetch(`${session.CDP_URL}/json/close/${id}`, { signal: AbortSignal.timeout(3000) }); } catch {}
+  delete t["ask-" + ai];
+  try { require("fs").writeFileSync(TABS_PATH, JSON.stringify(t)); } catch {}
 }
 async function askWebInner(ai, prompt, accept, timeoutMs, background) {
   const site = SITES[ai];

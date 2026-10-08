@@ -315,7 +315,9 @@ S.openSugg = {}; // 펼쳐둔 추천 댓글 (다시 그려도 유지)
 try { S.visitCat = localStorage.getItem("nb.cat") || S.visitCat; } catch {}
 document.addEventListener("toggle", (e) => {
   const d = e.target;
-  if (d.dataset && d.dataset.suggKey) S.openSugg[d.dataset.suggKey] = d.open;
+  if (!(d.dataset && d.dataset.suggKey)) return;
+  S.openSugg[d.dataset.suggKey] = d.open;
+  if (d.open) askFromCard(d.dataset.suggKey); // 펼친 사람 것만 AI가 만든다 (+ 같은 페이지 다음 몇 명)
 }, true);
 
 // ---------- utils ----------
@@ -401,12 +403,12 @@ async function load() {
     fetch("/api/neighbors/help", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }).catch(() => {});
   }
   const busy = r.state.running || (r.suggestState && r.suggestState.running) || (r.helpState && r.helpState.running) || r.helpTodo > 0 && helpAsked === (r.data && r.data.updatedAt) && !(r.helpState && r.helpState.error) || watching;
-  if (busy && !pollTimer) pollTimer = setInterval(load, 1500);
+  if (busy && !pollTimer) pollTimer = setInterval(load, 3000); // 3초마다 (너무 자주 확인하면 화면이 무거워진다)
   if (!busy && pollTimer) { clearInterval(pollTimer); pollTimer = null; }
   S.state = r.state;
   if (r.data && !r.state.running) loadMine();
   maybeAutoRefresh();
-  autoSuggest();
+  flushPendingAsk();
 }
 
 document.addEventListener("click", async (e) => {
@@ -629,7 +631,7 @@ function suggestBlock(key, label, fallback) {
   const waiting = !ai && key.startsWith("visit:") && !S.suggestState.error;
   const list = ai || (waiting ? [] : fallback);
   const note = busy && !ai ? `⏳ ${S.suggestState.progress || "AI가 글을 읽고 댓글을 쓰는 중..."}`
-    : waiting ? "⏳ AI가 이 글을 읽고 댓글을 쓸 차례를 기다리는 중이에요."
+    : waiting ? (autoAsked.has(key) ? "⏳ AI가 이 글을 읽고 댓글을 쓸 차례를 기다리는 중이에요." : "[✨ AI로 만들기]를 누르면 AI가 이 글을 읽고 맞춤 댓글을 써줘요.")
     : !ai && S.suggestState.error ? "" : "";
   return `<div class="sugg">
     <div class="sugg-head">💡 ${label} ${ai ? "<span class=\"ai-tag\">AI</span>" : ""}<small>예시예요. 내 말로 고쳐서 써주세요</small>
@@ -640,17 +642,28 @@ function suggestBlock(key, label, fallback) {
   </div>`;
 }
 
-// 답방 목록을 열면, 아직 AI 댓글이 없는 글은 AI에게 알아서 부탁한다 (크롬 뒤쪽 탭에서 조용히, 한 번만)
+// AI 추천 댓글은 필요할 때만 만든다 (느린 컴퓨터에서 버벅이지 않게):
+//  - "💡 추천 댓글 보기"를 펼친 사람 + 같은 페이지에서 그 아래 4명까지 (AI 한 번에 5명)
+//  - [이 페이지 AI 추천 만들기]를 누른 경우
+// 화면을 열거나 페이지를 넘기는 것만으로는 만들지 않는다.
 const autoAsked = new Set();
-function autoSuggest() {
-  if (!S.data || (S.state && S.state.running) || S.suggestState.running || S.suggestState.error) return;
-  if (S.tab && S.tab !== "visit") return;
-  const keys = visitPageData().items.filter((p) => !isDone(p) && p.latestPost).map(visitKey)
-    .filter((k) => !S.suggestions[k] && !autoAsked.has(k)); // 지금 보고 있는 페이지(10명)만
-  if (!keys.length) return;
+function autoSuggest() {} // (예전: 페이지를 열면 자동으로 만들기 — 무거워서 끔)
+function askFromCard(key) {
+  if (!S.data || S.suggestions[key] || autoAsked.has(key)) return;
+  if (S.suggestState.running) { autoAsked.add(key); return pendingAsk.add(key); } // 지금 만드는 게 끝나면 이어서
+  const items = visitPageData().items.filter((p) => !isDone(p) && p.latestPost);
+  const at = Math.max(0, items.findIndex((p) => visitKey(p) === key));
+  const keys = [key, ...items.slice(at + 1).map(visitKey)].filter((k, i, a) => a.indexOf(k) === i && !S.suggestions[k] && (k === key || !autoAsked.has(k))).slice(0, 5);
   keys.forEach((k) => autoAsked.add(k));
   fetch("/api/neighbors/suggest", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ keys, auto: true }) })
     .then(() => load()).catch(() => {});
+}
+const pendingAsk = new Set();
+function flushPendingAsk() {
+  if (S.suggestState.running || !pendingAsk.size) return;
+  const keys = [...pendingAsk].filter((k) => !S.suggestions[k]).slice(0, 5);
+  pendingAsk.clear();
+  if (keys.length) fetch("/api/neighbors/suggest", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ keys, auto: true }) }).then(() => load()).catch(() => {});
 }
 
 // 댓글 답글·내 글 현황의 "답방 완료" 체크 (이 컴퓨터에만 저장)

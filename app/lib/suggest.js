@@ -11,7 +11,7 @@ const { keywordsOf } = require("./trends");
 const neighbors = require("./neighbors");
 
 const SUGGEST_PATH = path.join(__dirname, "..", "data", "neighbors-suggest.json");
-const BATCH_SIZE = 10; // 답방 한 페이지(10명) = AI 한 번
+const BATCH_SIZE = 5; // AI 한 번에 5명까지 (요청문이 짧아야 AI 창이 가볍다)
 // buildPrompt()의 규칙(이모지 금지, 핵심 내용 파악 등)을 바꿀 때마다 올린다.
 // 예전 버전으로 만들어둔 결과는 업데이트해도 파일에 남아 재사용되므로, 여기서 버전이 다르면
 // "없는 것"으로 취급해 다시 만들게 한다 (사용자가 일일이 [다시 만들기]를 누를 필요 없이).
@@ -110,9 +110,10 @@ const decode = (t) =>
     .replace(/&amp;/g, "&");
 
 /** 너무 긴 글은 앞부분(주제·구체적 내용)과 끝부분(결론·마무리)을 남기고 가운데를 줄인다 */
-function clipPost(t, max = 4500) {
+// 댓글 하나 쓰는 데 글 전체는 필요 없다: 앞부분(무슨 글인지·핵심) + 끝부분(결론)만 보내서 AI 창이 가볍게
+function clipPost(t, max = 1600) {
   if (t.length <= max) return t;
-  return t.slice(0, 3200) + "\n(… 중간 생략 …)\n" + t.slice(-1200);
+  return t.slice(0, 1200) + "\n(… 중간 생략 …)\n" + t.slice(-400);
 }
 
 // 키 규칙 (프론트와 동일): visit:<blogId>:<logNo>  /  reply:<logNo>:<blogId>:<댓글시각>

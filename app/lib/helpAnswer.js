@@ -256,8 +256,8 @@ function todoCount(cache) {
   const have = readHelp();
   const c = collectComments(cache).filter((q) => !have[q.key]).length;
   const done = require("./neighbors").getVisited();
-  const v = (cache.neighbors || cache.people || []).filter((p) => p.latestPost && done[p.blogId] !== p.latestPost.logNo && !have[visitLocalKey(p)] && Date.now() - new Date(p.latestPost.date) < 30 * 864e5).slice(0, 80).length;
-  return c + v;
+  void done;
+  return c; // 이웃 글 댓글은 AI가 필요할 때만 만든다 (예전엔 이웃 글 80개를 미리 읽어서 컴퓨터가 무거웠다)
 }
 
 /** 아직 없는 것들을 만들어 저장한다 (백그라운드): 댓글 답글(질문이면 검색) + 이웃 글 댓글 */
@@ -269,7 +269,7 @@ async function build(cache, { force = false } = {}) {
   const visits = (cache.neighbors || cache.people || [])
     .filter((p) => p.latestPost && doneMap[p.blogId] !== p.latestPost.logNo && (force || !have[visitLocalKey(p)]) && Date.now() - new Date(p.latestPost.date) < 30 * 864e5)
     .sort((x, y) => new Date(y.latestPost.date) - new Date(x.latestPost.date))
-    .slice(0, 80);
+    .slice(0, 0); // 이웃 글 댓글 미리 만들기는 끔 (AI 추천 댓글로 대체, 무거워서)
   const total = comments.length + visits.length;
   if (!total) return;
   let done = 0;
