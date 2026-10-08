@@ -204,10 +204,17 @@ async function pressSend(client, site, sel) {
     return left < 3 && !chip;
   };
   // 붙여넣은 첨부를 처리하는 동안은 [보내기]가 안 먹을 수 있어서 몇 번 더 눌러본다
-  for (let i = 0; i < 4; i++) {
+  for (let i = 0; i < 8; i++) {
     if (await sentNow()) return true;
     const b = await client.eval(firstMatch(site.send)).catch(() => null);
-    if (b) await client.eval(`document.querySelector(${JSON.stringify(b)}).click()`).catch(() => {});
+    if (b && i % 2 === 0) await client.eval(`document.querySelector(${JSON.stringify(b)}).click()`).catch(() => {});
+    else {
+      // 버튼이 안 보이거나 눌러도 안 가면 Enter로 보내 본다 (긴 글을 붙여넣은 직후엔 버튼이 늦게 살아나는 경우가 있다)
+      await client.eval(`(document.querySelector(${JSON.stringify(sel)}) || {}).focus && document.querySelector(${JSON.stringify(sel)}).focus()`).catch(() => {});
+      const key = { key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13 };
+      await client.send("Input.dispatchKeyEvent", { type: "keyDown", ...key, text: "\r" }).catch(() => {});
+      await client.send("Input.dispatchKeyEvent", { type: "keyUp", ...key }).catch(() => {});
+    }
     await sleep(1500);
   }
   return sentNow();
@@ -519,7 +526,9 @@ let askLock = Promise.resolve();
 let askPending = 0;
 const askIdleTimers = {};
 function askWeb(ai, prompt, accept = () => true, { timeoutMs = 240000, background = false } = {}) {
-  const go = () => askWebInner(ai, prompt, accept, timeoutMs, background);
+  // 보내기가 안 먹었으면 새 대화에서 한 번 더 (탭이 덜 불러와졌거나 버튼이 늦게 살아난 경우)
+  const go = () => askWebInner(ai, prompt, accept, timeoutMs, background)
+    .catch((e) => (/보내지 못했/.test(e.message) ? askWebInner(ai, prompt, accept, timeoutMs, background) : Promise.reject(e)));
   askPending++;
   clearTimeout(askIdleTimers[ai]);
   const run = askLock.then(go, go);
