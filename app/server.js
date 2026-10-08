@@ -564,7 +564,22 @@ app.post("/api/neighbors/visited", (req, res) => {
 });
 
 // 네이버 글을 자동화 크롬에서 열기 (반반 화면) / 열어 둔 탭 닫기
-// 맞공감 탭의 [이웃 신청하러 가기]: 신청 화면을 열고 문구만 채워 둔다 (확인은 사용자가)
+// 이웃추가 탭의 "새 이웃 찾기": 내 주제로 글 쓰는 블로거 (검색어가 없으면 추천 검색어만 돌려준다)
+app.get("/api/neighbors/discover", async (req, res) => {
+  try {
+    const dc = require("./lib/discover");
+    const cache = neighbors.getCached() || {};
+    const myTitles = ((stats.getCached() || {}).posts || []).map((p) => p.title).concat((cache.posts || []).map((p) => p.title));
+    const keywords = dc.suggestKeywords(myTitles);
+    const q = String(req.query.q || "").trim();
+    if (!q) return res.json({ keywords, items: [] });
+    const exclude = [require("./lib/config").blogId(), ...(cache.neighbors || []).filter((n) => n.iAdded || n.mutual).map((n) => n.blogId)];
+    res.json({ keywords, items: await dc.discover(q, exclude) });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+// 이웃추가 탭의 [이웃 신청하러 가기]: 신청 화면을 열고 문구만 채워 둔다 (확인은 사용자가)
 app.post("/api/neighbors/buddy-form", async (req, res) => {
   try {
     res.json({ ok: true, ...(await like.openBuddyForm(String(req.body.blogId || ""), String(req.body.message || ""))) });

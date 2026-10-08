@@ -98,6 +98,8 @@
   .cat.on .cnt { background: rgba(255,255,255,.25); color: #fff; }
   .b-new { background: #eafbe7; color: #2f8a1f; }
   .sugg-wrap { margin-top: 6px; }
+  .lb-msg-box { background: #f0fdf4; border: 2px solid #34d399; border-radius: 14px; padding: 12px 14px; }
+  .lb-msg-box textarea { width: 100%; font-size: 14px; border: 1px solid #a7f3d0; border-radius: 10px; padding: 8px 10px; resize: vertical; background: #fff; box-sizing: border-box; }
   .pager { display: flex; gap: 6px; align-items: center; justify-content: center; flex-wrap: wrap; margin: 14px 0 6px; }
   .sugg-wrap > summary { color: #9a6200; font-weight: 500; }
   .sugg { margin-top: 8px; border: 1px solid #ffe2a8; background: #fffbf0; border-radius: 10px; padding: 8px 10px; }
@@ -157,7 +159,7 @@
 <nav class="tabs" id="tabs">
   <button class="tab on" data-tab="visit" title="남의 블로그 새 글에 공감·댓글 쓰러 가기">🏃 답방 <span class="cnt" id="cnt-visit">0</span></button>
   <button class="tab" data-tab="reply" title="내 글에 달린 댓글에 답글 달기">💬 댓글 답글 <span class="cnt" id="cnt-reply">0</span></button>
-  <button class="tab" data-tab="likeback" title="내 글에 공감해준 사람에게 맞공감·이웃 신청하러 가기">💞 맞공감 <span class="cnt" id="cnt-likeback">0</span></button>
+  <button class="tab" data-tab="likeback" title="공감해준 사람·나를 추가한 사람·내 주제 블로거에게 이웃 신청하러 가기">👥 이웃추가 <span class="cnt" id="cnt-likeback">0</span></button>
   <button class="tab" data-tab="neighbors">👥 이웃 목록 <span class="cnt" id="cnt-neighbors">0</span></button>
   <button class="tab" data-tab="posts">📝 내 글 현황 <span class="cnt" id="cnt-posts">0</span></button>
   <button class="tab" data-tab="trends">💡 주제 추천 <span class="cnt" id="cnt-trends">-</span></button>
@@ -193,11 +195,21 @@
   <div class="list" id="reply-list"></div>
 </section>
 
-<!-- 맞공감 -->
+<!-- 이웃추가 -->
 <section class="panel" id="panel-likeback" hidden>
-  <p class="hint" style="margin-bottom:10px">💞 <b>내 글에 공감해준 사람</b>의 최신 글에 <b>맞공감</b>하러 가는 곳이에요. 버튼을 누르면 그 글이 열리고, 하트는 직접 눌러주세요 (누르면 여기서 자동으로 체크돼요).</p>
-  <div class="panel-bar">
-    <div class="chips" data-key="lbHours">
+  <div class="lb-msg-box">
+    <div style="font-weight:700;color:#065f46;margin-bottom:6px">✉️ 이웃 신청 문구</div>
+    <textarea id="lb-buddy-msg" rows="2" maxlength="100" placeholder="예: 안녕하세요 {닉네임}님! 공감 감사해요. 앞으로 자주 소통해요 :)"></textarea>
+    <small class="muted"><b>{닉네임}</b>은 그 사람 이름으로 바뀌어요 (최대 100자). [이웃 신청하러 가기]를 누르면 이 문구를 신청 화면에 미리 채워 둬요 — <b>[확인]은 직접</b> 눌러주세요.</small>
+  </div>
+  <div class="chips" data-key="lbSrc" style="margin:12px 0 8px">
+    <button class="chip on" data-v="likes">💗 공감해준 사람</button>
+    <button class="chip" data-v="comments">💬 댓글 남긴 사람</button>
+    <button class="chip" data-v="addedMe">🙋 나를 추가한 사람</button>
+    <button class="chip" data-v="find">🔎 새 이웃 찾기</button>
+  </div>
+  <div class="panel-bar" id="lb-bar">
+    <div class="chips" data-key="lbHours" id="lb-hours">
       <button class="chip" data-v="12">최근 12시간</button>
       <button class="chip on" data-v="24">최근 24시간</button>
     </div>
@@ -206,13 +218,15 @@
       <button class="chip" data-v="all">모두</button>
     </div>
   </div>
-  <details class="lb-msg" style="margin:6px 0 12px">
-    <summary style="cursor:pointer;font-weight:600;color:#475569">✉️ 이웃 신청 문구 정하기</summary>
-    <div style="margin-top:8px">
-      <textarea id="lb-buddy-msg" rows="2" maxlength="100" style="width:100%;font-size:13px" placeholder="예: 안녕하세요 {닉네임}님! 공감 감사해요. 앞으로 자주 소통해요 :)"></textarea>
-      <small class="muted">{닉네임}은 그 사람 이름으로 바뀌어요. 이웃 신청 화면을 열 때 이 문구를 미리 채워 둬요 (최대 100자). 신청 [확인]은 직접 눌러주세요.</small>
+  <div id="lb-find" hidden style="margin:4px 0 10px">
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <input id="lb-find-q" placeholder="내 주제 검색어 (예: 블로그 자동화)" style="flex:1;min-width:200px">
+      <button class="btn btn-primary" id="lb-find-btn" style="font-size:13px;padding:6px 14px">찾기</button>
     </div>
-  </details>
+    <div id="lb-find-kw" class="tr-chips" style="margin-top:6px"></div>
+    <small class="muted">이 검색어로 최근 글을 쓴 블로거예요 (이미 추가한 이웃은 빼고). 글을 먼저 읽어보고 마음에 들면 이웃 신청하세요.</small>
+  </div>
+  <p class="hint" id="lb-hint" style="margin:0 0 8px"></p>
   <div class="list" id="likeback-list"></div>
 </section>
 
@@ -290,7 +304,7 @@ const $ = (s) => document.querySelector(s);
 const BLOG = "https://blog.naver.com/";
 let S = {
   data: null, visited: {}, blogId: "", suggestions: {}, suggestState: {}, help: {}, helpState: {}, mine: {}, liked: {}, likeWatch: {},
-  tab: "visit", visitCat: "realtime", visitFilter: "todo", visitSort: "score", lbHours: "24", lbFilter: "todo",
+  tab: "visit", visitCat: "realtime", visitFilter: "todo", visitSort: "score", lbHours: "24", lbFilter: "todo", lbSrc: "likes",
   nbFilter: "all", nbSearch: "", nbSort: "activity", nbDir: -1,
 };
 try { S.tab = localStorage.getItem("nb.tab") || S.tab; } catch {}
@@ -471,42 +485,117 @@ function render() {
 const DEFAULT_BUDDY_MSG = "안녕하세요 {닉네임}님! 공감 남겨주셔서 감사해요. 앞으로 자주 소통해요 :)";
 const buddyMsg = () => { try { return localStorage.getItem("nb.buddyMsg") || DEFAULT_BUDDY_MSG; } catch { return DEFAULT_BUDDY_MSG; } };
 const buddyWant = () => { try { return JSON.parse(localStorage.getItem("nb.buddyWant") || "{}"); } catch { return {}; } };
+const LB_HINT = {
+  likes: "내 글에 공감해준 사람이에요. 최신 글에 맞공감하고, 이웃이 아니면 이웃 신청도 해보세요.",
+  comments: "최근 내 글에 댓글을 남긴 사람 중 아직 내 이웃이 아닌 사람이에요.",
+  addedMe: "나를 이웃추가했는데 나는 아직 추가하지 않은 사람이에요. 맞이웃하면 소통이 쉬워져요.",
+  find: "",
+};
+let findItems = [], findKeywords = null;
 function likebackList() {
-  const since = Date.now() - Number(S.lbHours || 24) * 3600000;
-  return (S.data ? S.data.people : [])
-    .map((p) => ({ p, likes: p.likes.filter((l) => ts(l.date) >= since).sort((a, b) => ts(b.date) - ts(a.date)) }))
-    .filter((x) => x.likes.length)
-    .sort((a, b) => ts(b.likes[0].date) - ts(a.likes[0].date));
+  const src = S.lbSrc || "likes";
+  const d = S.data;
+  if (!d) return [];
+  const isNbId = new Set((d.neighbors || []).filter((n) => n.iAdded || n.mutual).map((n) => n.blogId));
+  if (src === "likes") {
+    const since = Date.now() - Number(S.lbHours || 24) * 3600000;
+    return d.people
+      .map((p) => ({ p, likes: p.likes.filter((l) => ts(l.date) >= since).sort((a, b) => ts(b.date) - ts(a.date)) }))
+      .filter((x) => x.likes.length)
+      .sort((a, b) => ts(b.likes[0].date) - ts(a.likes[0].date));
+  }
+  if (src === "comments") {
+    return d.people.filter((p) => p.comments.length && !isNbId.has(p.blogId))
+      .map((p) => ({ p, comments: p.comments.slice().sort((a, b) => ts(b.date) - ts(a.date)) }))
+      .sort((a, b) => ts(b.comments[0].date) - ts(a.comments[0].date));
+  }
+  if (src === "addedMe") {
+    const people = Object.fromEntries(d.people.map((p) => [p.blogId, p]));
+    return (d.neighbors || []).filter((n) => n.addedMe && !n.iAdded)
+      .map((n) => ({ p: { likes: [], comments: [], ...n, ...(people[n.blogId] || {}), relation: "addedMe" } }))
+      .sort((a, b) => (b.p.likes.length + b.p.comments.length) - (a.p.likes.length + a.p.comments.length));
+  }
+  return findItems.map((x) => ({ p: { blogId: x.blogId, nickname: x.nickname, relation: "none", likes: [], comments: [], latestPost: { title: x.title, logNo: x.logNo, link: x.link, date: "" } }, snippet: x.snippet }));
 }
-const likedBack = (p) => !!(p.latestPost && (S.liked[`${p.blogId}:${p.latestPost.logNo}`] || (mineOf(p) && mineOf(p).liked)));
+const likedBack = (p) => !!(p.latestPost && p.latestPost.logNo && (S.liked[`${p.blogId}:${p.latestPost.logNo}`] || (mineOf(p) && mineOf(p).liked)));
+const buddyDone = () => { try { return JSON.parse(localStorage.getItem("nb.buddyDone") || "{}"); } catch { return {}; } };
+// 할 일 판단: 공감해준 사람은 "맞공감했는지", 나머지는 "이웃 신청 완료로 체크했는지"
+const lbDone = (x) => ((S.lbSrc || "likes") === "likes" ? likedBack(x.p) : !!buddyDone()[x.p.blogId]);
 function renderLikeback() {
-  const all = likebackList();
-  const todo = all.filter((x) => !likedBack(x.p));
-  $("#cnt-likeback").textContent = todo.length;
+  const src = S.lbSrc || "likes";
+  $("#lb-hours").hidden = src !== "likes";
+  $("#lb-find").hidden = src !== "find";
+  $("#lb-hint").textContent = LB_HINT[src] || "";
   const ta = $("#lb-buddy-msg");
   if (ta && document.activeElement !== ta) ta.value = buddyMsg();
+  if (src === "find" && findKeywords === null) loadFindKeywords();
+  const all = likebackList();
+  const todo = all.filter((x) => !lbDone(x));
+  if (src === "likes") $("#cnt-likeback").textContent = todo.length;
   const list = (S.lbFilter || "todo") === "todo" ? todo : all;
   const want = buddyWant();
-  $("#likeback-list").innerHTML = list.length ? list.map(({ p, likes }) => {
+  const done = buddyDone();
+  $("#likeback-list").innerHTML = list.length ? list.map((x) => {
+    const { p, likes, comments, snippet } = x;
     const lp = p.latestPost;
     const isNb = p.relation === "mutual" || p.relation === "iAdded";
-    return `<div class="row ${likedBack(p) ? "done" : ""}">
-      ${avatar(p)}
+    const meta = likes ? `❤️ 내 글 ${likes.length}개에 공감 · ${ago(likes[0].date)}`
+      : comments ? `💬 댓글 ${comments.length}개 · ${ago(comments[0].date)}`
+      : src === "addedMe" ? `나를 이웃추가했어요${p.likes.length + p.comments.length ? ` · 공감 ${p.likes.length} · 댓글 ${p.comments.length}` : ""}`
+      : esc(snippet || "");
+    const detail = likes ? `<ul class="ex" style="margin:4px 0 0">${likes.slice(0, 3).map((l) => `<li>${esc(l.title)}</li>`).join("")}</ul>`
+      : comments ? `<div class="snippet">${esc(comments[0].text || "(스티커)")} <small>— ${esc(comments[0].title)}</small></div>` : "";
+    return `<div class="row ${lbDone(x) ? "done" : ""}">
+      ${p.profileImage ? avatar(p) : `<div class="avatar" style="display:flex;align-items:center;justify-content:center;background:#eef2f7">👤</div>`}
       <div style="min-width:0">
-        <a class="name" href="${BLOG}${esc(p.blogId)}" target="_blank" rel="noopener" data-split data-tag="visit:${esc(p.blogId)}">${esc(p.nickname)}</a>${relBadge(p.relation)}
-        <div class="meta">❤️ 내 글 ${likes.length}개에 공감 · ${ago(likes[0].date)}</div>
-        <ul class="ex" style="margin:4px 0 0">${likes.slice(0, 3).map((l) => `<li>${esc(l.title)}</li>`).join("")}</ul>
+        <a class="name" href="${BLOG}${esc(p.blogId)}" target="_blank" rel="noopener" data-split data-tag="visit:${esc(p.blogId)}">${esc(p.nickname || p.blogId)}</a>${relBadge(p.relation)}
+        <div class="meta">${meta}</div>
+        ${detail}
       </div>
       <div class="side">
-        ${lp ? `<div class="post-title">${isFresh(lp) ? "🆕 " : "📝 "}${esc(lp.title)}</div><small class="muted">${ago(lp.date)}</small>
-               ${likeButton(p.blogId, lp.logNo)}` : `<small class="muted">최신 글을 못 찾았어요</small>`}
+        ${lp && lp.logNo ? `<div class="post-title">${lp.date && isFresh(lp) ? "🆕 " : "📝 "}${esc(lp.title)}</div>${lp.date ? `<small class="muted">${ago(lp.date)}</small>` : ""}
+               ${src === "find" ? `<a class="btn btn-outline" href="${esc(lp.link)}" target="_blank" rel="noopener" data-split data-tag="visit:${esc(p.blogId)}">글 읽으러 가기</a>` : likeButton(p.blogId, lp.logNo)}`
+          : `<a class="btn btn-outline" href="${BLOG}${esc(p.blogId)}" target="_blank" rel="noopener" data-split data-tag="visit:${esc(p.blogId)}">블로그 가기</a>`}
         ${isNb ? `<small class="muted">이미 이웃이에요</small>`
           : `<label><input type="checkbox" data-buddy-want="${esc(p.blogId)}" ${want[p.blogId] ? "checked" : ""}> 이웃 신청할까요?</label>
-             ${want[p.blogId] ? `<button class="btn btn-outline" data-buddy-open="${esc(p.blogId)}" data-nick="${esc(p.nickname)}">👥 이웃 신청하러 가기</button>` : ""}`}
+             ${want[p.blogId] ? `<button class="btn btn-outline" data-buddy-open="${esc(p.blogId)}" data-nick="${esc(p.nickname || "")}">👥 이웃 신청하러 가기</button>
+             <label><input type="checkbox" data-buddy-done="${esc(p.blogId)}" ${done[p.blogId] ? "checked" : ""}> 신청 완료</label>` : ""}`}
       </div>
     </div>`;
-  }).join("") : `<div class="empty">${all.length ? "최근 공감해준 분들께 모두 맞공감했어요 🎉" : `최근 ${S.lbHours || 24}시간 안에 공감해준 사람이 없어요. 위의 [새로 불러오기]로 최신 공감을 불러와 보세요.`}</div>`;
+  }).join("") : `<div class="empty">${src === "find" ? (findItems.length ? "모두 처리했어요 🎉" : "위에 검색어를 넣고 [찾기]를 눌러주세요.")
+      : all.length ? "모두 처리했어요 🎉"
+      : src === "likes" ? `최근 ${S.lbHours || 24}시간 안에 공감해준 사람이 없어요. 위의 [새로 불러오기]로 최신 공감을 불러와 보세요.` : "해당하는 사람이 없어요."}</div>`;
 }
+async function loadFindKeywords() {
+  findKeywords = [];
+  const r = await fetch("/api/neighbors/discover").then((x) => x.json()).catch(() => ({}));
+  findKeywords = r.keywords || [];
+  $("#lb-find-kw").innerHTML = findKeywords.map((k) => `<a class="chip" href="#" data-find-kw="${esc(k)}">${esc(k)}</a>`).join("");
+}
+async function runFind(q) {
+  q = String(q || "").trim();
+  if (!q) return;
+  $("#lb-find-q").value = q;
+  $("#likeback-list").innerHTML = `<div class="empty">⏳ '${esc(q)}'로 최근 글 쓴 블로거를 찾는 중...</div>`;
+  const r = await fetch("/api/neighbors/discover?q=" + encodeURIComponent(q)).then((x) => x.json()).catch((e) => ({ error: e.message }));
+  findItems = r.items || [];
+  if (r.error) $("#likeback-list").innerHTML = `<div class="empty error">⚠ ${esc(r.error)}</div>`;
+  else renderLikeback();
+}
+document.addEventListener("click", (e) => {
+  const kw = e.target.closest("[data-find-kw]");
+  if (kw) { e.preventDefault(); return runFind(kw.dataset.findKw); }
+  if (e.target.closest("#lb-find-btn")) runFind($("#lb-find-q").value);
+});
+document.addEventListener("keydown", (e) => { if (e.target.id === "lb-find-q" && e.key === "Enter") runFind(e.target.value); });
+document.addEventListener("change", (e) => {
+  const d = e.target.closest && e.target.closest("[data-buddy-done]");
+  if (!d) return;
+  const m = buddyDone();
+  if (d.checked) m[d.dataset.buddyDone] = 1; else delete m[d.dataset.buddyDone];
+  try { localStorage.setItem("nb.buddyDone", JSON.stringify(m)); } catch {}
+  renderLikeback();
+});
 document.addEventListener("input", (e) => {
   if (e.target.id === "lb-buddy-msg") { try { localStorage.setItem("nb.buddyMsg", e.target.value); } catch {} }
 });
