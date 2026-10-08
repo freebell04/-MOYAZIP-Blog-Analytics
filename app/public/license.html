@@ -43,7 +43,7 @@ if (preKey) { $("#key").value = preKey; history.replaceState(null, "", location.
 fetch("/api/license").then((r) => r.json()).then((st) => {
   if (st.trial) { $("#trial-box").hidden = false; $("#t-link").href = st.trialUrl || "#"; }
   if (st.ok) location.href = "/";
-  else if (st.expired) $("#why").textContent = `사용 기간이 끝났어요 (${st.start} ~ ${st.end}). 계속 쓰시려면 새 키를 입력해주세요.`;
+  else if (st.expired) $("#why").textContent = `사용 기간이 끝났어요 (${st.start} ~ ${st.end}). 계속 쓰시려면 운영자에게 문의해서 받은 새 키를 입력해주세요.`;
 });
 // 설정을 저장하면 프로그램이 스스로 다시 켜진다 → 다시 응답할 때까지 기다렸다가 메인 화면으로
 function waitRestart() {
