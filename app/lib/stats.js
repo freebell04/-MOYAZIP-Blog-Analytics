@@ -163,14 +163,15 @@ async function refresh({ full = false } = {}) {
     const hour = reuseWeek ? prev.hour : rowsOf(hourJ, "hour").map((r) => ({ hour: Number(r.date), cv: r.cv }));
     const demo = reuseWeek ? prev.demo : rowsOf(demoJ, "demo").map((r) => ({ age: r.age === "total" ? "전체" : AGE[r.age] || r.age, m: r.m, f: r.f }));
 
+    state.progress = "체류시간 분석 중..."; // (아래 글별 성과 단계가 탭을 다른 주소로 옮기므로 그 전에)
+    let dwellError = null;
+    const dwell = await fetchDwell(api, today, prev).catch((e) => { dwellError = e.message; return (prev && prev.dwell) || null; });
     state.progress = "내 글별 성과 확인 중...";
     const posts = await postsP;
     const early = await fetchEarlyPerformance(page, posts, now, prev, api, stats);
-    state.progress = "체류시간 분석 중...";
-    const dwell = await fetchDwell(api, today, prev).catch(() => (prev && prev.dwell) || null);
 
     const data = {
-      updatedAt: new Date().toISOString(), today, lastWeek, lastMonth: lastMonth1.slice(0, 7), daily, weekly, monthly, week, month, hour, demo, posts, early, dwell,
+      updatedAt: new Date().toISOString(), today, lastWeek, lastMonth: lastMonth1.slice(0, 7), daily, weekly, monthly, week, month, hour, demo, posts, early, dwell, dwellError,
       refresh: { ms: Date.now() - t0, apiCalls: stats.calls, reused: stats.reused, full: !!full },
     };
     data.analysis = analyze(data);
@@ -634,13 +635,16 @@ async function fetchDwell(api, today, prev) {
       const y = d.total - other * mean; // 추정 대상이 아닌 글은 평균으로 본다
       for (let i = 0; i < n; i++) { if (!a[i]) continue; b[i] += a[i] * y; for (let k = 0; k < n; k++) A[i][k] += a[i] * a[k]; }
     }
-    const LAMBDA = 0.6;
-    for (let i = 0; i < n; i++) { A[i][i] += LAMBDA; b[i] += LAMBDA * mean; }
+    // 보정 세기: 글마다 가진 정보량(조회 비중)에 비례해서 약하게 — 너무 세면 모든 글이 평균값으로 뭉친다
+    const diagAvg = A.reduce((t, r, i) => t + r[i], 0) / n || 1;
+    for (let i = 0; i < n; i++) { const lam = 0.5 * A[i][i] + 0.1 * diagAvg; A[i][i] += lam; b[i] += lam * mean; }
     const x = solve(A, b);
-    ids.forEach((id, i) => posts.push({ logNo: id, title: titles[id], views: views[id], est: Math.max(0, Math.round(x[i])), sure: views[id] >= 15 ? "보통" : "낮음" }));
+    // 추정이 튀는 걸 막기 위해 평균의 1/4~3배 안으로 자른다
+    ids.forEach((id, i) => posts.push({ logNo: id, title: titles[id], views: views[id], est: Math.round(Math.min(mean * 3, Math.max(mean * 0.25, x[i]))), sure: views[id] >= 30 ? "보통" : "낮음" }));
     posts.sort((p, q) => q.est - p.est);
   }
-  const avg = (k) => Math.round(days.reduce((s, d) => s + d[k], 0) / days.length);
+  // 그 방문자가 없던 날(0)은 빼고 평균 (이웃 방문이 없는 날이 많으면 0이 섞여 평균이 터무니없이 작아진다)
+  const avg = (k) => { const v = days.map((d) => d[k]).filter((x) => x > 0); return v.length ? Math.round(v.reduce((s, x) => s + x, 0) / v.length) : 0; };
   return { days, mean: Math.round(mean), friendAvg: avg("friend"), followAvg: avg("follow"), etcAvg: avg("etc"), posts, rank };
 }
 const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
