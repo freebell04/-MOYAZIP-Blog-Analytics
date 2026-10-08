@@ -492,6 +492,7 @@ document.addEventListener("click", async (e) => {
   if (!r.error) pollAiChat(); // status가 done이 되어 평소처럼 다음 단계로 넘어간다
 });
 
+let lastPopStart = null;
 async function pollAiChat() {
   const st = await fetch("/api/ai-chat/status").then((r) => r.json()).catch(() => null);
   if (!st || st.status === "idle" || st.status === "taken") return;
@@ -516,6 +517,7 @@ async function pollAiChat() {
   if (pop) {
     if (st.status === "chatting") { $("#ai-popup-title").textContent = isFormat ? `${st.name}에서 분석 결과를 기다리는 중이에요` : `${st.name}에서 대화 나눠보세요`; pop.style.display = "block"; }
     else pop.style.display = "none";
+    if (st.status !== "chatting" || st.startedAt !== lastPopStart) { const m = $("#ai-grab-msg"); if (m) m.textContent = ""; lastPopStart = st.startedAt; } // 지난번 [가져오기] 안내 문구가 남아 있지 않게
   }
   if (!running && ["error", "timeout", "closed"].includes(st.status)) $("#handoff-prompt-box").hidden = false; // 자동이 안 됐을 때만 수동 방법을 보여준다
   const line = isFormat ? $("#format-status") : $("#handoff-status");

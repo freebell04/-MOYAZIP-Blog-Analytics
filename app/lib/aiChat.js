@@ -477,7 +477,10 @@ async function grab() {
   const port = new URL(session.CDP_URL).port || "9222";
   const c = await connectPage(`ws://localhost:${port}/devtools/page/${id}`);
   try {
+    // AI가 아직 답을 쓰는 중이면(중지 버튼이 보임) 기다리라고 알린다 — 다 쓰면 자동으로 넘어간다
+    const writing = await c.eval(`!!document.querySelector('button[data-testid="stop-button"], button[aria-label*="중지"], button[aria-label*="Stop"]')`).catch(() => false);
     const r = JSON.parse(await c.eval(findResult("").replace("const ALL = false;", "const ALL = true;")));
+    if (!r.found && writing) throw new Error("AI가 아직 답을 쓰는 중이에요. 다 쓰면 자동으로 넘어가요 (안 넘어가면 그때 다시 눌러주세요).");
     if (!r.found) throw new Error(r.broken ? "AI 답의 JSON이 중간에 끊겨 있어요. AI에게 \"JSON을 처음부터 끝까지 다시 보내줘\"라고 한 뒤 다시 눌러주세요." : "AI 탭에서 완성된 JSON을 못 찾았어요. AI에게 \"완성\"이라고 보낸 뒤 JSON이 다 나오면 다시 눌러주세요.");
     if (state.client) try { state.client.close(); } catch {}
     state = { ...state, status: "done", kind: r.found.kind, result: r.found.json };
