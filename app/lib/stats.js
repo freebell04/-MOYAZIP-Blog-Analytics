@@ -166,9 +166,11 @@ async function refresh({ full = false } = {}) {
     state.progress = "내 글별 성과 확인 중...";
     const posts = await postsP;
     const early = await fetchEarlyPerformance(page, posts, now, prev, api, stats);
+    state.progress = "체류시간 분석 중...";
+    const dwell = await fetchDwell(api, today, prev).catch(() => (prev && prev.dwell) || null);
 
     const data = {
-      updatedAt: new Date().toISOString(), today, lastWeek, lastMonth: lastMonth1.slice(0, 7), daily, weekly, monthly, week, month, hour, demo, posts, early,
+      updatedAt: new Date().toISOString(), today, lastWeek, lastMonth: lastMonth1.slice(0, 7), daily, weekly, monthly, week, month, hour, demo, posts, early, dwell,
       refresh: { ms: Date.now() - t0, apiCalls: stats.calls, reused: stats.reused, full: !!full },
     };
     data.analysis = analyze(data);
@@ -578,6 +580,83 @@ function getCached() {
   } catch {
     return null;
   }
+}
+
+/**
+ * ⏱ 체류시간: 네이버는 블로그 전체의 "날짜별 평균 체류시간"만 알려주고 글별 체류시간은 주지 않는다.
+ * 그래서 (1) 날짜별 평균 체류시간(이웃·팔로워·그 외 방문자)을 그대로 보여주고,
+ * (2) "그날 어떤 글이 얼마나 읽혔는지(날짜별 글 순위)"와 엮어서 글별 체류시간을 추정한다.
+ *     → 날짜마다 평균 체류시간 ≈ Σ(그날 글별 조회 비중 × 그 글의 체류시간). 15일치로 글별 값을 푼다
+ *       (날짜 수보다 글이 많아 답이 하나로 안 정해지므로, 블로그 평균 쪽으로 살짝 당기는 보정(릿지)을 넣는다).
+ * 통계 화면 탭 하나에서 API만 부른다 (창을 더 열지 않음). 지난 날짜는 바뀌지 않아서 이전 결과를 재사용한다.
+ */
+async function fetchDwell(api, today, prev) {
+  const DAYS = 15;
+  const durJ = await api(`blog/visit/averageDuration?timeDimension=DATE&startDate=${today}`);
+  const rows = rowsOf(durJ, "averageDuration");
+  const days = rows
+    .map((r) => ({ date: r.date, total: num(r.total), friend: num(r.friend), follow: num(r.follow), etc: num(r.etc) }))
+    .filter((r) => r.total > 0)
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .slice(-DAYS);
+  if (!days.length) return null;
+
+  // 날짜별 글 조회수 (지난 날짜는 이전 결과 재사용, 최근 2일만 새로)
+  const prevRank = (prev && prev.dwell && prev.dwell.rank) || {};
+  const recent = new Set([today, ymd(addDays(new Date(today), -1))]);
+  const rank = {};
+  await Promise.all(days.map(async (d) => {
+    if (prevRank[d.date] && !recent.has(d.date)) { rank[d.date] = prevRank[d.date]; return; }
+    try {
+      const j = await api(`blog/daily/rankDetail?timeDimension=DATE&startDate=${d.date}`);
+      rank[d.date] = rowsOf(j, "rankCv").filter((r) => r.date === d.date).map((r) => ({ logNo: String((String(r.uri || "").match(/(\d{9,})/) || [])[1] || ""), title: r.title, cv: num(r.cv) })).filter((r) => r.logNo);
+    } catch { rank[d.date] = prevRank[d.date] || []; }
+  }));
+
+  // 글별 체류시간 추정 (릿지 회귀)
+  const mean = days.reduce((s, d) => s + d.total, 0) / days.length;
+  const views = {}, titles = {};
+  for (const d of days) for (const r of rank[d.date] || []) { views[r.logNo] = (views[r.logNo] || 0) + r.cv; titles[r.logNo] = r.title; }
+  const ids = Object.keys(views).filter((id) => views[id] >= 3).sort((a, b) => views[b] - views[a]).slice(0, 25);
+  const n = ids.length;
+  const posts = [];
+  if (n) {
+    const idx = Object.fromEntries(ids.map((id, i) => [id, i]));
+    const A = Array.from({ length: n }, () => new Array(n).fill(0));
+    const b = new Array(n).fill(0);
+    for (const d of days) {
+      const list = rank[d.date] || [];
+      const tot = list.reduce((s, r) => s + r.cv, 0);
+      if (!tot) continue;
+      const a = new Array(n).fill(0);
+      let other = 0;
+      for (const r of list) { if (idx[r.logNo] !== undefined) a[idx[r.logNo]] += r.cv / tot; else other += r.cv / tot; }
+      const y = d.total - other * mean; // 추정 대상이 아닌 글은 평균으로 본다
+      for (let i = 0; i < n; i++) { if (!a[i]) continue; b[i] += a[i] * y; for (let k = 0; k < n; k++) A[i][k] += a[i] * a[k]; }
+    }
+    const LAMBDA = 0.6;
+    for (let i = 0; i < n; i++) { A[i][i] += LAMBDA; b[i] += LAMBDA * mean; }
+    const x = solve(A, b);
+    ids.forEach((id, i) => posts.push({ logNo: id, title: titles[id], views: views[id], est: Math.max(0, Math.round(x[i])), sure: views[id] >= 15 ? "보통" : "낮음" }));
+    posts.sort((p, q) => q.est - p.est);
+  }
+  const avg = (k) => Math.round(days.reduce((s, d) => s + d[k], 0) / days.length);
+  return { days, mean: Math.round(mean), friendAvg: avg("friend"), followAvg: avg("follow"), etcAvg: avg("etc"), posts, rank };
+}
+const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+/** 작은 연립방정식 (가우스 소거) */
+function solve(A, b) {
+  const n = b.length;
+  const M = A.map((row, i) => [...row, b[i]]);
+  for (let c = 0; c < n; c++) {
+    let p = c;
+    for (let r = c + 1; r < n; r++) if (Math.abs(M[r][c]) > Math.abs(M[p][c])) p = r;
+    [M[c], M[p]] = [M[p], M[c]];
+    const v = M[c][c] || 1e-9;
+    for (let k = c; k <= n; k++) M[c][k] /= v;
+    for (let r = 0; r < n; r++) if (r !== c && M[r][c]) { const f = M[r][c]; for (let k = c; k <= n; k++) M[r][k] -= f * M[c][k]; }
+  }
+  return M.map((row) => row[n]);
 }
 
 module.exports = { refresh, getState, getCached, analyze, suggestGoals, getGoals, setGoals, getHistory, setMemo };

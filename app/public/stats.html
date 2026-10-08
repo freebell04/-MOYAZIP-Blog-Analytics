@@ -438,6 +438,8 @@ function render() {
 
     <section class="card" id="early"></section>
 
+    <section class="card" id="dwell"></section>
+
     <section class="card">
       <h2>📌 앞으로 이렇게 올려보세요</h2>
       <p class="sub">위 숫자로 계산한 기본 분석이에요 · 회색 글씨는 지금 상황, 굵은 글씨는 해볼 일이에요</p>
@@ -469,6 +471,7 @@ function render() {
   renderQueries();
   renderGoals();
   renderEarly();
+  renderDwell();
   renderRecords();
   renderTrends();
 }
@@ -639,6 +642,41 @@ function renderGoals() {
 }
 
 // ---------------- 글별 초반 성과 ----------------
+// ⏱ 체류시간 (블로그 전체는 네이버 값 그대로, 글별은 추정)
+const mmss = (sec) => { sec = Math.round(sec || 0); return sec >= 60 ? `${Math.floor(sec / 60)}분 ${String(sec % 60).padStart(2, "0")}초` : `${sec}초`; };
+function renderDwell() {
+  const el = $("#dwell");
+  const w = S.data.dwell;
+  if (!w || !w.days || !w.days.length) { el.innerHTML = `<h2>⏱ 체류시간</h2><p class="muted">[새로 불러오기]를 누르면 체류시간을 분석해요.</p>`; return; }
+  const last = w.days[w.days.length - 1];
+  const max = Math.max(...w.days.map((d) => d.total), 1);
+  const bars = w.days.map((d) => `<div title="${md(d.date)} · ${mmss(d.total)}" style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px">
+      <div style="width:100%;max-width:26px;height:${Math.max(4, (d.total / max) * 90)}px;background:${d.total >= w.mean ? "#10b981" : "#a7f3d0"};border-radius:4px 4px 0 0"></div>
+      <small class="muted" style="font-size:10px">${md(d.date)}</small></div>`).join("");
+  const seg = (label, v) => `<div class="kpi" style="flex:1;min-width:110px;background:#f8fafc;border-radius:10px;padding:8px 10px"><small class="muted">${label}</small><div style="font-weight:700;font-size:16px">${v ? mmss(v) : "-"}</div></div>`;
+  const best = w.posts.slice(0, 1)[0], worst = w.posts.length > 2 ? w.posts[w.posts.length - 1] : null;
+  const tips = [];
+  if (w.friendAvg && w.etcAvg) tips.push(w.friendAvg > w.etcAvg
+    ? `이웃은 평균 ${mmss(w.friendAvg)}, 검색 등 그 외 방문자는 ${mmss(w.etcAvg)} 머물러요. 검색으로 온 사람이 더 오래 읽게 글 첫머리에 결론·요약을 먼저 보여주세요.`
+    : `검색 등 그 외 방문자(${mmss(w.etcAvg)})가 이웃(${mmss(w.friendAvg)})보다 오래 읽어요. 검색 유입 글의 정보가 충실하다는 뜻이에요.`);
+  if (best && worst && best.est > worst.est) tips.push(`'${best.title.slice(0, 22)}'이(가) 가장 오래 읽힌 것으로 보여요. 이 글의 구성(소제목·사진·표)을 다른 글에도 써보세요.`);
+  el.innerHTML = `<h2>⏱ 체류시간</h2>
+    <p class="sub">방문자가 블로그에 머문 평균 시간이에요 (최근 ${w.days.length}일, 네이버 통계 기준). 진한 막대 = 평균(${mmss(w.mean)})보다 오래 머문 날.</p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin:8px 0">${seg("최근 하루 (" + md(last.date) + ")", last.total)}${seg("15일 평균", w.mean)}${seg("이웃", w.friendAvg)}${seg("팔로워", w.followAvg)}${seg("그 외(검색 등)", w.etcAvg)}</div>
+    <div style="display:flex;align-items:flex-end;gap:3px;height:110px;margin:6px 0 12px">${bars}</div>
+    ${tips.length ? `<ul style="margin:0 0 12px;padding-left:18px;line-height:1.7">${tips.map((t) => `<li>${esc(t)}</li>`).join("")}</ul>` : ""}
+    <h3 style="font-size:14px;margin:6px 0 4px">글별 체류시간 (추정)</h3>
+    <p class="sub">네이버는 글별 체류시간을 따로 알려주지 않아요. 날짜별 평균 체류시간과 그날 어떤 글이 읽혔는지를 엮어서 추정한 값이라 참고용이에요 (조회수가 적은 글일수록 부정확).</p>
+    ${w.posts.length ? `<div class="scroll-x"><table class="early">
+      <tr><th style="text-align:left">글</th><th>추정 체류</th><th>평균 대비</th><th>${w.days.length}일 조회</th><th>정확도</th></tr>
+      ${w.posts.map((p) => {
+        const diff = w.mean ? Math.round(((p.est - w.mean) / w.mean) * 100) : 0;
+        return `<tr><td class="t">${(() => { const own = (S.data.posts || []).find((x) => String(x.logNo) === p.logNo); return own ? `<a href="${esc(own.link)}" target="_blank" rel="noopener" style="color:inherit">${esc(p.title)}</a>` : esc(p.title); })()}</td>
+          <td><b>${mmss(p.est)}</b></td><td><span class="delta ${diff >= 0 ? "up" : "down"}">${diff >= 0 ? "+" : ""}${diff}%</span></td><td>${fmt(p.views)}</td><td>${p.sure}</td></tr>`;
+      }).join("")}
+    </table></div>` : `<p class="muted">추정할 만큼 조회된 글이 아직 없어요 (15일 동안 3회 이상).</p>`}`;
+}
+
 function renderEarly() {
   const el = $("#early");
   const e = S.data.early;
