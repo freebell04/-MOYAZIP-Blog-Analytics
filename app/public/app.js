@@ -525,7 +525,8 @@ async function pollAiChat() {
     clearInterval(aiPollTimer);
     if (aiBusy) { aiBusy = false; busyOff(); }
     setAiButtons(false);
-    await fetch("/api/ai-chat/taken", { method: "POST" }).catch(() => {});
+    const claim = await fetch("/api/ai-chat/taken", { method: "POST" }).then((r) => r.json()).catch(() => ({ claimed: true }));
+    if (claim.claimed === false) { line.textContent = `✅ ${st.name}의 완성본은 다른 창(또는 탭)에 열린 이 프로그램 화면이 가져갔어요. 그 화면에서 이어서 진행돼요.`; return; } // 화면이 두 개 열려 있을 때 중복으로 쓰지 않게
     if (isFormat) {
       const r = await fetch("/api/format", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(st.result) })
         .then((r) => r.json())

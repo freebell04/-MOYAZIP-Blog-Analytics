@@ -424,8 +424,7 @@ app.post("/api/format/analyze", async (req, res) => {
   }
 });
 app.post("/api/ai-chat/taken", (req, res) => {
-  aiChat.markTaken();
-  res.json({ success: true });
+  res.json({ success: true, claimed: aiChat.markTaken() });
 });
 
 app.get("/api/handoff", (req, res) => {
@@ -452,10 +451,17 @@ app.post("/api/images", async (req, res) => {
 // --- 네이버 블로그 임시저장 ---
 // title + introLines(3) + sections(5)가 오면 템플릿의 정확한 자리에 채워 넣고,
 // 그게 없으면(구버전 호출 호환) title + body를 그냥 통짜로 입력한다.
+let lastDraft = { sig: "", at: 0 };
 app.post("/api/save-draft", async (req, res) => {
   const { title, body, introLines, sectionHeadingLines, sections, imagePaths, useTemplate, continueDraft } = req.body;
   if (!title) return res.status(400).json({ error: "title이 필요합니다." });
   if (!body && !sections) return res.status(400).json({ error: "body 또는 sections가 필요합니다." });
+  // 이미 글쓰기 창에 쓰는 중이면 또 시작하지 않는다 (같은 에디터에 두 번 겹쳐 써져 중복·오타가 생긴다)
+  if (require("./lib/blogEditor").isBusy()) return res.status(409).json({ error: "이미 블로그 글쓰기 창에 글을 쓰는 중이에요. 끝날 때까지 기다려주세요.", busy: true });
+  // 같은 글을 방금(2분 안에) 저장하기 시작했으면 한 번 더 하지 않는다 (같은 글을 고쳐 다시 저장할 땐 continueDraft)
+  const sig = String(title) + "|" + JSON.stringify(sections || body).length;
+  if (!continueDraft && lastDraft.sig === sig && Date.now() - lastDraft.at < 120000) return res.status(409).json({ error: "같은 글을 방금 저장했어요. 중복 저장은 막았어요.", duplicate: true });
+  lastDraft = { sig, at: Date.now() };
 
   try {
     // 글자 그대로 들어온 \n 같은 표시는 진짜 줄바꿈으로 바꿔서 입력한다 (AI가 JSON을 이중으로 이스케이프해서 줄 때가 있다)

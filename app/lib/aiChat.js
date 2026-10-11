@@ -493,7 +493,11 @@ async function grab() {
 
 /** 앱이 결과를 가져간 뒤 다시 가져가지 않게 표시 */
 function markTaken() {
-  if (state.status === "done") state.status = "taken";
+  // 결과는 딱 한 번만 넘겨준다: 프로그램 화면이 두 곳(예: 엣지와 크롬)에 열려 있으면 둘 다 "완성"을 보고
+  // 동시에 글쓰기를 시작해서, 같은 글이 두 번(서로 섞여 오타까지) 써졌다. 먼저 가져간 쪽만 true
+  if (state.status !== "done") return false;
+  state.status = "taken";
+  return true;
 }
 
 /** 대화 중인 AI 탭을 앞으로 가져온다 */
