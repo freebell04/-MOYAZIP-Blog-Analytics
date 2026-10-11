@@ -418,6 +418,30 @@ async function liveLoggedIn() {
   }
 }
 
+/** 자동화 크롬에 지금 로그인된 네이버 계정 {userId, nickname} (모르면 null). 10초 동안은 다시 묻지 않는다 */
+let whoCache = { at: 0, v: null };
+async function loggedInUser() {
+  if (Date.now() - whoCache.at < 10000) return whoCache.v;
+  if (!(await isCdpUp())) return null;
+  let ws;
+  try {
+    const v = await (await fetch(`${CDP_URL}/json/version`, { signal: AbortSignal.timeout(3000) })).json();
+    ws = await require("./like").connectPage(v.webSocketDebuggerUrl);
+    const r = await ws.send("Storage.getCookies");
+    const cookie = (r.cookies || []).filter((c) => /naver\.com$/.test(c.domain.replace(/^\./, ""))).map((c) => `${c.name}=${c.value}`).join("; ");
+    if (!/NID_AUT=/.test(cookie)) { whoCache = { at: Date.now(), v: null }; return null; }
+    const j = await (await fetch("https://m.blog.naver.com/api/current-user", { headers: { cookie, referer: "https://m.blog.naver.com/", "user-agent": "Mozilla/5.0" }, signal: AbortSignal.timeout(5000) })).json();
+    const x = (j && j.result) || {};
+    const out = x.loggedIn && x.userId ? { userId: String(x.userId), nickname: String(x.nickname || "") } : null;
+    whoCache = { at: Date.now(), v: out };
+    return out;
+  } catch {
+    return null;
+  } finally {
+    try { ws && ws.close(); } catch {}
+  }
+}
+
 function getLoginWatchState() {
   return watchState;
 }
@@ -448,6 +472,7 @@ async function openVisibleContext() {
 module.exports = {
   hasSession,
   liveLoggedIn,
+  loggedInUser,
   clearSession,
   startLoginWatch,
   getLoginWatchState,

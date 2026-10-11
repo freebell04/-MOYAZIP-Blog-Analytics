@@ -451,6 +451,28 @@ app.post("/api/images", async (req, res) => {
 // --- 네이버 블로그 임시저장 ---
 // title + introLines(3) + sections(5)가 오면 템플릿의 정확한 자리에 채워 넣고,
 // 그게 없으면(구버전 호출 호환) title + body를 그냥 통짜로 입력한다.
+// 네이버에 로그인된 계정과 프로그램에 설정된 블로그가 다른지 (다르면 다른 사람 블로그에 글을 쓰려다 실패한다)
+app.get("/api/account-check", async (req, res) => {
+  const who = await session.loggedInUser().catch(() => null);
+  const configured = config.blogId();
+  res.json({ configured, loggedIn: who && who.userId, nickname: who && who.nickname, mismatch: !!(who && configured && who.userId.toLowerCase() !== configured.toLowerCase()) });
+});
+// [로그인된 블로그로 바꾸기]: 설정을 로그인된 계정으로 바꾸고 다시 시작한다 (통계·이웃도 새 블로그 기준이 되게)
+app.post("/api/account-switch", async (req, res) => {
+  const who = await session.loggedInUser().catch(() => null);
+  if (!who) return res.status(400).json({ error: "네이버에 로그인된 계정을 확인하지 못했어요. [네이버 로그인]을 먼저 해주세요." });
+  config.save({ blogId: who.userId, blogName: who.nickname || who.userId });
+  res.json({ success: true, blogId: who.userId });
+  setTimeout(() => process.exit(3), 300);
+});
+/** 글을 쓰기 직전: 로그인된 계정과 설정이 다르면 로그인된 계정 블로그로 쓴다 (내 블로그에만 글을 쓸 수 있으므로) */
+async function followLoggedInBlog() {
+  const who = await session.loggedInUser().catch(() => null);
+  const cur = config.blogId();
+  if (!who || !cur || who.userId.toLowerCase() === cur.toLowerCase()) return null;
+  config.save({ blogId: who.userId, blogName: who.nickname || who.userId });
+  return { from: cur, to: who.userId };
+}
 let lastDraft = { sig: "", at: 0 };
 app.post("/api/save-draft", async (req, res) => {
   const { title, body, introLines, sectionHeadingLines, sections, imagePaths, useTemplate, continueDraft } = req.body;
@@ -466,6 +488,7 @@ app.post("/api/save-draft", async (req, res) => {
   try {
     // 글자 그대로 들어온 \n 같은 표시는 진짜 줄바꿈으로 바꿔서 입력한다 (AI가 JSON을 이중으로 이스케이프해서 줄 때가 있다)
     const fix = (v) => (typeof v === "string" ? v.replace(/\\r\\n|\\n|\\r/g, "\n").replace(/\\t/g, " ").replace(/\\"/g, '"') : Array.isArray(v) ? v.map(fix) : v && typeof v === "object" ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, fix(x)])) : v);
+    const switched = await followLoggedInBlog();
     const result = await saveDraftToNaver({
       title: fix(title),
       bodyHtml: body,
@@ -478,7 +501,7 @@ app.post("/api/save-draft", async (req, res) => {
       continueDraft: continueDraft === true,
     });
     usage.track("draft");
-    res.json(result);
+    res.json(switched ? { ...result, switchedBlog: switched } : result);
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

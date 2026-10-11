@@ -344,7 +344,9 @@ $("#save-draft-btn").addEventListener("click", async () => {
   $("#save-draft-btn").disabled = false;
   $("#save-status").textContent = r.error
     ? "오류: " + r.error
-    : "본문 임시저장 완료! 네이버 에디터에서 검토/수정 후, 아래 4단계에서 목차·요약을 채워주세요.";
+    : "본문 임시저장 완료! 네이버 에디터에서 검토/수정 후, 아래 4단계에서 목차·요약을 채워주세요." +
+      (r.switchedBlog ? ` (네이버에 로그인된 계정이 '${r.switchedBlog.to}'라서, 프로그램의 블로그 설정도 '${r.switchedBlog.from}' → '${r.switchedBlog.to}'로 바꿨어요)` : "");
+  if (r.switchedBlog) checkAccount();
   if (!r.error) {
     $("#step-finalize").hidden = false;
     setActiveStep(4);
@@ -493,6 +495,31 @@ document.addEventListener("click", async (e) => {
 });
 
 let lastPopStart = null;
+// 네이버에 로그인된 계정 ≠ 프로그램에 설정된 블로그면 알려준다 (계정을 바꾼 경우: 예전 블로그로 글을 쓰려다 실패함)
+async function checkAccount() {
+  const r = await fetch("/api/account-check").then((x) => x.json()).catch(() => null);
+  const box = $("#account-warn");
+  if (!box) return;
+  if (!r || !r.mismatch) { box.style.display = "none"; return; }
+  const esc2 = (s) => String(s || "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  box.innerHTML = `⚠️ <b>블로그 계정이 서로 달라요.</b> 크롬에 로그인된 네이버 계정은 <b>${esc2(r.nickname || r.loggedIn)} (${esc2(r.loggedIn)})</b>인데, 프로그램은 <b>${esc2(r.configured)}</b> 블로그로 설정돼 있어요.<br>
+    지금 로그인된 블로그에 글을 쓰려면 → <button id="account-switch" class="btn btn-primary" style="font-size:13px;padding:5px 12px">${esc2(r.loggedIn)} 블로그로 바꾸기</button>
+    <small class="muted">예전 블로그(${esc2(r.configured)})를 계속 쓰려면 위 [네이버 로그인]으로 그 계정에 다시 로그인해주세요.</small>`;
+  box.style.display = "block";
+}
+document.addEventListener("click", async (e) => {
+  const b = e.target.closest("#account-switch");
+  if (!b) return;
+  b.disabled = true;
+  b.textContent = "바꾸는 중... (프로그램이 다시 켜져요)";
+  const r = await fetch("/api/account-switch", { method: "POST" }).then((x) => x.json()).catch((er) => ({ error: er.message }));
+  if (r.error) { b.disabled = false; b.textContent = "⚠ " + r.error; return; }
+  // 다시 켜질 때까지 기다렸다가 새로고침
+  const t = setInterval(async () => { try { const s = await fetch("/api/setup", { cache: "no-store" }).then((x) => x.json()); if (s.configured) { clearInterval(t); location.reload(); } } catch {} }, 1500);
+});
+setTimeout(checkAccount, 1500);
+window.addEventListener("focus", () => checkAccount());
+
 async function pollAiChat() {
   const st = await fetch("/api/ai-chat/status").then((r) => r.json()).catch(() => null);
   if (!st || st.status === "idle" || st.status === "taken") return;

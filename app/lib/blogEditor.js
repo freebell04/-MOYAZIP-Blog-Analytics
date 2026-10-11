@@ -3,7 +3,8 @@
 // 실제로 동작하는지 확인 후 필요하면 조정해야 합니다.
 const { openVisibleContext } = require("./session");
 
-const BLOG_ID = require("./config").blogId();
+// 글을 쓸 블로그: 쓸 때마다 설정 파일에서 읽는다 (네이버 계정을 바꿔서 설정이 바뀌어도 다시 켤 필요 없게)
+const blogIdNow = () => require("./config").blogId();
 
 const CONTENT_PLACEHOLDER = "내용을 입력하세요.";
 const SECTION_MARKERS = ["꒰①꒱", "꒰②꒱", "꒰③꒱", "꒰④꒱", "꒰⑤꒱"];
@@ -686,7 +687,7 @@ async function insertTableAtPlaceholder(frame, page, tableIndex, rows, docIndex 
  * @param {{title: string, bodyHtml: string, imagePaths: string[]}} post
  */
 async function saveDraftToNaver(post) {
-  if (!BLOG_ID) throw new Error("환경변수 NAVER_BLOG_ID가 설정되어 있지 않습니다.");
+  if (!blogIdNow()) throw new Error("환경변수 NAVER_BLOG_ID가 설정되어 있지 않습니다.");
 
   // 로그인 때와 같은(눈에 보이는) 디버그 크롬을 그대로 사용 — 사용자가 과정을 볼 수 있게
   const { browser, context } = await openVisibleContext();
@@ -697,7 +698,7 @@ async function saveDraftToNaver(post) {
   try {
     // 직접 글쓰기 URL로 바로 가지 않고, 블로그 홈 → '글쓰기' 버튼 클릭 순서로 진입.
     // 블로그 홈 콘텐츠 자체가 #mainFrame iframe 안에 있고, '글쓰기' 링크도 그 안에 있다.
-    await page.goto(`https://blog.naver.com/${BLOG_ID}`, { waitUntil: "domcontentloaded" });
+    await page.goto(`https://blog.naver.com/${blogIdNow()}`, { waitUntil: "domcontentloaded" });
     await page.waitForTimeout(1500);
     await page.bringToFront().catch(() => {});
 
@@ -881,7 +882,7 @@ async function saveDraftToNaver(post) {
  * 실제 현재 내용을 읽고, Claude로 목차 요약/전체요약을 생성한 뒤 채워 넣고 저장한다.
  */
 async function finalizeTocAndSummary() {
-  if (!BLOG_ID) throw new Error("환경변수 NAVER_BLOG_ID가 설정되어 있지 않습니다.");
+  if (!blogIdNow()) throw new Error("환경변수 NAVER_BLOG_ID가 설정되어 있지 않습니다.");
   const { askClaude, extractJson } = require("./claude");
 
   const { browser, context } = await openVisibleContext();
@@ -890,7 +891,7 @@ async function finalizeTocAndSummary() {
   require("./session").notifyChrome("블로그 글쓰기 창");
 
   try {
-    await page.goto(`https://blog.naver.com/${BLOG_ID}`, { waitUntil: "domcontentloaded" });
+    await page.goto(`https://blog.naver.com/${blogIdNow()}`, { waitUntil: "domcontentloaded" });
     await page.waitForTimeout(1500);
     await page.bringToFront().catch(() => {});
 
@@ -979,7 +980,7 @@ async function finalizeTocAndSummary() {
  * 저장도 하지 않는다 — 사용자가 눈에 보이는 그 크롬 창에서 직접 타이핑하도록 열어만 둔다.
  */
 async function openTemplateEditor() {
-  if (!BLOG_ID) throw new Error("환경변수 NAVER_BLOG_ID가 설정되어 있지 않습니다.");
+  if (!blogIdNow()) throw new Error("환경변수 NAVER_BLOG_ID가 설정되어 있지 않습니다.");
 
   const { browser, context } = await openVisibleContext();
   const page = await context.newPage();
@@ -988,7 +989,7 @@ async function openTemplateEditor() {
 
   // 주의: 여기서는 browser.close()를 하지 않는다 — 이건 CDP 연결 해제일 뿐이라 실제로는
   // 상관없지만, 굳이 연결을 끊을 필요도 없으므로 함수가 끝나도 그대로 열어둔 채로 반환한다.
-  await page.goto(`https://blog.naver.com/${BLOG_ID}`, { waitUntil: "domcontentloaded" });
+  await page.goto(`https://blog.naver.com/${blogIdNow()}`, { waitUntil: "domcontentloaded" });
   await page.waitForTimeout(1500);
   await page.bringToFront().catch(() => {});
 
