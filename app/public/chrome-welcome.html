@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>블로그 도우미 전용 크롬</title>
+<style>
+  :root { --g: #03c75a; --gd: #029b46; --ink: #1f2937; --soft: #6b7280; --line: #e5e7eb; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #f0fdf4; color: var(--ink); font-family: "Noto Sans KR", "Malgun Gothic", system-ui, sans-serif; }
+  .w { max-width: 640px; margin: 0 auto; padding: 40px 18px 60px; }
+  .badge { display: inline-block; background: var(--g); color: #fff; font-weight: 700; border-radius: 999px; padding: 6px 14px; font-size: 14px; }
+  h1 { font-size: 26px; margin: 14px 0 8px; }
+  p { line-height: 1.75; margin: 0 0 10px; }
+  .card { background: #fff; border: 1px solid var(--line); border-radius: 16px; padding: 20px 22px; margin: 16px 0; }
+  .step { display: flex; gap: 12px; align-items: flex-start; padding: 10px 0; border-top: 1px dashed var(--line); }
+  .step:first-of-type { border-top: 0; }
+  .n { flex: 0 0 28px; height: 28px; border-radius: 50%; background: var(--g); color: #fff; font-weight: 700; display: flex; align-items: center; justify-content: center; }
+  a.btn { display: inline-block; margin-top: 6px; background: var(--g); color: #fff; text-decoration: none; font-weight: 700; padding: 8px 14px; border-radius: 10px; font-size: 14px; }
+  a.btn.o { background: #fff; color: var(--gd); border: 1.5px solid var(--g); }
+  small { color: var(--soft); }
+</style>
+</head>
+<body>
+<div class="w">
+  <span class="badge">🟢 블로그 도우미 전용 크롬</span>
+  <h1>이 크롬 창은 블로그 도우미가 쓰는 창이에요</h1>
+  <p>평소 쓰시던 크롬과 <b>따로</b>예요. 그래서 처음 한 번만 여기서 로그인해 두면, 그다음부터는 프로그램이 알아서 이 창으로 글을 쓰고 이웃 글을 열어요.</p>
+
+  <div class="card">
+    <div class="step"><div class="n">1</div><div><b>네이버 로그인</b> (꼭 필요해요)<br><small>"로그인 상태 유지"를 켜 두면 다음부터 다시 안 해도 돼요.</small><br>
+      <a class="btn" href="https://nid.naver.com/nidlogin.login?url=https%3A%2F%2Fwww.naver.com">네이버 로그인하기</a></div></div>
+    <div class="step"><div class="n">2</div><div><b>글 써줄 AI에 로그인</b> (쓰는 것 하나만)<br><small>평소 쓰는 AI 하나만 로그인하면 돼요.</small><br>
+      <a class="btn o" href="https://chatgpt.com/">ChatGPT 로그인</a> <a class="btn o" href="https://gemini.google.com/app">Gemini 로그인</a></div></div>
+    <div class="step"><div class="n">3</div><div><b>이 창은 닫지 말고 그대로 두세요</b><br><small>작업 표시줄에 내려 두면 돼요. 닫아도 프로그램이 필요할 때 다시 열어요.</small></div></div>
+  </div>
+
+  <p><small>💡 크롬 아이콘이 작업 표시줄에 두 개 보이면, 하나는 평소 크롬이고 하나는 이 전용 크롬이에요. 창 제목에 "블로그 도우미 전용 크롬"이 보이는 쪽이 이 창이에요.</small></p>
+</div>
+</body>
+</html>

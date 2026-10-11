@@ -205,7 +205,7 @@ async function ensureWindow() {
   if (!chromePath) return;
   // 9222 포트를 실제로 쥐고 있는 크롬이 쓰는 프로필 폴더로 연다 (다른 폴더에 설치한 프로그램의 크롬일 수도 있어서)
   const dir = runningProfileDir() || CHROME_PROFILE_DIR;
-  spawn(chromePath, [`--user-data-dir=${dir}`, "about:blank"], { detached: true, stdio: "ignore" }).unref();
+  spawn(chromePath, [`--user-data-dir=${dir}`, "--window-name=블로그 도우미 전용 크롬", "about:blank"], { detached: true, stdio: "ignore" }).unref();
   for (let i = 0; i < 12; i++) {
     await sleep(500);
     if (await hasOpenPage()) return;
@@ -232,7 +232,12 @@ async function ensureDebugChrome(opts = {}) {
       killStaleProfileChrome(); // 첫 시도에 포트가 안 열렸으면, 백그라운드에 남은 크롬을 정리하고 한 번 더
       await sleep(1200);
     }
-    const child = spawn(chromePath, [`--remote-debugging-port=${CDP_PORT}`, `--user-data-dir=${CHROME_PROFILE_DIR}`], {
+    // 평소 쓰는 크롬과 헷갈리지 않게 창 제목을 "블로그 도우미 전용 크롬"으로 붙이고,
+    // 이 전용 크롬을 처음 켜는 거면 무엇을 하는 창인지(로그인 안내) 첫 탭으로 보여준다
+    const firstRun = !fs.existsSync(path.join(CHROME_PROFILE_DIR, "Default"));
+    const args = [`--remote-debugging-port=${CDP_PORT}`, `--user-data-dir=${CHROME_PROFILE_DIR}`, "--window-name=블로그 도우미 전용 크롬", "--no-first-run", "--no-default-browser-check"];
+    if (firstRun) args.push(`http://localhost:${process.env.PORT || 3300}/chrome-welcome.html`);
+    const child = spawn(chromePath, args, {
       detached: true,
       stdio: "ignore",
     });
@@ -449,9 +454,22 @@ function getLoginWatchState() {
 /**
  * 저장된 세션으로 로그인된 브라우저 컨텍스트를 연다 (항상 headless:true로 실행, 화면에 안 보임).
  */
+/**
+ * 화면에 안 보이는 브라우저 (글 검색·본문 읽기용).
+ * 컴퓨터에 깔린 크롬(없으면 엣지)을 그대로 쓴다 → 설치할 때 Playwright 전용 브라우저(약 100MB, 2~5분)를 따로 받지 않아도 된다.
+ * 깔린 브라우저로 못 켜면 Playwright 전용 브라우저로 (받아 둔 경우).
+ */
+async function launchHeadless(opts = {}) {
+  const exe = findChromePath();
+  if (exe) {
+    try { return await chromium.launch({ ...opts, headless: true, executablePath: exe }); } catch {}
+  }
+  return chromium.launch({ ...opts, headless: true });
+}
+
 async function openLoggedInContext() {
   if (!hasSession()) throw new Error("저장된 네이버 로그인 세션이 없습니다. 먼저 로그인해주세요.");
-  const browser = await chromium.launch({ headless: true });
+  const browser = await launchHeadless();
   const context = await browser.newContext({ storageState: SESSION_PATH });
   return { browser, context };
 }
@@ -479,6 +497,7 @@ module.exports = {
   openLoggedInContext,
   openVisibleContext,
   ensureDebugChrome,
+  launchHeadless,
   newBackgroundPage,
   notifyChrome,
   getChromeNotice,

@@ -7,7 +7,7 @@ const chromium = new Proxy({}, { get: (_, k) => { const c = require("playwright"
  * @returns {Promise<{news: Array, blogs: Array}>}
  */
 async function searchNaver(keyword) {
-  const browser = await chromium.launch({ headless: true });
+  const browser = await require("./session").launchHeadless();
   const page = await browser.newPage();
   await page.goto(`https://search.naver.com/search.naver?query=${encodeURIComponent(keyword)}`, {
     waitUntil: "domcontentloaded",
@@ -176,7 +176,7 @@ let fallbackChain = Promise.resolve();
 async function browserCards(url) {
   const run = async () => {
     fallback ||= (async () => {
-      const browser = await chromium.launch({ headless: true });
+      const browser = await require("./session").launchHeadless();
       return { browser, page: await browser.newPage() };
     })();
     const { page } = await fallback;
@@ -369,7 +369,7 @@ async function fetchArticleText(url) {
   // 먼저 일반 요청으로 본문을 읽어본다 (브라우저를 켜지 않아 0.3~1초). 너무 짧거나 못 읽으면 예전처럼 브라우저로 읽는다.
   const quick = await fastArticleText(url).catch(() => "");
   if (quick && quick.length >= 200) return quick.slice(0, 4000);
-  const browser = await chromium.launch({ headless: true });
+  const browser = await require("./session").launchHeadless();
   const page = await browser.newPage();
   try {
     await page.goto(url, { waitUntil: "domcontentloaded", timeout: 20000 });

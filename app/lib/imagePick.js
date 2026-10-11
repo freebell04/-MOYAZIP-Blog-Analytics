@@ -57,7 +57,7 @@ async function download(src, pageUrl) {
 
 /** 어떤 형식(webp·avif·gif·jpg…)이든 PNG로 바꾼다 (윈도우 클립보드·네이버 에디터에 붙여넣기 쉽게). 너무 크면 가로 2000px로 줄인다. */
 async function toPng(buf, mime) {
-  const browser = await chromium.launch({ headless: true });
+  const browser = await require("./session").launchHeadless();
   try {
     const page = await browser.newPage();
     const url = `data:${mime || "image/png"};base64,${buf.toString("base64")}`;
@@ -83,7 +83,7 @@ async function toPng(buf, mime) {
 
 /** 가로 W × 세로 H 로 맞춘다 (비율이 다르면 가운데를 기준으로 넘치는 부분을 잘라낸다). 결과는 PNG */
 async function toPngSized(buf, mime, W, H) {
-  const browser = await chromium.launch({ headless: true });
+  const browser = await require("./session").launchHeadless();
   try {
     const page = await browser.newPage();
     const url = `data:${mime || "image/png"};base64,${buf.toString("base64")}`;

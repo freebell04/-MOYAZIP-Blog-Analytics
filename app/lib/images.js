@@ -10,7 +10,7 @@ const IMG_DIR = path.join(__dirname, "..", "data", "images");
 if (!fs.existsSync(IMG_DIR)) fs.mkdirSync(IMG_DIR, { recursive: true });
 
 async function searchImageUrls(query, limit = 6) {
-  const browser = await chromium.launch({ headless: true });
+  const browser = await require("./session").launchHeadless();
   const page = await browser.newPage();
   await page.goto(`https://search.naver.com/search.naver?where=image&query=${encodeURIComponent(query)}`, {
     waitUntil: "domcontentloaded",

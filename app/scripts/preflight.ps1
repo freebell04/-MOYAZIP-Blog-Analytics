@@ -124,7 +124,21 @@ function Save-InstallHash {
   Set-Content -Path (Join-Path $app "node_modules\.nbh-pkg-hash") -Value $h -Encoding ASCII
 }
 
+# 컴퓨터에 크롬이나 엣지가 깔려 있으면 프로그램이 그걸 쓰므로, 내부 브라우저(약 100MB, 2~5분)를 따로 받지 않는다
+function Test-SystemBrowser {
+  $paths = @(
+    "$env:ProgramFiles\Google\Chrome\Application\chrome.exe",
+    "${env:ProgramFiles(x86)}\Google\Chrome\Application\chrome.exe",
+    "$env:LOCALAPPDATA\Google\Chrome\Application\chrome.exe",
+    "${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe",
+    "$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe"
+  )
+  foreach ($p in $paths) { if ($p -and (Test-Path $p)) { return $true } }
+  return $false
+}
+
 function Test-PlaywrightChromium {
+  if (Test-SystemBrowser) { return $true }
   $base = Join-Path $env:LOCALAPPDATA "ms-playwright"
   if (-not (Test-Path $base)) { return $false }
   return $null -ne (Get-ChildItem $base -Directory -Filter "chromium_headless_shell-*" -ErrorAction SilentlyContinue | Select-Object -First 1)
