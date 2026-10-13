@@ -803,24 +803,44 @@ async function saveDraftToNaver(post) {
       // 섹션 형태로 온 글은 인용구·구분선을 쓴 깔끔한 기본 틀로 쓴다 (styled:false면 예전처럼 글자만)
       const styledBlocks = !post.bodyHtml && post.sections && post.sections.length && post.styled !== false ? composeStyledBlocks(post) : null;
       const clearBody = async () => {
+        // 일반 글 문단을 눌러야 한다: 인용구 안을 누르고 Ctrl+A를 하면 그 인용구 글자만 선택돼서 나머지가 남는다
+        // (AI 글은 첫 블록이 인용구라, 다시 쓸 때 소제목이 두 번 들어가는 원인이었다)
         const bodyAreaHandle = await frame.locator(":root").evaluateHandle(() => {
-          const paras = Array.from(document.querySelectorAll(".se-component-content .se-text-paragraph"));
-          return paras.find((p) => !p.closest(".se-title-text, .se-documentTitle, .se-table"));
+          const paras = Array.from(document.querySelectorAll(".se-component-content .se-text-paragraph")).filter((p) => !p.closest(".se-title-text, .se-documentTitle, .se-table"));
+          return paras.find((p) => p.closest(".se-component.se-text")) || paras[0];
         });
         const bodyArea = bodyAreaHandle.asElement();
         await bodyArea.scrollIntoViewIfNeeded();
-        await bodyArea.click({ timeout: 15000 });
+        await bodyArea.click({ timeout: 8000 }).catch(() => bodyArea.click({ force: true })); // 깜빡이는 커서가 가로막으면 강제로
         await page.waitForTimeout(300);
-        // 이어쓰기로 연 글에는 이전 내용이 남아 있으므로 본문 전체를 먼저 비운다.
-        await page.keyboard.press("Control+a");
-        await page.keyboard.press("Delete");
-        await page.waitForTimeout(500);
+        // 이어쓰기로 연 글·다시 쓰기 전 글에는 이전 내용이 남아 있으므로 본문 전체를 먼저 비운다.
+        // Ctrl+A → Delete 한 번으로는 인용구·표·구분선이 남는 경우가 있어서(다시 쓰면 소제목이 두 번 들어갔다),
+        // 본문이 정말 비었는지 확인하며 몇 번 더 지운다.
+        const leftover = () => frame.locator(":root").evaluate(() => {
+          const comps = [...document.querySelectorAll(".se-component")].filter((c) => !c.classList.contains("se-documentTitle"));
+          const text = comps.map((c) => { const k = c.cloneNode(true); k.querySelectorAll(".se-placeholder, [class*='placeholder']").forEach((x) => x.remove()); return k.textContent || ""; }).join("").replace(/[​\s]/g, ""); // 빈 줄 안내문(placeholder)은 빼고
+          return comps.filter((c) => !c.classList.contains("se-text")).length + (text ? 1 : 0);
+        }).catch(() => 0);
+        for (let k = 0; k < 4; k++) {
+          await page.keyboard.press("Control+a");
+          await page.keyboard.press("Delete");
+          await page.waitForTimeout(400);
+          if (!(await leftover())) break;
+          await page.keyboard.press("Control+a");
+          await page.keyboard.press("Backspace");
+          await page.waitForTimeout(400);
+          if (!(await leftover())) break;
+          const again = await frame.locator(":root").evaluateHandle(() => { const ps = [...document.querySelectorAll(".se-component-content .se-text-paragraph")].filter((p) => !p.closest(".se-title-text, .se-documentTitle, .se-table")); return ps.find((p) => p.closest(".se-component.se-text")) || ps[0]; });
+          const el = again.asElement();
+          if (el) await el.click({ timeout: 5000 }).catch(() => el.click({ force: true }).catch(() => {}));
+        }
       };
 
       // 드물게 입력 도중 줄이 통째로 사라지는 경우가 있어, 원문과 대조해서 틀리면 한 번 다시 쓰고
       // 그래도 틀리면 망가진 글을 저장하지 않도록 에러를 낸다.
       let check = { ok: false };
-      for (let attempt = 0; attempt < 2 && !check.ok; attempt++) {
+      const reasons = [];
+      for (let attempt = 0; attempt < 3 && !check.ok; attempt++) {
         await clearBody();
         if (styledBlocks) {
           await writeStyledBody(frame, page, styledBlocks);
@@ -829,9 +849,10 @@ async function saveDraftToNaver(post) {
           await writePlainBody(frame, page, bodyText);
           check = await verifyPlainBody(frame, bodyText);
         }
+        if (!check.ok) reasons.push(check.reason);
       }
       if (!check.ok) {
-        throw new Error(`본문이 원문과 다르게 입력돼서 저장하지 않았습니다 (${check.reason})`);
+        throw new Error(`본문이 원문과 다르게 입력돼서 저장하지 않았습니다 (${[...new Set(reasons)].join(" → ")})`);
       }
 
       // 제목은 본문을 다 쓴 뒤에 마지막으로 입력한다. 본문 쪽 Ctrl+A가 제목까지
