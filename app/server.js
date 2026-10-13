@@ -667,6 +667,14 @@ app.post("/api/neighbors/suggest", async (req, res) => {
 });
 
 // --- 성과 통계 ---
+// 🗓 발행 기록: 지금까지 올린 글의 날짜 (기간·목표 체크용, 크롬 창 없이 공개 글 목록으로)
+app.get("/api/post-log", async (req, res) => {
+  try {
+    res.json(await require("./lib/postLog").load(config.blogId(), { refresh: req.query.refresh === "1" }));
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
 app.get("/api/stats", (req, res) => {
   const data = stats.getCached();
   res.json({

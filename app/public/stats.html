@@ -369,6 +369,8 @@ function render() {
       <div class="insights">${a.insights.map(insightCard).join("")}</div>
     </section>
 
+    <section class="card" id="postlog"></section>
+
     <section class="card">
       <h2>일별 조회수 (최근 30일)</h2>
       <p class="sub">점은 글을 발행한 날이에요. 마우스를 올리면 그날 공감·댓글과 올린 글이 보여요.</p>
@@ -472,6 +474,7 @@ function render() {
   renderGoals();
   renderEarly();
   renderDwell();
+  if (PL.posts) renderPostLog(); else loadPostLog();
   renderRecords();
   renderTrends();
 }
@@ -642,6 +645,113 @@ function renderGoals() {
 }
 
 // ---------------- 글별 초반 성과 ----------------
+// 🗓 발행 기록: 기간을 고르면 그동안 글을 몇 개·며칠 올렸는지, 주마다 목표(주 N개)를 지켰는지 보여준다
+const PL = { posts: null, start: "", end: "", goal: 3, loading: false, error: "" };
+const plAdd = (s, n) => { const d = new Date(s + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+const plToday = () => new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10);
+const plDays = (a, b) => Math.round((new Date(b + "T00:00:00Z") - new Date(a + "T00:00:00Z")) / 86400000) + 1;
+try { const g = Number(localStorage.getItem("pl.goal")); if (g >= 1 && g <= 14) PL.goal = g; } catch {}
+async function loadPostLog(refresh = false) {
+  PL.loading = true; renderPostLog();
+  const r = await fetch("/api/post-log" + (refresh ? "?refresh=1" : "")).then((x) => x.json()).catch((e) => ({ error: e.message }));
+  PL.loading = false;
+  PL.error = r.error || "";
+  if (!r.error) PL.posts = r.posts || [];
+  if (!PL.end) { PL.end = plToday(); PL.start = plAdd(PL.end, -29); }
+  renderPostLog();
+}
+function plPreset(k) {
+  const t = plToday();
+  if (k === "30") { PL.start = plAdd(t, -29); PL.end = t; }
+  if (k === "90") { PL.start = plAdd(t, -89); PL.end = t; }
+  if (k === "month") { PL.start = t.slice(0, 8) + "01"; PL.end = t; }
+  if (k === "lastmonth") { const d = new Date(t.slice(0, 8) + "01T00:00:00Z"); d.setUTCDate(0); PL.end = d.toISOString().slice(0, 10); PL.start = PL.end.slice(0, 8) + "01"; }
+  if (k === "year") { PL.start = t.slice(0, 4) + "-01-01"; PL.end = t; }
+  if (k === "all" && PL.posts && PL.posts.length) { PL.start = PL.posts[0].day; PL.end = t; }
+  renderPostLog();
+}
+function renderPostLog() {
+  const el = $("#postlog");
+  if (!el) return;
+  if (!PL.posts) { el.innerHTML = `<h2>🗓 발행 기록</h2><p class="muted">${PL.loading ? "글 목록을 불러오는 중..." : PL.error ? "⚠ " + esc(PL.error) : ""}</p>`; return; }
+  const s = PL.start, e = PL.end < PL.start ? PL.start : PL.end;
+  const inR = PL.posts.filter((p) => p.day >= s && p.day <= e);
+  const byDay = {};
+  for (const p of inR) (byDay[p.day] = byDay[p.day] || []).push(p);
+  const total = plDays(s, e);
+  const wrote = Object.keys(byDay).length;
+  // 가장 길게 쉰 기간
+  let gap = 0, gapFrom = "", run = 0, runFrom = "";
+  for (let d = s; d <= e; d = plAdd(d, 1)) { if (byDay[d]) { run = 0; } else { if (!run) runFrom = d; run++; if (run > gap) { gap = run; gapFrom = runFrom; } } }
+  // 주마다 (시작일부터 7일씩)
+  const weeks = [];
+  for (let w = s; w <= e; w = plAdd(w, 7)) { const we = plAdd(w, 6) > e ? e : plAdd(w, 6); weeks.push({ from: w, to: we, n: inR.filter((p) => p.day >= w && p.day <= we).length, full: plDays(w, we) === 7 }); }
+  const failed = weeks.filter((w) => w.n < PL.goal);
+  // 달마다
+  const months = {};
+  for (const p of inR) months[p.day.slice(0, 7)] = (months[p.day.slice(0, 7)] || 0) + 1;
+  const mMax = Math.max(1, ...Object.values(months));
+  // 달력 (기간의 각 달)
+  const cal = [];
+  for (let m = s.slice(0, 7); m <= e.slice(0, 7); ) {
+    const first = m + "-01";
+    const dow = new Date(first + "T00:00:00Z").getUTCDay();
+    const last = plAdd(plAdd(first, 32).slice(0, 8) + "01", -1);
+    let cells = "";
+    for (let i = 0; i < dow; i++) cells += `<div></div>`;
+    for (let d = first; d <= last; d = plAdd(d, 1)) {
+      const n = (byDay[d] || []).length, out = d < s || d > e;
+      cells += `<div title="${d}${n ? " · " + n + "개: " + esc(byDay[d].map((p) => p.title).join(" / ")) : ""}" style="aspect-ratio:1;border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:11px;${out ? "opacity:.25;" : ""}background:${n ? (n > 1 ? "#059669" : "#34d399") : "#f1f5f9"};color:${n ? "#fff" : "#94a3b8"};font-weight:${n ? 700 : 400}">${Number(d.slice(8))}</div>`;
+    }
+    cal.push(`<div style="min-width:170px;flex:1;max-width:240px"><div style="font-weight:700;font-size:13px;margin-bottom:4px">${m.replace("-", "년 ")}월</div>
+      <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:3px;font-size:10px;color:#94a3b8;text-align:center;margin-bottom:3px">${"일월화수목금토".split("").map((x) => `<div>${x}</div>`).join("")}</div>
+      <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:3px">${cells}</div></div>`);
+    const nd = new Date(m + "-01T00:00:00Z"); nd.setUTCMonth(nd.getUTCMonth() + 1); m = nd.toISOString().slice(0, 7);
+  }
+  const kpi = (label, v, sub = "") => `<div style="flex:1;min-width:110px;background:#f8fafc;border-radius:10px;padding:8px 10px"><small class="muted">${label}</small><div style="font-weight:700;font-size:18px">${v}</div>${sub ? `<small class="muted">${sub}</small>` : ""}</div>`;
+  const q = ($("#pl-q") && $("#pl-q").value) || PL.q || "";
+  const hits = q ? PL.posts.filter((p) => p.title.includes(q) || q.includes(p.logNo)).slice(-8).reverse() : [];
+  el.innerHTML = `<h2>🗓 발행 기록</h2>
+    <p class="sub">기간을 고르면 그동안 글을 몇 번 올렸는지, 주마다 목표를 지켰는지 보여줘요. (공개 글 기준 · 전체 ${PL.posts.length}개)</p>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:8px 0">
+      <input type="date" id="pl-start" value="${s}"> ~ <input type="date" id="pl-end" value="${e}">
+      ${[["30", "최근 30일"], ["month", "이번 달"], ["lastmonth", "지난달"], ["90", "최근 90일"], ["year", "올해"], ["all", "전체"]].map(([k, l]) => `<button class="btn btn-outline" style="font-size:12px;padding:4px 10px" data-pl="${k}">${l}</button>`).join("")}
+      <span style="margin-left:auto">목표: 주 <input type="number" id="pl-goal" min="1" max="14" value="${PL.goal}" style="width:52px"> 개</span>
+    </div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:0 0 10px">
+      <input id="pl-q" placeholder="글 제목이나 주소로 찾기 → 그 글 날짜부터 세기 (예: 26개 올리고 깨달은 점)" value="${esc(q)}" style="flex:1;min-width:260px">
+      <button class="btn btn-outline" style="font-size:12px;padding:4px 10px" data-pl="refresh" title="방금 올린 글까지 다시 불러와요">${PL.loading ? "불러오는 중..." : "↻ 새로 불러오기"}</button>
+    </div>
+    ${hits.length ? `<div style="margin:-4px 0 10px;font-size:13px">${hits.map((p) => `<div><a href="#" data-pl-from="${p.day}" style="font-weight:600">${esc(p.day)}</a> · ${esc(p.title)} <small class="muted">← 날짜를 누르면 그날부터 오늘까지</small></div>`).join("")}</div>` : q ? `<p class="muted" style="margin:-4px 0 10px">'${esc(q)}'가 들어간 글을 못 찾았어요.</p>` : ""}
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+      ${kpi("올린 글", inR.length + "개", `${total}일 동안`)}
+      ${kpi("글 쓴 날", wrote + "일", `글 없는 날 ${total - wrote}일`)}
+      ${kpi("가장 길게 쉰 기간", gap ? gap + "일" : "-", gap ? `${md(gapFrom)}부터` : "")}
+      ${kpi(`주 ${PL.goal}개 목표`, `${weeks.length - failed.length} / ${weeks.length}주`, failed.length ? `미달 ${failed.length}주 · 부족 ${failed.reduce((t, w) => t + (PL.goal - w.n), 0)}개` : "모두 달성 🎉")}
+    </div>
+    <div class="scroll-x"><table class="early" style="margin-bottom:12px">
+      <tr><th style="text-align:left">주 (시작일부터 7일씩)</th><th>올린 글</th><th>목표 ${PL.goal}개</th></tr>
+      ${weeks.map((w, i) => `<tr><td class="t">${i + 1}주차 · ${md(w.from)} ~ ${md(w.to)}${w.full ? "" : ` <small class="muted">(${plDays(w.from, w.to)}일)</small>`}</td><td><b>${w.n}개</b></td><td>${w.n >= PL.goal ? `<span class="delta up">✅ 달성</span>` : `<span class="delta down">❌ ${PL.goal - w.n}개 부족</span>`}</td></tr>`).join("")}
+    </table></div>
+    ${Object.keys(months).length > 1 ? `<div style="margin-bottom:12px">${Object.entries(months).map(([m, n]) => `<div style="display:flex;align-items:center;gap:8px;font-size:13px;margin:3px 0"><span style="width:70px">${m.replace("-", ".")}</span><div style="height:14px;width:${Math.max(4, (n / mMax) * 70)}%;background:#34d399;border-radius:4px"></div><b>${n}개</b></div>`).join("")}</div>` : ""}
+    <div style="display:flex;gap:14px;flex-wrap:wrap">${cal.join("")}</div>
+    <p class="muted" style="font-size:12px;margin-top:6px">진한 초록 = 하루 2개 이상 · 칸에 마우스를 올리면 그날 올린 글 제목이 보여요.</p>`;
+}
+document.addEventListener("click", (ev) => {
+  const b = ev.target.closest("[data-pl]");
+  if (b) { if (b.dataset.pl === "refresh") return loadPostLog(true); return plPreset(b.dataset.pl); }
+  const f = ev.target.closest("[data-pl-from]");
+  if (f) { ev.preventDefault(); PL.start = f.dataset.plFrom; PL.end = plToday(); PL.q = ""; renderPostLog(); }
+});
+document.addEventListener("change", (ev) => {
+  if (ev.target.id === "pl-start") { PL.start = ev.target.value; renderPostLog(); }
+  if (ev.target.id === "pl-end") { PL.end = ev.target.value; renderPostLog(); }
+  if (ev.target.id === "pl-goal") { PL.goal = Math.min(14, Math.max(1, Number(ev.target.value) || 3)); try { localStorage.setItem("pl.goal", PL.goal); } catch {} renderPostLog(); }
+});
+document.addEventListener("keydown", (ev) => {
+  if (ev.target.id === "pl-q" && ev.key === "Enter") { PL.q = ev.target.value.trim(); renderPostLog(); setTimeout(() => { const i = $("#pl-q"); if (i) { i.focus(); i.setSelectionRange(i.value.length, i.value.length); } }, 0); }
+});
+
 // ⏱ 체류시간 (블로그 전체는 네이버 값 그대로, 글별은 추정)
 const mmss = (sec) => { sec = Math.round(sec || 0); return sec >= 60 ? `${Math.floor(sec / 60)}분 ${String(sec % 60).padStart(2, "0")}초` : `${sec}초`; };
 function renderDwell() {
