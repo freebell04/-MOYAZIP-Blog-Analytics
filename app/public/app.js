@@ -494,6 +494,34 @@ document.addEventListener("click", async (e) => {
   if (!r.error) pollAiChat(); // status가 done이 되어 평소처럼 다음 단계로 넘어간다
 });
 
+// ✏️ 마음에 안 드는 부분 다시 쓰기
+let rewriteOld = "";
+async function rewriteStart() {
+  const b = $("#rewrite-start");
+  b.disabled = true;
+  $("#rewrite-status").textContent = "⏳ 에디터에서 선택한 부분을 읽고 AI가 다시 쓰는 중이에요 (20~40초)...";
+  const r = await fetch("/api/rewrite/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ how: $("#rewrite-how").value }) }).then((x) => x.json()).catch((e) => ({ error: e.message }));
+  b.disabled = false;
+  if (r.error) { $("#rewrite-status").innerHTML = `<span class="error">⚠ ${r.error}</span>`; return; }
+  rewriteOld = r.old;
+  $("#rewrite-old").textContent = r.old;
+  $("#rewrite-new").value = r.text;
+  $("#rewrite-result").hidden = false;
+  $("#rewrite-status").textContent = "✅ 다시 썼어요. 마음에 들면 [에디터에 바꿔 넣기]를 눌러주세요 (오른쪽 글은 직접 고쳐도 돼요).";
+}
+document.addEventListener("click", async (e) => {
+  if (e.target.closest("#rewrite-start") || e.target.closest("#rewrite-again")) return rewriteStart();
+  if (!e.target.closest("#rewrite-apply")) return;
+  const b = $("#rewrite-apply");
+  b.disabled = true;
+  $("#rewrite-status").textContent = "⏳ 에디터의 선택한 부분에 바꿔 넣는 중...";
+  const r = await fetch("/api/rewrite/apply", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ old: rewriteOld, text: $("#rewrite-new").value }) }).then((x) => x.json()).catch((er) => ({ error: er.message }));
+  b.disabled = false;
+  if (r.error) { $("#rewrite-status").innerHTML = `<span class="error">⚠ ${r.error}</span>`; return; }
+  $("#rewrite-result").hidden = true;
+  $("#rewrite-status").textContent = r.sameSelection ? "✅ 바꿔 넣었어요! 에디터에서 확인해 보세요 (되돌리려면 에디터에서 Ctrl+Z)." : "✅ 지금 선택된 부분에 바꿔 넣었어요 (처음 선택과 달랐어요). 에디터에서 확인해 보세요 (되돌리려면 Ctrl+Z).";
+});
+
 let lastPopStart = null;
 // 네이버에 로그인된 계정 ≠ 프로그램에 설정된 블로그면 알려준다 (계정을 바꾼 경우: 예전 블로그로 글을 쓰려다 실패함)
 async function checkAccount() {

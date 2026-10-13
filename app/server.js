@@ -695,6 +695,15 @@ app.post("/api/template-maker/save", async (req, res) => {
     res.status(500).json({ error: e.message });
   }
 });
+// ✏️ 마음에 안 드는 부분 다시 쓰기 (네이버 글쓰기 창에서 선택한 부분만)
+app.post("/api/rewrite/start", async (req, res) => {
+  if (require("./lib/blogEditor").isBusy()) return res.status(409).json({ error: "지금 글쓰기 창에서 자동 입력이 진행 중이에요. 끝난 뒤 다시 눌러주세요." });
+  try { res.json(await require("./lib/rewrite").start({ how: String((req.body || {}).how || "").slice(0, 200) })); } catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.post("/api/rewrite/apply", async (req, res) => {
+  if (require("./lib/blogEditor").isBusy()) return res.status(409).json({ error: "지금 글쓰기 창에서 자동 입력이 진행 중이에요. 끝난 뒤 다시 눌러주세요." });
+  try { res.json(await require("./lib/rewrite").apply({ old: String((req.body || {}).old || ""), text: String((req.body || {}).text || "") })); } catch (e) { res.status(400).json({ error: e.message }); }
+});
 // 🗓 발행 기록: 지금까지 올린 글의 날짜 (기간·목표 체크용, 크롬 창 없이 공개 글 목록으로)
 app.get("/api/post-log", async (req, res) => {
   try {

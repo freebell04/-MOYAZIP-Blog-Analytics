@@ -152,6 +152,26 @@
 
     <button id="save-draft-btn" class="btn btn-primary btn-lg">네이버에 임시저장 (본문만)</button>
     <div id="save-status" class="status-line"></div>
+    <div id="rewrite-box" style="margin-top:14px;border:1.5px solid #c4b5fd;background:#faf5ff;border-radius:14px;padding:12px 14px">
+      <div style="font-weight:700;color:#5b21b6">✏️ 마음에 안 드는 부분 다시 쓰기</div>
+      <div class="hint" style="margin:4px 0 8px">네이버 글쓰기 창에서 고치고 싶은 부분을 <b>마우스로 드래그(선택)</b>한 뒤 아래 버튼을 누르세요. 그 부분만 AI가 다시 쓰고, 확인 후 그 자리에만 바꿔 넣어요 (사진·다른 문단은 그대로).</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        <input id="rewrite-how" placeholder="어떻게 고칠까요? (선택: 더 짧게 / 친근하게 / 예시 추가 / 정보 위주로…)" style="flex:1;min-width:220px">
+        <button type="button" id="rewrite-start" class="btn btn-outline" style="border-color:#8b5cf6;color:#6d28d9">✏️ 선택한 부분 AI로 다시 쓰기</button>
+      </div>
+      <div id="rewrite-status" class="status-line" style="font-size:13px"></div>
+      <div id="rewrite-result" hidden style="margin-top:8px">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+          <div><small class="muted">원래 글</small><div id="rewrite-old" style="white-space:pre-wrap;background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:8px;font-size:13px;max-height:220px;overflow:auto"></div></div>
+          <div><small class="muted">다시 쓴 글 (직접 고쳐도 돼요)</small><textarea id="rewrite-new" rows="8" style="width:100%;font-size:13px;border-radius:10px"></textarea></div>
+        </div>
+        <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">
+          <button type="button" id="rewrite-apply" class="btn btn-primary" style="font-size:13px">✅ 에디터에 바꿔 넣기</button>
+          <button type="button" id="rewrite-again" class="btn btn-outline" style="font-size:13px">↻ 다시 쓰기</button>
+          <small class="muted" style="align-self:center">바꿔 넣기 전에 에디터의 선택이 그대로인지 확인해요. 풀렸으면 다시 드래그해 주세요.</small>
+        </div>
+      </div>
+    </div>
   </section>
 
   <section id="step-finalize" class="card" hidden>
