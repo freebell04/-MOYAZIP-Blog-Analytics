@@ -667,6 +667,34 @@ app.post("/api/neighbors/suggest", async (req, res) => {
 });
 
 // --- 성과 통계 ---
+// 🤖 AI가 자동으로 만드는 템플릿 (내 인기글 → '앞으로 쓸 템플릿')
+app.get("/api/template-maker", async (req, res) => {
+  const tm = require("./lib/templateMaker");
+  const d = stats.getCached() || {};
+  const seen = new Set();
+  let cands = [...((d.month && d.month.topPosts) || []), ...((d.week && d.week.topPosts) || [])]
+    .filter((p) => /^\d{6,}$/.test(String(p.logNo)) && !seen.has(p.logNo) && seen.add(p.logNo))
+    .slice(0, 10).map((p) => ({ logNo: String(p.logNo), title: p.title, cv: p.cv }));
+  if (!cands.length) {
+    try { cands = (await require("./lib/postLog").load(config.blogId())).posts.slice(-10).reverse().map((p) => ({ logNo: p.logNo, title: p.title })); } catch {}
+  }
+  res.json({ ...tm.getState(), name: tm.NAME, candidates: cands });
+});
+app.post("/api/template-maker/create", async (req, res) => {
+  if (require("./lib/blogEditor").isBusy()) return res.status(409).json({ error: "지금 블로그 글쓰기 창에서 다른 작업이 진행 중이에요. 끝난 뒤 다시 눌러주세요." });
+  try {
+    res.json(await require("./lib/templateMaker").create({ logNo: String((req.body || {}).logNo || ""), replace: (req.body || {}).replace === true }));
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+app.post("/api/template-maker/save", async (req, res) => {
+  try {
+    res.json(await require("./lib/templateMaker").saveEdited());
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
 // 🗓 발행 기록: 지금까지 올린 글의 날짜 (기간·목표 체크용, 크롬 창 없이 공개 글 목록으로)
 app.get("/api/post-log", async (req, res) => {
   try {

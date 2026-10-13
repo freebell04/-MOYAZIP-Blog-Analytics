@@ -979,7 +979,8 @@ async function finalizeTocAndSummary() {
  * AI 글 생성 없이, 블로그 → 글쓰기 → 템플릿(앞으로 쓸 템플릿) 적용까지만 하고 멈춘다.
  * 저장도 하지 않는다 — 사용자가 눈에 보이는 그 크롬 창에서 직접 타이핑하도록 열어만 둔다.
  */
-async function openTemplateEditor() {
+async function openTemplateEditor(opts = {}) {
+  const tmplName = opts.name || "앞으로 쓸 템플릿";
   if (!blogIdNow()) throw new Error("환경변수 NAVER_BLOG_ID가 설정되어 있지 않습니다.");
 
   const { browser, context } = await openVisibleContext();
@@ -1025,7 +1026,7 @@ async function openTemplateEditor() {
   await myTmplTab.evaluate((el) => el.click());
   await page.waitForTimeout(800);
 
-  const targetTmpl = frame.getByText("앞으로 쓸 템플릿", { exact: true }).first();
+  const targetTmpl = frame.getByText(tmplName, { exact: true }).first();
   await targetTmpl.evaluate((el) => el.click());
   await page.waitForTimeout(800);
 
