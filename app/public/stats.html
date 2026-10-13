@@ -730,8 +730,11 @@ function renderPostLog() {
       ${kpi(`주 ${PL.goal}개 목표`, `${weeks.length - failed.length} / ${weeks.length}주`, failed.length ? `미달 ${failed.length}주 · 부족 ${failed.reduce((t, w) => t + (PL.goal - w.n), 0)}개` : "모두 달성 🎉")}
     </div>
     <div class="scroll-x"><table class="early" style="margin-bottom:12px">
-      <tr><th style="text-align:left">주 (시작일부터 7일씩)</th><th>올린 글</th><th>목표 ${PL.goal}개</th></tr>
-      ${weeks.map((w, i) => `<tr><td class="t">${i + 1}주차 · ${md(w.from)} ~ ${md(w.to)}${w.full ? "" : ` <small class="muted">(${plDays(w.from, w.to)}일)</small>`}</td><td><b>${w.n}개</b></td><td>${w.n >= PL.goal ? `<span class="delta up">✅ 달성</span>` : `<span class="delta down">❌ ${PL.goal - w.n}개 부족</span>`}</td></tr>`).join("")}
+      <tr><th style="text-align:left">주 (시작일부터 7일씩)</th><th>그 주에 올린 글</th><th>올린 날</th></tr>
+      ${weeks.map((w, i) => {
+        const ds = inR.filter((p) => p.day >= w.from && p.day <= w.to).map((p) => md(p.day));
+        return `<tr><td class="t">${i + 1}주차 · ${md(w.from)} ~ ${md(w.to)}${w.full ? "" : ` <small class="muted">(${plDays(w.from, w.to)}일)</small>`}</td><td><b>${w.n}번</b></td><td class="muted" style="font-size:12px">${ds.join(", ") || "-"}</td></tr>`;
+      }).join("")}
     </table></div>
     ${Object.keys(months).length > 1 ? `<div style="margin-bottom:12px">${Object.entries(months).map(([m, n]) => `<div style="display:flex;align-items:center;gap:8px;font-size:13px;margin:3px 0"><span style="width:70px">${m.replace("-", ".")}</span><div style="height:14px;width:${Math.max(4, (n / mMax) * 70)}%;background:#34d399;border-radius:4px"></div><b>${n}개</b></div>`).join("")}</div>` : ""}
     <div style="display:flex;gap:14px;flex-wrap:wrap">${cal.join("")}</div>
