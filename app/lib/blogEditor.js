@@ -1076,4 +1076,4 @@ const guarded = (fn) => async (...a) => {
 };
 const isBusy = () => busyDepth > 0;
 
-module.exports = { saveDraftToNaver: guarded(saveDraftToNaver), finalizeTocAndSummary: guarded(finalizeTocAndSummary), openTemplateEditor: guarded(openTemplateEditor), isBusy, _test: { composeStyledBlocks, writeStyledBody, verifyStyledBody, replaceShortText, replaceWrappedText } };
+module.exports = { insertTableAtPlaceholder, saveDraftToNaver: guarded(saveDraftToNaver), finalizeTocAndSummary: guarded(finalizeTocAndSummary), openTemplateEditor: guarded(openTemplateEditor), isBusy, _test: { composeStyledBlocks, writeStyledBody, verifyStyledBody, replaceShortText, replaceWrappedText } };

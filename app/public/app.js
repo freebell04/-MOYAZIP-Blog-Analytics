@@ -499,7 +499,7 @@ let rewriteOld = "";
 async function rewriteStart() {
   const b = $("#rewrite-start");
   b.disabled = true;
-  $("#rewrite-status").textContent = "⏳ 에디터에서 선택한 부분을 읽고 AI가 다시 쓰는 중이에요 (20~40초)...";
+  $("#rewrite-status").textContent = "⏳ 에디터에서 선택한 부분을 읽고 ChatGPT가 다시 쓰는 중이에요 (20~40초)...";
   const r = await fetch("/api/rewrite/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ how: $("#rewrite-how").value }) }).then((x) => x.json()).catch((e) => ({ error: e.message }));
   b.disabled = false;
   if (r.error) { $("#rewrite-status").innerHTML = `<span class="error">⚠ ${r.error}</span>`; return; }
@@ -519,7 +519,7 @@ document.addEventListener("click", async (e) => {
   b.disabled = false;
   if (r.error) { $("#rewrite-status").innerHTML = `<span class="error">⚠ ${r.error}</span>`; return; }
   $("#rewrite-result").hidden = true;
-  $("#rewrite-status").textContent = r.sameSelection ? "✅ 바꿔 넣었어요! 에디터에서 확인해 보세요 (되돌리려면 에디터에서 Ctrl+Z)." : "✅ 지금 선택된 부분에 바꿔 넣었어요 (처음 선택과 달랐어요). 에디터에서 확인해 보세요 (되돌리려면 Ctrl+Z).";
+  $("#rewrite-status").textContent = (r.tables ? `(표 ${r.tables}개를 만들어 넣었어요) ` : "") + (r.sameSelection ? "✅ 바꿔 넣었어요! 에디터에서 확인해 보세요 (되돌리려면 에디터에서 Ctrl+Z)." : "✅ 지금 선택된 부분에 바꿔 넣었어요 (처음 선택과 달랐어요). 에디터에서 확인해 보세요 (되돌리려면 Ctrl+Z).");
 });
 
 let lastPopStart = null;
