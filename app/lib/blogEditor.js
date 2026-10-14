@@ -886,7 +886,20 @@ async function saveDraftToNaver(post) {
           await writePlainBody(frame, page, bodyText);
           check = await verifyPlainBody(frame, bodyText);
         }
-        if (!check.ok) { reasons.push(check.reason); console.warn(`[글쓰기] 본문 확인 실패(${attempt + 1}번째): ${check.reason}`); }
+        if (!check.ok) {
+          reasons.push(check.reason);
+          console.warn(`[글쓰기] 본문 확인 실패(${attempt + 1}번째): ${check.reason}`);
+          // 원인을 나중에 볼 수 있게 data\write-fail.log에 남긴다 (고객 PC에서만 나는 문제를 추적하기 위함)
+          try {
+            const snap = await frame.locator(":root").evaluate(() => {
+              const t = (sel) => Array.from(document.querySelectorAll(sel)).map((e) => (e.textContent || "").replace(/​/g, "").trim());
+              return { title: t(".se-documentTitle .se-text-paragraph").join(" ").slice(0, 120), body: t(".se-component:not(.se-documentTitle) .se-text-paragraph").join(" / ").slice(0, 600), quotes: document.querySelectorAll(".se-quotation").length, tables: document.querySelectorAll(".se-table").length };
+            }).catch(() => ({}));
+            const want = (styledBlocks ? styledBlocks.map((b) => b.text || (b.lines || []).join(" ") || b.type).join(" / ") : bodyText).slice(0, 600);
+            require("fs").appendFileSync(require("path").join(__dirname, "..", "data", "write-fail.log"), JSON.stringify({ at: new Date().toISOString(), attempt: attempt + 1, reason: check.reason, want, editor: snap }) + "
+");
+          } catch {}
+        }
       }
       if (!check.ok) {
         throw new Error(`본문이 원문과 다르게 입력돼서 저장하지 않았습니다 (${[...new Set(reasons)].join(" → ")})`);
