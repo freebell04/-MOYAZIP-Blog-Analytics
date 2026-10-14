@@ -296,6 +296,32 @@ async function typeText(page, text) {
   }
 }
 
+/**
+ * 제목을 넣고, 실제로 들어갔는지 읽어서 확인한다 (안 들어갔으면 최대 3번 다시 넣는다).
+ * 본문 입력 중에 제목이 지워지거나, 클릭이 씹혀서 제목이 비는 일이 있어서 반드시 확인한다.
+ */
+async function setTitle(frame, page, titleArea, title) {
+  const want = String(title || "").replace(/[^\p{L}\p{N}]/gu, "");
+  if (!want) return true;
+  const read = () => frame.locator(".se-documentTitle .se-text-paragraph, .se-title-text .se-text-paragraph").first().evaluate((el) => {
+    const k = el.cloneNode(true);
+    k.querySelectorAll(".se-placeholder, [class*='placeholder']").forEach((x) => x.remove());
+    return k.textContent || "";
+  }).then((t) => t.replace(/[^\p{L}\p{N}]/gu, "")).catch(() => "");
+  for (let i = 0; i < 3; i++) {
+    const got = await read();
+    if (got && got.includes(want) && got.length <= want.length * 1.3) return true;
+    try { await titleArea.click({ timeout: 8000 }); } catch { await titleArea.click({ force: true }).catch(() => {}); }
+    await page.waitForTimeout(200);
+    await page.keyboard.press("Control+a");
+    await page.keyboard.press("Delete");
+    await typeText(page, String(title));
+    await page.waitForTimeout(500);
+  }
+  const got = await read();
+  return !!got && got.includes(want);
+}
+
 const TABLE_SEPARATOR_ROW = /^\|(\s*:?-{2,}:?\s*\|)+\s*$/;
 
 function parseTableRow(line) {
@@ -795,11 +821,11 @@ async function saveDraftToNaver(post) {
 
     if (useTemplate && post.tpl) {
       // 내 템플릿 모드: 제목을 넣고, 템플릿의 자리(인트로·목차 표·본문 ①~⑥·요약 표·소감)에 글을 채운다
-      await replaceShortText(page, titleArea, post.title);
+      if (!(await setTitle(frame, page, titleArea, post.title))) throw new Error("제목이 입력되지 않았어요. 크롬의 글쓰기 화면에서 제목 칸을 확인하고 다시 시도해주세요.");
       await page.waitForTimeout(500);
       await require("./myTemplate").fillMyTemplate(frame, page, post.tpl, { replaceShortText, replaceWrappedText, insertTable: insertTableAtPlaceholder });
     } else if (useTemplate && post.introLines && post.introLines.length && post.sections && post.sections.length) {
-      await replaceShortText(page, titleArea, post.title);
+      if (!(await setTitle(frame, page, titleArea, post.title))) throw new Error("제목이 입력되지 않았어요. 크롬의 글쓰기 화면에서 제목 칸을 확인하고 다시 시도해주세요.");
       await page.waitForTimeout(500);
       // 템플릿의 정확한 자리에 본문만 채워 넣기 (목차/전체요약은 2단계에서 별도로)
       await fillBodyOnly(frame, page, post);
@@ -848,6 +874,7 @@ async function saveDraftToNaver(post) {
 
       // 드물게 입력 도중 줄이 통째로 사라지는 경우가 있어, 원문과 대조해서 틀리면 한 번 다시 쓰고
       // 그래도 틀리면 망가진 글을 저장하지 않도록 에러를 낸다.
+      await setTitle(frame, page, titleArea, post.title).catch(() => {}); // 본문을 쓰다 실패해도 제목은 먼저 들어가 있게
       let check = { ok: false };
       const reasons = [];
       for (let attempt = 0; attempt < 2 && !check.ok; attempt++) { // 최대 2번 (예전엔 3번이라 같은 글이 세 번 지워지고 써졌다)
@@ -868,11 +895,8 @@ async function saveDraftToNaver(post) {
       // 제목은 본문을 다 쓴 뒤에 마지막으로 입력한다. 본문 쪽 Ctrl+A가 제목까지
       // 같이 지워버리는 경우가 있는데, 순서를 이렇게 두면 그래도 제목이 항상 올바르게 남는다.
       // (제목이 길어 줄바꿈된 상태면 트리플클릭은 한 줄만 잡으므로 여기서도 Ctrl+A를 쓴다.)
-      await titleArea.click({ timeout: 10000 });
-      await page.keyboard.press("Control+a");
-      await page.keyboard.press("Delete");
-      await typeText(page, post.title);
-      await page.waitForTimeout(500);
+      if (!(await setTitle(frame, page, titleArea, post.title))) throw new Error("제목이 입력되지 않았어요. 크롬의 글쓰기 화면에서 제목 칸을 확인하고 다시 시도해주세요.");
+      await page.waitForTimeout(300);
     }
 
     // 이미지 삽입 (툴바 '사진' 버튼 → 파일 업로드)
