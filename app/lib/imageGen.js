@@ -136,8 +136,9 @@ async function start({ chapter, heading, body, style = "auto", paste = true, ai 
     try {
       await session.ensureDebugChrome({ quick: true });
       const site = SITES[key];
-      // 글을 쓰던 그 AI의 대화 탭을 그대로 이어서 쓴다 (없을 때만 새 대화를 만든다)
-      const tab = await aiChat.acquireTab(key, site);
+      // 글쓰기 대화와 섞이지 않게 이미지 만들기 전용 탭·새 대화를 쓴다.
+      // (글을 쓰던 대화에서 "완성"이라고 하면 AI가 앞의 규칙대로 글 JSON을 또 만들어 버려서 이미지가 안 넘어갔다)
+      const tab = await aiChat.acquireTab(key, site, { tabKey: "img-" + key, newChat: true });
       client = tab.client;
       session.notifyChrome(`${cfg.name} 이미지 만드는 창`);
       require("./windowLayout").splitSoon([1500, 6000]);
@@ -153,7 +154,7 @@ async function start({ chapter, heading, body, style = "auto", paste = true, ai 
         if (!sel && i === 40) await aiChat._h.within(client.send("Page.reload"), 2000);
         if (!sel && i === 80 && !LOGIN_URL.test(String(await client.eval("location.href").catch(() => "")))) {
           try { client.close(); } catch {}
-          const fresh = await aiChat.freshTab(key, site); // 응답 없는 탭은 버리고 새 대화 탭으로
+          const fresh = await aiChat.freshTab(key, site, "img-" + key); // 응답 없는 탭은 버리고 새 대화 탭으로
           tab.id = fresh.id; client = fresh.client;
           await aiChat.showTab(fresh.id, client, site);
         }
@@ -188,9 +189,13 @@ async function start({ chapter, heading, body, style = "auto", paste = true, ai 
         if (((await client.eval(DONE_COUNT(cfg.userSel)).catch(() => 0)) || 0) <= doneBefore) continue;
         // "완성"이 왔다 → 이미지가 아직 만들어지는 중이면 끝날 때까지 기다리고(최대 3분), 가장 마지막 새 이미지를 쓴다
         set({ status: "generating", note: '"완성"을 확인했어요. 마지막 이미지를 가져오는 중이에요...' });
-        for (let w = 0; w < 90 && (await client.eval(GENERATING).catch(() => false)); w++) await sleep(2000);
-        await sleep(1500);
-        const imgs = ((await client.eval(LIST_IMGS(cfg.imgSel)).catch(() => [])) || []).filter((u) => !before.has(u));
+        // 이미 만들어 둔 이미지(이전 이미지)가 있으면 그걸 바로 쓴다. AI가 "완성"에 글·JSON을 답하는 중이어도 기다리지 않는다
+        let imgs = ((await client.eval(LIST_IMGS(cfg.imgSel)).catch(() => [])) || []).filter((u) => !before.has(u));
+        if (!imgs.length) {
+          for (let w = 0; w < 90 && (await client.eval(GENERATING).catch(() => false)); w++) await sleep(2000);
+          await sleep(1500);
+          imgs = ((await client.eval(LIST_IMGS(cfg.imgSel)).catch(() => [])) || []).filter((u) => !before.has(u));
+        }
         src = imgs[imgs.length - 1] || "";
         if (src) break;
         set({ status: "generating", waiting: true, note: '아직 새 이미지가 보이지 않아요. 이미지가 만들어진 뒤 "완성"이라고 다시 보내주세요.' });

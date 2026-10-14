@@ -259,8 +259,9 @@ function acquireTab(ai, site, opts = {}) {
   return run;
 }
 async function acquireTabInner(ai, site, opts = {}) {
+  const tkey = opts.tabKey || ai; // 이미지 만들기는 글쓰기와 다른 탭·대화를 쓴다 (글쓰기 대화의 "완성 → JSON" 규칙에 안 걸리게)
   const port = new URL(session.CDP_URL).port || "9222";
-  const id = readTabs()[ai];
+  const id = readTabs()[tkey];
   if (id) {
     try {
       const list = await (await fetch(`${session.CDP_URL}/json/list`)).json();
@@ -274,7 +275,7 @@ async function acquireTabInner(ai, site, opts = {}) {
             usable = !!(await client.eval(firstMatch(site.input)).catch(() => null));
             if (!usable) await sleep(250);
           }
-          if (usable && opts.newChat && Date.now() - (newChatAt[ai] || 0) > 90000) {
+          if (usable && opts.newChat && Date.now() - (newChatAt[tkey] || 0) > 90000) {
             // 글쓰기를 새로 시작할 때는 긴 예전 대화가 아니라 새 대화에서 시작한다 (대화가 길면 AI가 느려지고 JSON이 끊긴다)
             await within(client.send("Page.navigate", { url: site.url }), 4000);
             await sleep(1200);
@@ -283,7 +284,7 @@ async function acquireTabInner(ai, site, opts = {}) {
               usable = !!(await client.eval(firstMatch(site.input)).catch(() => null));
               if (!usable) await sleep(300);
             }
-            newChatAt[ai] = Date.now();
+            newChatAt[tkey] = Date.now();
           }
           if (usable) return { id, client, continued: !opts.newChat, reused: true };
           try { client.close(); } catch {}
@@ -291,24 +292,26 @@ async function acquireTabInner(ai, site, opts = {}) {
       }
     } catch {}
   }
-  const reuse = await findReusableTab(ai, site);
-  if (reuse) { rememberTab(ai, reuse.id); return { ...reuse, continued: false, reused: true }; }
+  let reuse = await findReusableTab(ai, site);
+  // 이미지용 탭은 글쓰기용 탭을 가져다 쓰지 않는다 (같은 탭이면 대화가 섞인다)
+  if (reuse && opts.tabKey && reuse.id === readTabs()[ai]) { try { reuse.client.close(); } catch {} reuse = null; }
+  if (reuse) { rememberTab(tkey, reuse.id); return { ...reuse, continued: false, reused: true }; }
   // 빈 탭을 만든 뒤 붙고 나서 이동한다 (URL로 바로 만들면 붙은 연결이 처음 about:blank 화면에 묶여 있는 경우가 있다)
   const targetId = await session.createTab("about:blank");
   const client = await connectPage(`ws://localhost:${port}/devtools/page/${targetId}`);
   await within(client.send("Page.navigate", { url: site.url }), 3000);
-  rememberTab(ai, targetId);
-  newChatAt[ai] = Date.now();
+  rememberTab(tkey, targetId);
+  newChatAt[tkey] = Date.now();
   return { id: targetId, client, continued: false, reused: false };
 }
 
 /** 대화 탭이 안 풀릴 때: 기억해 둔 탭을 버리고 새 탭을 하나 연다 */
-async function freshTab(ai, site) {
+async function freshTab(ai, site, tabKey) {
   const port = new URL(session.CDP_URL).port || "9222";
   const targetId = await session.createTab("about:blank");
   const client = await connectPage(`ws://localhost:${port}/devtools/page/${targetId}`);
   await within(client.send("Page.navigate", { url: site.url }), 3000);
-  rememberTab(ai, targetId);
+  rememberTab(tabKey || ai, targetId);
   return { id: targetId, client };
 }
 
