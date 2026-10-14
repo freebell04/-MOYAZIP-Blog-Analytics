@@ -344,25 +344,9 @@ $("#save-draft-btn").addEventListener("click", async () => {
   $("#save-draft-btn").disabled = false;
   $("#save-status").textContent = r.error
     ? "오류: " + r.error
-    : "본문 임시저장 완료! 네이버 에디터에서 검토/수정 후, 아래 4단계에서 목차·요약을 채워주세요." +
+    : "본문 임시저장 완료! 네이버 에디터에서 검토·수정한 뒤 발행해 주세요." +
       (r.switchedBlog ? ` (네이버에 로그인된 계정이 '${r.switchedBlog.to}'라서, 프로그램의 블로그 설정도 '${r.switchedBlog.from}' → '${r.switchedBlog.to}'로 바꿨어요)` : "");
   if (r.switchedBlog) checkAccount();
-  if (!r.error) {
-    $("#step-finalize").hidden = false;
-    setActiveStep(4);
-  }
-});
-
-$("#finalize-btn").addEventListener("click", async () => {
-  $("#finalize-btn").disabled = true;
-  setAiButtons(true);
-  busyOn("임시글을 열어 목차·요약을 채우는 중이에요 (1~2분). 끝날 때까지 기다려주세요.", "목차와 요약을 채우는 중이에요");
-  $("#finalize-status").textContent = "지금 임시글을 열어서 목차·요약을 채우는 중입니다... (1~2분 소요)";
-  const r = await fetch("/api/finalize-toc", { method: "POST" }).then((r) => r.json()).catch((e) => ({ error: e.message }));
-  busyOff();
-  setAiButtons(false);
-  $("#finalize-btn").disabled = false;
-  $("#finalize-status").textContent = r.error ? "오류: " + r.error : "목차·요약까지 완료! 네이버 블로그에서 최종 확인 후 발행해주세요.";
 });
 
 // 저장된 세션이 있어도 처음에는 "로그인 필요"로 시작하고, 실제 로그인 상태는 브라우저에서 눈으로 확인해 갱신한다.
