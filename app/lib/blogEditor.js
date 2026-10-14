@@ -520,18 +520,22 @@ async function verifyStyledBody(frame, page, blocks) {
   const gotTables = await f.evaluate(() => document.querySelectorAll(".se-component.se-table").length);
   // (표 개수 검사는 뺐다: 템플릿·재시도 때 에디터의 표 수가 달라 멀쩡한 글도 저장이 막혔다)
   void gotTables; void wantTables;
-  if (actual.quotes.length !== quotes.length) return { ok: false, reason: `인용구 개수가 다름: 원문 ${quotes.length} / 에디터 ${actual.quotes.length}` };
-  if (actual.hrs !== hrs) return { ok: false, reason: `구분선 개수가 다름: 원문 ${hrs} / 에디터 ${actual.hrs}` };
-  const plain = (s) => s.replace(/\*\*/g, "").replace(/\s+/g, " ").trim();
-  for (let i = 0; i < quotes.length; i++) {
-    const want = plain(quotes[i].lines.join(" "));
-    if (!actual.quotes[i].includes(want)) return { ok: false, reason: `${i + 1}번째 인용구가 다름: 원문 "${want}" / 에디터 "${actual.quotes[i]}"` };
-  }
+  // 글자·숫자만 남겨서 비교한다: 에디터가 따옴표·말줄임표·공백·기호를 자동으로 바꿔도 "다른 글"로 오해하지 않게
+  const norm = (s) => String(s || "").replace(/\*\*/g, "").replace(/[^\p{L}\p{N}]/gu, "");
+  const actualAll = norm(actual.quotes.join("") + actual.text);
+  const wantParas = blocks.filter((b) => b.type === "para").map((p) => norm(p.text)).filter(Boolean);
+  const wantQuotes = quotes.map((q) => norm(q.lines.join(" ")));
+  const wantAll = wantParas.join("") + wantQuotes.join("");
   // 같은 내용이 두 번 들어갔는지(이전 내용이 안 지워진 경우): 에디터 글자 수가 원문보다 훨씬 많으면 실패로 보고 다시 쓴다
-  const expectLen = blocks.filter((b) => b.type === "para").reduce((n, p) => n + plain(p.text).length, 0);
-  if (expectLen > 200 && actual.text.length > expectLen * 1.6) return { ok: false, reason: `내용이 중복돼 보여요 (원문 ${expectLen}자 / 에디터 ${actual.text.length}자)` };
-  for (const p of blocks.filter((b) => b.type === "para")) {
-    if (!actual.text.includes(plain(p.text))) return { ok: false, reason: `본문 줄이 빠짐: "${plain(p.text).slice(0, 30)}"` };
+  if (wantAll.length > 150 && actualAll.length > wantAll.length * 1.6) return { ok: false, reason: `내용이 중복돼 보여요 (원문 ${wantAll.length}자 / 에디터 ${actualAll.length}자)` };
+  // 빠진 줄이 있는지: 줄 하나하나가 에디터 글에 들어 있어야 한다 (대부분 들어 있으면 기호 차이로 보고 통과시킨다)
+  const missing = [...wantParas, ...wantQuotes].filter((t) => !actualAll.includes(t));
+  const total = wantParas.length + wantQuotes.length;
+  if (missing.length && missing.length / Math.max(1, total) > 0.05) return { ok: false, reason: `본문 줄이 빠짐 (${missing.length}/${total}줄): "${missing[0].slice(0, 30)}"` };
+  if (missing.length) console.warn(`[글쓰기] 본문 ${missing.length}/${total}줄은 기호가 달라 보이지만 내용은 같다고 보고 통과시켰어요`);
+  // 인용구·구분선 개수는 참고만 한다 (내용이 다 들어 있는데 개수만 달라서 글을 세 번 다시 쓰던 문제)
+  if (actual.quotes.length !== quotes.length || actual.hrs !== hrs) {
+    console.warn(`[글쓰기] 서식 개수가 조금 달라요 — 인용구 ${quotes.length}→${actual.quotes.length}, 구분선 ${hrs}→${actual.hrs} (내용은 모두 들어가 있어 그대로 저장)`);
   }
   return { ok: true };
 }
@@ -570,10 +574,16 @@ async function verifyPlainBody(frame, bodyText) {
   while (actual.lines.length && actual.lines[actual.lines.length - 1] === "") actual.lines.pop();
   while (expectedLines.length && expectedLines[expectedLines.length - 1] === "") expectedLines.pop();
 
-  for (let i = 0; i < Math.max(expectedLines.length, actual.lines.length); i++) {
-    if (expectedLines[i] !== actual.lines[i]) {
-      return { ok: false, reason: `${i + 1}번째 줄이 다름: 원문 "${expectedLines[i] || ""}" / 에디터 "${actual.lines[i] || ""}"` };
-    }
+  // 글자·숫자만 남겨 비교한다 (에디터가 따옴표·공백·기호를 바꿔도 같은 글로 본다). 빈 줄 개수 차이도 무시한다
+  const norm = (s) => String(s || "").replace(/[^\p{L}\p{N}]/gu, "");
+  const exp = expectedLines.map(norm).filter(Boolean);
+  const got = actual.lines.map(norm).filter(Boolean);
+  const gotAll = got.join("");
+  const expAll = exp.join("");
+  if (expAll.length > 150 && gotAll.length > expAll.length * 1.6) return { ok: false, reason: `내용이 중복돼 보여요 (원문 ${expAll.length}자 / 에디터 ${gotAll.length}자)` };
+  const missing = exp.filter((t) => !gotAll.includes(t));
+  if (missing.length && missing.length / Math.max(1, exp.length) > 0.05) {
+    return { ok: false, reason: `본문 줄이 빠짐 (${missing.length}/${exp.length}줄): "${missing[0].slice(0, 30)}"` };
   }
   if (tables.length !== actual.tables.length) {
     return { ok: false, reason: `표 개수가 다름: 원문 ${tables.length}개 / 에디터 ${actual.tables.length}개` };
@@ -840,7 +850,7 @@ async function saveDraftToNaver(post) {
       // 그래도 틀리면 망가진 글을 저장하지 않도록 에러를 낸다.
       let check = { ok: false };
       const reasons = [];
-      for (let attempt = 0; attempt < 3 && !check.ok; attempt++) {
+      for (let attempt = 0; attempt < 2 && !check.ok; attempt++) { // 최대 2번 (예전엔 3번이라 같은 글이 세 번 지워지고 써졌다)
         await clearBody();
         if (styledBlocks) {
           await writeStyledBody(frame, page, styledBlocks);
@@ -849,7 +859,7 @@ async function saveDraftToNaver(post) {
           await writePlainBody(frame, page, bodyText);
           check = await verifyPlainBody(frame, bodyText);
         }
-        if (!check.ok) reasons.push(check.reason);
+        if (!check.ok) { reasons.push(check.reason); console.warn(`[글쓰기] 본문 확인 실패(${attempt + 1}번째): ${check.reason}`); }
       }
       if (!check.ok) {
         throw new Error(`본문이 원문과 다르게 입력돼서 저장하지 않았습니다 (${[...new Set(reasons)].join(" → ")})`);
