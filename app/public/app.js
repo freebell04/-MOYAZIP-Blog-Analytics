@@ -376,7 +376,7 @@ const AI_STATUS_TEXT = {
   needLogin: (n) => `열린 크롬 탭에서 ${n}에 로그인해주세요 (처음 한 번만). 로그인하면 요청문이 자동으로 들어가요.`,
   sending: (n) => `${n}에 요청문을 보내는 중이에요...`,
   chatting: (n) =>
-    `✅ ${n}에 요청문을 보냈어요. 크롬 탭에서 ${n}이 제안하는 방향을 고르고 초안을 다듬은 뒤, "완성"이라고 보내세요. 결과가 나오면 자동으로 블로그 글쓰기 창이 열려요.`,
+    `✅ ${n}에 요청문을 보냈어요. 크롬 탭에서 ${n}이 제안하는 방향을 고르고 초안을 다듬은 뒤, "완성"이라고 보내세요. "완성"이 오면 이 화면에 미리보기가 뜨고, 확인한 뒤 직접 [임시저장]을 누르면 네이버에 써져요.`,
   closed: (n) => `${n} 탭이 닫혀서 연결을 끝냈어요. 다시 하려면 버튼을 눌러주세요.`,
   timeout: (n) => `${n} 대화를 기다리다 시간이 지났어요. 결과 JSON을 아래에 직접 붙여넣어도 돼요.`,
 };
@@ -566,6 +566,13 @@ async function pollAiChat() {
     setAiButtons(false);
     const claim = await fetch("/api/ai-chat/taken", { method: "POST" }).then((r) => r.json()).catch(() => ({ claimed: true }));
     if (claim.claimed === false) { line.textContent = `✅ ${st.name}의 완성본은 다른 창(또는 탭)에 열린 이 프로그램 화면이 가져갔어요. 그 화면에서 이어서 진행돼요.`; return; } // 화면이 두 개 열려 있을 때 중복으로 쓰지 않게
+    if (isFormat && !confirm(`${st.name}가 내 블로그 글 형식 분석을 마쳤어요.
+
+이 형식을 저장해서 앞으로 초안에 쓸까요?
+(취소하면 저장하지 않아요)`)) {
+      line.textContent = `${st.name}의 분석 결과를 저장하지 않았어요. 다시 하려면 AI 탭에서 [📥 완성본 가져오기]를 눌러주세요.`;
+      return;
+    }
     if (isFormat) {
       const r = await fetch("/api/format", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(st.result) })
         .then((r) => r.json())
@@ -995,9 +1002,9 @@ function loadPost(post, opts = {}) {
   renderSectionImages(post);
   $("#step-preview").hidden = false;
   setActiveStep(3);
-  $("#paste-status").textContent = `✅ 불러왔어요 (섹션 ${post.sections.length}개). 네이버 블로그 글쓰기 창을 여는 중이에요... (크롬 창을 확인하세요)`;
+  $("#paste-status").textContent = `✅ 불러왔어요 (섹션 ${post.sections.length}개). 아래 미리보기를 확인하고, 괜찮으면 [네이버에 임시저장] 버튼을 눌러주세요. (누르기 전에는 네이버에 아무것도 쓰지 않아요)`;
   $("#step-preview").scrollIntoView({ behavior: "smooth" });
-  $("#save-draft-btn").click();
+  const sb = $("#save-draft-btn"); if (sb) { sb.classList.add("pulse"); setTimeout(() => sb.classList.remove("pulse"), 6000); }
 }
 
 document.addEventListener("click", (e) => {

@@ -324,3 +324,7 @@ button.si-link { cursor: pointer; font-family: inherit; }
 /* 챕터 카드의 "AI로 이미지 만들기" 버튼 */
 .si-link.ai { border-color: #7c3aed; color: #6d28d9; background: #f5f3ff; font-weight: 700; }
 .si-link.ai:hover { background: #ede9fe; }
+
+/* 완성본이 도착했을 때 임시저장 버튼을 잠깐 눈에 띄게 (자동으로 저장하지 않고, 누를 곳만 알려준다) */
+@keyframes nbh-pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(3,199,90,.55); } 50% { box-shadow: 0 0 0 10px rgba(3,199,90,0); } }
+.btn.pulse { animation: nbh-pulse 1.2s ease-in-out 5; }

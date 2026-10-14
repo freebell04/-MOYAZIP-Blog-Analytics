@@ -520,15 +520,8 @@ async function start(ai, prompt, kind = "post", mode = "default", _auto = false)
             recovers++;
             lastRecoverAt = Date.now();
             brokenSince = Date.now();
-            s.note = `AI가 보낸 JSON이 중간에 끊겨 있어서, 처음부터 끝까지 다시 보내달라고 자동으로 요청했어요 (${recovers}/3).`;
-            try {
-              const selNow = await client.eval(firstMatch(site.input));
-              const left = (await client.eval(`((document.querySelector(${JSON.stringify(selNow)}) || {}).innerText || "").trim().length`).catch(() => 0)) || 0;
-              if (left < 3) { // 입력창에 사용자가 쓰던 글이 있으면 건드리지 않는다
-                await putPrompt(client, selNow, "방금 JSON이 중간에 끊겼어. 내용은 그대로 두고, 처음({)부터 끝(})까지 빠짐없이 코드블록 하나로 다시 보내줘. 다른 설명은 붙이지 마.");
-                await pressSend(client, site, selNow);
-              }
-            } catch {}
+            // 자동으로 AI에게 말을 걸지 않는다: 알려만 주고, 다시 보내달라는 말은 사용자가 직접 한다
+            s.note = "AI가 보낸 JSON이 중간에 끊겨 있어요. AI 탭에서 \"처음부터 끝까지 코드블록 하나로 다시 보내줘\"라고 직접 말해 주세요.";
           }
         } else brokenSince = 0;
         await sleep(2000);
