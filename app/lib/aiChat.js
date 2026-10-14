@@ -293,11 +293,8 @@ async function acquireTabInner(ai, site, opts = {}) {
   }
   const reuse = await findReusableTab(ai, site);
   if (reuse) { rememberTab(ai, reuse.id); return { ...reuse, continued: false, reused: true }; }
-  const version = await (await fetch(`${session.CDP_URL}/json/version`)).json();
-  const browserWs = await connectPage(version.webSocketDebuggerUrl);
   // 빈 탭을 만든 뒤 붙고 나서 이동한다 (URL로 바로 만들면 붙은 연결이 처음 about:blank 화면에 묶여 있는 경우가 있다)
-  const { targetId } = await browserWs.send("Target.createTarget", { url: "about:blank", newWindow: false });
-  browserWs.close();
+  const targetId = await session.createTab("about:blank");
   const client = await connectPage(`ws://localhost:${port}/devtools/page/${targetId}`);
   await within(client.send("Page.navigate", { url: site.url }), 3000);
   rememberTab(ai, targetId);
@@ -308,10 +305,7 @@ async function acquireTabInner(ai, site, opts = {}) {
 /** 대화 탭이 안 풀릴 때: 기억해 둔 탭을 버리고 새 탭을 하나 연다 */
 async function freshTab(ai, site) {
   const port = new URL(session.CDP_URL).port || "9222";
-  const version = await (await fetch(`${session.CDP_URL}/json/version`)).json();
-  const browserWs = await connectPage(version.webSocketDebuggerUrl);
-  const { targetId } = await browserWs.send("Target.createTarget", { url: "about:blank", newWindow: false });
-  browserWs.close();
+  const targetId = await session.createTab("about:blank");
   const client = await connectPage(`ws://localhost:${port}/devtools/page/${targetId}`);
   await within(client.send("Page.navigate", { url: site.url }), 3000);
   rememberTab(ai, targetId);
@@ -340,6 +334,8 @@ async function findReusableTab(ai, site) {
 }
 
 /** AI 채팅 탭을 열고 요청문을 보낸 뒤, 결과 JSON이 나올 때까지 지켜본다 (바로 반환 — 진행은 getState()). */
+// 바로 앞에서 열기에 실패했으면, 이번 버튼은 크롬을 다시 시작해서 연다 (창을 또 여는 게 아니라 하나만 새로 띄움)
+let failedStreak = 0;
 async function start(ai, prompt, kind = "post", mode = "default") {
   const site = SITES[ai];
   if (!site) throw new Error("알 수 없는 AI예요: " + ai);
@@ -349,8 +345,28 @@ async function start(ai, prompt, kind = "post", mode = "default") {
 
   (async () => {
     try {
+      if (failedStreak > 0) {
+        s.note = "이전에 열리지 않아서 크롬을 다시 시작하는 중이에요 (10~20초)...";
+        // 글쓰기 창에 자동 입력 중이면 크롬을 끄지 않는다 (쓰던 글이 날아간다)
+        let busy = false;
+        try { busy = require("./blogEditor").isBusy(); } catch {}
+        if (busy) throw new Error("지금 블로그 글쓰기 창에 글을 쓰는 중이라 크롬을 다시 시작하지 않았어요. 끝난 뒤 다시 눌러주세요.");
+        await session.restartChrome();
+        for (const k of Object.keys(readTabs())) { try { require("fs").writeFileSync(TABS_PATH, "{}"); } catch {} break; } // 기억해 둔 탭 번호는 새 크롬에선 쓸 수 없다
+        for (const k of Object.keys(newChatAt)) delete newChatAt[k];
+        s.note = "";
+      }
+      if (process.env.NBH_TEST_FAIL_FIRST === "1" && !globalThis.__nbhFailedOnce) { globalThis.__nbhFailedOnce = true; throw new Error("(시험) Failed to open new tab - no browser is open"); }
+      const restarted = failedStreak > 0;
       await session.ensureDebugChrome({ quick: true });
       const tab = await acquireTab(ai, site, { newChat: kind === "post" || kind === "format" }); // 글쓰기·형식 분석은 새 대화에서 시작
+      if (restarted) {
+        // 크롬을 새로 켜면서 생긴 빈 탭은 닫는다 (빈 창이 남아 "또 열렸다"처럼 보이지 않게)
+        try {
+          const all = await (await fetch(`${session.CDP_URL}/json/list`)).json();
+          for (const t of all.filter((x) => x.type === "page" && x.id !== tab.id && /^(about:blank|chrome:\/\/newtab\/?|chrome:\/\/new-tab-page\/?)$/.test(x.url))) await fetch(`${session.CDP_URL}/json/close/${t.id}`).catch(() => {});
+        } catch {}
+      }
       let targetId = tab.id;
       let client = tab.client;
       s.reused = tab.reused;
@@ -441,6 +457,7 @@ async function start(ai, prompt, kind = "post", mode = "default") {
         sent = await confirmed(9000);
       }
       s.status = "chatting";
+      if (sent) failedStreak = 0;
       if (!sent) s.note = "요청문이 AI 화면에 보이지 않아요. 탭에서 요청문을 붙여넣고 [보내기]를 눌러주세요 (아래 [요청문 복사] 버튼으로 복사할 수 있어요).";
       else if (s.note && /다시 보내요/.test(s.note)) s.note = "";
 
@@ -491,7 +508,8 @@ async function start(ai, prompt, kind = "post", mode = "default") {
       }
     } catch (e) {
       s.status = "error";
-      s.error = e.message;
+      s.error = e.message + " — 버튼을 한 번 더 누르면 크롬을 다시 시작해서 열어요.";
+      failedStreak++;
     } finally {
       if (s.client) s.client.close();
       delete s.client;
@@ -603,11 +621,7 @@ async function askWebInner(ai, prompt, accept, timeoutMs, background) {
     if (!client || !client.eval) client = null;
   }
   if (!client) {
-    const version = await (await fetch(`${session.CDP_URL}/json/version`)).json();
-    const browserWs = await connectPage(version.webSocketDebuggerUrl);
-    const t = await browserWs.send("Target.createTarget", { url: "about:blank", newWindow: false });
-    browserWs.close();
-    id = t.targetId;
+    id = await session.createTab("about:blank");
     client = await connectPage(`ws://localhost:${port}/devtools/page/${id}`);
     rememberTab(key, id);
   }

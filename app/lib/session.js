@@ -215,6 +215,67 @@ async function ensureWindow() {
   await sleep(1500);
 }
 
+/**
+ * 로그인 크롬에 새 탭을 만든다. 창이 하나도 없어서 "Failed to open new tab - no browser is open"가 나면
+ * 창을 하나 열어 주고 다시 만든다 (크롬을 껐다 켜거나 창을 전부 닫은 직후에 생기는 오류).
+ */
+async function createTab(url = "about:blank") {
+  let lastErr;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    let ws;
+    try {
+      const v = await (await fetch(`${CDP_URL}/json/version`, { signal: AbortSignal.timeout(4000) })).json();
+      ws = await require("./like").connectPage(v.webSocketDebuggerUrl);
+      const r = await ws.send("Target.createTarget", { url, newWindow: false });
+      return r.targetId;
+    } catch (e) {
+      lastErr = e;
+      if (!/no browser is open|Failed to open|closed|ECONNREFUSED|fetch failed/i.test(String(e.message))) throw e;
+      await ensureDebugChrome({ quick: true }).catch(() => {}); // 크롬이 꺼졌으면 켜고, 창이 없으면 창을 연다
+      await sleep(800);
+      // 방금 창을 열면서 생긴 빈 탭이 있으면 새 탭을 또 만들지 않고 그걸 쓴다 (빈 창이 하나 더 남는 걸 막는다)
+      try {
+        const pages = (await (await fetch(`${CDP_URL}/json/list`, { signal: AbortSignal.timeout(3000) })).json()).filter((t) => t.type === "page");
+        const blank = pages.length === 1 && /^(about:blank|chrome:\/\/newtab\/?|chrome:\/\/new-tab-page\/?)$/.test(pages[0].url) ? pages[0] : null;
+        if (blank) {
+          if (url && url !== "about:blank") {
+            const c = await require("./like").connectPage(blank.webSocketDebuggerUrl);
+            await c.send("Page.navigate", { url }).catch(() => {});
+            c.close();
+          }
+          return blank.id;
+        }
+      } catch {}
+    } finally {
+      try { ws && ws.close(); } catch {}
+    }
+  }
+  throw lastErr || new Error("크롬에 새 탭을 만들지 못했어요.");
+}
+
+/**
+ * 로그인 크롬을 완전히 껐다가 다시 켠다 (중복으로 창을 또 여는 게 아니라, 이 프로그램 전용 크롬을 정리하고 하나만 새로 띄운다).
+ * 같은 때 여러 번 불려도 한 번만 실행된다. 평소 쓰는 크롬(다른 프로필)은 건드리지 않는다.
+ */
+let restarting = null;
+function restartChrome() {
+  if (restarting) return restarting;
+  restarting = (async () => {
+    killStaleProfileChrome();
+    const dir = runningProfileDir();
+    if (dir && dir.toLowerCase() !== CHROME_PROFILE_DIR.toLowerCase()) {
+      // 9222 포트를 다른 폴더의 크롬이 쥐고 있으면 그 프로세스도 함께 정리한다 (다른 폴더에 설치한 이 프로그램의 크롬)
+      try {
+        require("child_process").execFileSync("powershell.exe", ["-NoProfile", "-Command", `Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" | Where-Object { $_.CommandLine -and $_.CommandLine.Contains('--remote-debugging-port=${CDP_PORT}') } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }`], { timeout: 15000, windowsHide: true, stdio: "ignore" });
+      } catch {}
+    }
+    for (let i = 0; i < 10 && (await isCdpUp()); i++) await sleep(500);
+    await sleep(1200);
+    return ensureDebugChrome({ quick: true });
+  })().finally(() => { restarting = null; });
+  return restarting;
+}
+
 async function ensureDebugChrome(opts = {}) {
   if (await isCdpUp()) {
     await ensureWindow();
@@ -497,6 +558,8 @@ module.exports = {
   openLoggedInContext,
   openVisibleContext,
   ensureDebugChrome,
+  restartChrome,
+  createTab,
   launchHeadless,
   newBackgroundPage,
   notifyChrome,

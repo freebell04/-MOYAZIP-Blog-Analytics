@@ -118,10 +118,7 @@ async function openInVisitTab(url, tag = "") {
       }
     } catch {}
   }
-  const version = await (await fetch(`${session.CDP_URL}/json/version`)).json();
-  const browserWs = await connectPage(version.webSocketDebuggerUrl);
-  const { targetId } = await browserWs.send("Target.createTarget", { url, newWindow: false });
-  browserWs.close();
+  const targetId = await session.createTab(url);
   Object.assign(visitTab, { id: targetId, tag });
   fetch(`${session.CDP_URL}/json/activate/${targetId}`).catch(() => {});
   return targetId;

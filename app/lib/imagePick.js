@@ -231,10 +231,7 @@ async function startPick({ chapter, query, engine = "naver", openUrl }) {
   (async () => {
     try {
       await session.ensureDebugChrome();
-      const version = await (await fetch(`${session.CDP_URL}/json/version`)).json();
-      const browserWs = await connectPage(version.webSocketDebuggerUrl);
-      const { targetId } = await browserWs.send("Target.createTarget", { url: "about:blank", newWindow: false });
-      browserWs.close();
+      const targetId = await session.createTab("about:blank");
       s.targetId = targetId;
       session.notifyChrome("이미지 검색 창 — 마음에 드는 이미지를 클릭하세요");
       const port = new URL(session.CDP_URL).port || "9222";
