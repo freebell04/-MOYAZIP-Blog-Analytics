@@ -107,6 +107,21 @@ async function grabImage(client, src) {
     const m = String(dataUrl || "").match(/^data:([\w/+.-]+);base64,([A-Za-z0-9+/=]+)$/);
     if (m) return { mime: m[1], data: m[2] };
   } catch {}
+  // 2) 화면에 올라온 그 이미지의 원본 픽셀을 canvas로 그려서 PNG로 받는다 (Gemini는 blob 주소라 fetch가 막히지만 이건 된다).
+  //    화면 캡처처럼 주변 화면이 섞이거나 잘리지 않는다
+  try {
+    const dataUrl = await client.eval(`(() => {
+      const i = [...document.querySelectorAll("img")].find((x) => (x.currentSrc || x.src) === ${JSON.stringify(src)});
+      if (!i || !i.complete || !i.naturalWidth) return "";
+      const cv = document.createElement("canvas");
+      cv.width = i.naturalWidth; cv.height = i.naturalHeight;
+      cv.getContext("2d").drawImage(i, 0, 0);
+      return cv.toDataURL("image/png");
+    })()`);
+    const m2 = String(dataUrl || "").match(/^data:([\w/+.-]+);base64,([A-Za-z0-9+/=]+)$/);
+    if (m2) return { mime: m2[1], data: m2[2] };
+  } catch {}
+  // 3) 그래도 안 되면 마지막 수단으로 화면 캡처
   const rect = await client.eval(SHOT_RECT(src));
   if (!rect) throw new Error("만들어진 이미지를 찾지 못했어요.");
   await sleep(500);

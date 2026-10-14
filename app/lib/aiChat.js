@@ -165,6 +165,18 @@ async function targetAlive(targetId) {
 }
 
 // 입력창에 붙어 있는 "붙여넣은 텍스트" 첨부의 [제거] 버튼 (보내고 나면 사라진다)
+// 사용자 말풍선 중 "완성"만 보낸 것의 개수 (ChatGPT·Gemini). 이 숫자가 늘어야 AI가 낸 JSON을 결과로 받는다 —
+// AI가 사용자가 말하기 전에 혼자 JSON을 만들어도 그건 결과로 보지 않는다
+const USER_SEL = { chatgpt: '[data-message-author-role="user"], [class*="group/user-message"]', gemini: "user-query" };
+const DONE_COUNT_JS = (userSel) => `(() => {
+  const sel = ${JSON.stringify(userSel)};
+  return [...document.querySelectorAll(sel)]
+    .filter((e) => !(e.parentElement && e.parentElement.closest(sel)))
+    .filter((e) => {
+      const lines = (e.innerText || "").trim().replace(/^(?:내가 한 말|말씀하신 내용)[:\\s]*/, "").split("\\n").map((s) => s.trim()).filter(Boolean);
+      return lines.length > 0 && lines.every((s) => /^완성[\\s.!~]*$/.test(s));
+    }).length;
+})()`;
 const PASTED_CHIP = 'button[aria-label*="붙여넣은 텍스트 첨부 제거"], button[aria-label*="Remove pasted"]';
 /** 요청문을 입력창에 넣는다. 붙여넣기 이벤트를 먼저 쓰고(줄바꿈이 그대로 살아서), 안 되면 직접 입력한다. */
 async function putPrompt(client, sel, prompt) {
@@ -179,7 +191,7 @@ async function putPrompt(client, sel, prompt) {
   const len = await client.eval(`(document.querySelector(${JSON.stringify(sel)}).innerText || "").trim().length`);
   // 긴 글을 붙여넣으면 ChatGPT는 입력창 대신 "붙여넣은 텍스트" 첨부로 바꿔 넣는다 — 그것도 들어간 것
   const attached = await client.eval(`!!document.querySelector('${PASTED_CHIP}')`).catch(() => false);
-  if (len < 20 && !attached) {
+  if (len < Math.min(20, String(prompt).trim().length) && !attached) { // (짧은 글은 20자 미만이어도 이미 들어간 것이다)
     await client.eval(`document.querySelector(${JSON.stringify(sel)}).focus()`);
     await client.send("Input.insertText", { text: prompt });
     await sleep(600);
@@ -428,6 +440,9 @@ async function start(ai, prompt, kind = "post", mode = "default", _auto = false)
         await sleep(300);
       }
       const marker = "req" + Math.random().toString(36).slice(2, 7);
+      // 글쓰기·형식 분석은 사용자가 "완성"이라고 보낸 뒤의 JSON만 받는다 (사이트마다 말풍선 구조를 아는 ChatGPT·Gemini에서)
+      const gateSel = (kind === "post" || kind === "format") ? USER_SEL[ai] : null;
+      const doneBase = gateSel ? ((await client.eval(DONE_COUNT_JS(gateSel)).catch(() => 0)) || 0) : 0;
       s.status = "sending";
       const full = `${prompt}\n\n(요청 번호: ${marker})`;
       // 보냈는지는 "입력창이 비었다"가 아니라 "대화에 우리 요청(요청 번호)이 보이고 입력창엔 없다"로 확인한다.
@@ -482,7 +497,11 @@ async function start(ai, prompt, kind = "post", mode = "default", _auto = false)
         // 요청문이 보이면 그 뒤에 나온 결과만 / 아직 안 보이면(보내기 전·전송 실패) 기준 개수보다 늘어난 결과만
         // (긴 대화는 위쪽 말풍선이 화면에서 빠져 개수가 안 늘 수 있어서, 보내기 전에 없던 새 내용의 JSON이면 새 결과로 본다)
         const isNew = cur && cur.found && (cur.sigs || []).some((g) => !baseSigs.includes(g));
-        const found = cur && cur.found && (cur.markerFound || cur.count > baseline || isNew) ? JSON.stringify(cur.found) : null;
+        let found = cur && cur.found && (cur.markerFound || cur.count > baseline || isNew) ? JSON.stringify(cur.found) : null;
+        if (found && gateSel) {
+          const doneNow = (await client.eval(DONE_COUNT_JS(gateSel)).catch(() => doneBase + 1)) || 0;
+          if (doneNow <= doneBase) { found = null; s.note = 'AI가 먼저 JSON을 만들었어요. 괜찮으면 "완성"이라고 보내주세요 — 보내기 전에는 다음으로 넘어가지 않아요.'; }
+        }
         if (found && found === last) {
           const r = JSON.parse(found);
           s.kind = r.kind; // 글감으로 시작했는데 형식(분석) 결과가 온 경우 등, 실제로 받은 종류를 따른다
