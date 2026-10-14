@@ -336,7 +336,7 @@ async function findReusableTab(ai, site) {
 /** AI 채팅 탭을 열고 요청문을 보낸 뒤, 결과 JSON이 나올 때까지 지켜본다 (바로 반환 — 진행은 getState()). */
 // 바로 앞에서 열기에 실패했으면, 이번 버튼은 크롬을 다시 시작해서 연다 (창을 또 여는 게 아니라 하나만 새로 띄움)
 let failedStreak = 0;
-async function start(ai, prompt, kind = "post", mode = "default") {
+async function start(ai, prompt, kind = "post", mode = "default", _auto = false) {
   const site = SITES[ai];
   if (!site) throw new Error("알 수 없는 AI예요: " + ai);
   if (state.client) state.client.close(); // 이전 대화 지켜보기는 그만둔다 (탭은 그대로 둠)
@@ -351,6 +351,11 @@ async function start(ai, prompt, kind = "post", mode = "default") {
         let busy = false;
         try { busy = require("./blogEditor").isBusy(); } catch {}
         if (busy) throw new Error("지금 블로그 글쓰기 창에 글을 쓰는 중이라 크롬을 다시 시작하지 않았어요. 끝난 뒤 다시 눌러주세요.");
+        // 저장 안 한 글이 있을 수 있는 네이버 글쓰기 창이 열려 있으면 크롬을 끄지 않는다
+        try {
+          const open = (await (await fetch(`${session.CDP_URL}/json/list`, { signal: AbortSignal.timeout(2500) })).json()).filter((t) => t.type === "page" && /PostWriteForm|postwrite|Redirect=Write|PostUpdateForm/i.test(t.url));
+          if (open.length) throw new Error("네이버 글쓰기 창이 열려 있어서 크롬을 다시 시작하지 않았어요 (쓰던 글이 사라질 수 있어요). 글을 임시저장하거나 그 창을 닫은 뒤 다시 눌러주세요.");
+        } catch (e) { if (/글쓰기 창이 열려/.test(e.message)) throw e; }
         await session.restartChrome();
         for (const k of Object.keys(readTabs())) { try { require("fs").writeFileSync(TABS_PATH, "{}"); } catch {} break; } // 기억해 둔 탭 번호는 새 크롬에선 쓸 수 없다
         for (const k of Object.keys(newChatAt)) delete newChatAt[k];
@@ -507,9 +512,18 @@ async function start(ai, prompt, kind = "post", mode = "default") {
         await sleep(2000);
       }
     } catch (e) {
-      s.status = "error";
-      s.error = e.message + " — 버튼을 한 번 더 누르면 크롬을 다시 시작해서 열어요.";
-      failedStreak++;
+      const protectedMsg = /글쓰기 창|크롬을 다시 시작하지 않았어요/.test(e.message);
+      if (!_auto && !protectedMsg && s === state) {
+        // 열기에 실패하면 사용자가 다시 누르지 않아도 한 번은 알아서 크롬을 다시 시작해서 열어 본다
+        failedStreak++;
+        s.status = "opening";
+        s.note = "열리지 않아서 크롬을 다시 시작해서 열어요 (10~20초)...";
+        setTimeout(() => { if (s === state) start(ai, prompt, kind, mode, true); }, 300);
+      } else {
+        s.status = "error";
+        s.error = e.message + (protectedMsg ? "" : " — 버튼을 한 번 더 누르면 크롬을 다시 시작해서 열어요.");
+        failedStreak++;
+      }
     } finally {
       if (s.client) s.client.close();
       delete s.client;
