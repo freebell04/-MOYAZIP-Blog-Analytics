@@ -364,7 +364,7 @@ async function start(ai, prompt, kind = "post", mode = "default") {
         // 크롬을 새로 켜면서 생긴 빈 탭은 닫는다 (빈 창이 남아 "또 열렸다"처럼 보이지 않게)
         try {
           const all = await (await fetch(`${session.CDP_URL}/json/list`)).json();
-          for (const t of all.filter((x) => x.type === "page" && x.id !== tab.id && /^(about:blank|chrome:\/\/newtab\/?|chrome:\/\/new-tab-page\/?)$/.test(x.url))) await fetch(`${session.CDP_URL}/json/close/${t.id}`).catch(() => {});
+          for (const t of all.filter((x) => x.type === "page" && x.id !== tab.id && /^(about:blank|chrome:\/\/newtab\/?|chrome:\/\/new-tab-page\/?|https:\/\/www\.naver\.com\/?)$/.test(x.url))) await fetch(`${session.CDP_URL}/json/close/${t.id}`).catch(() => {});
         } catch {}
       }
       let targetId = tab.id;

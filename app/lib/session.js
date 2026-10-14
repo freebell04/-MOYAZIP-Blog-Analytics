@@ -199,13 +199,16 @@ async function hasOpenPage() {
  * 새 탭을 만들 수 없다 ("Failed to open new tab - no browser is open"). 이럴 땐 같은 프로필로 크롬을 한 번 더
  * 실행해서(이미 켜진 크롬이 받아서) 새 창을 하나 열어준다.
  */
+let ensuredAt = 0; // 창이 없어서 방금 우리가 연 시각
 async function ensureWindow() {
   if (await hasOpenPage()) return;
   const chromePath = findChromePath();
   if (!chromePath) return;
   // 9222 포트를 실제로 쥐고 있는 크롬이 쓰는 프로필 폴더로 연다 (다른 폴더에 설치한 프로그램의 크롬일 수도 있어서)
   const dir = runningProfileDir() || CHROME_PROFILE_DIR;
-  spawn(chromePath, [`--user-data-dir=${dir}`, "--window-name=블로그 도우미 전용 크롬", "about:blank"], { detached: true, stdio: "ignore" }).unref();
+  // 빈 화면(about:blank)이 아니라 네이버를 열어 둔다 — 어차피 이 크롬은 네이버에 로그인해서 쓰는 창이다
+  ensuredAt = Date.now();
+  spawn(chromePath, [`--user-data-dir=${dir}`, "--window-name=블로그 도우미 전용 크롬", "https://www.naver.com/"], { detached: true, stdio: "ignore" }).unref();
   for (let i = 0; i < 12; i++) {
     await sleep(500);
     if (await hasOpenPage()) return;
@@ -236,7 +239,8 @@ async function createTab(url = "about:blank") {
       // 방금 창을 열면서 생긴 빈 탭이 있으면 새 탭을 또 만들지 않고 그걸 쓴다 (빈 창이 하나 더 남는 걸 막는다)
       try {
         const pages = (await (await fetch(`${CDP_URL}/json/list`, { signal: AbortSignal.timeout(3000) })).json()).filter((t) => t.type === "page");
-        const blank = pages.length === 1 && /^(about:blank|chrome:\/\/newtab\/?|chrome:\/\/new-tab-page\/?)$/.test(pages[0].url) ? pages[0] : null;
+        const justOpened = Date.now() - ensuredAt < 60000 && /^https:\/\/www\.naver\.com\/?(\?.*)?$/.test((pages[0] || {}).url || "");
+        const blank = pages.length === 1 && (justOpened || /^(about:blank|chrome:\/\/newtab\/?|chrome:\/\/new-tab-page\/?)$/.test(pages[0].url)) ? pages[0] : null;
         if (blank) {
           if (url && url !== "about:blank") {
             const c = await require("./like").connectPage(blank.webSocketDebuggerUrl);
