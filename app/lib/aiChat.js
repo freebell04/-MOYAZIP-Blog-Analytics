@@ -405,10 +405,44 @@ async function start(ai, prompt, kind = "post", mode = "default") {
       }
       const marker = "req" + Math.random().toString(36).slice(2, 7);
       s.status = "sending";
-      await putPrompt(client, sel, `${prompt}\n\n(요청 번호: ${marker})`);
-      const sent = await pressSend(client, site, sel);
+      const full = `${prompt}\n\n(요청 번호: ${marker})`;
+      // 보냈는지는 "입력창이 비었다"가 아니라 "대화에 우리 요청(요청 번호)이 보이고 입력창엔 없다"로 확인한다.
+      // (입력창에 아무것도 안 들어간 채로도 비어 있으니 '보냈다'로 착각해서, 빈 대화 화면만 남는 일이 있었다)
+      const confirmed = async (waitMs) => {
+        const until = Date.now() + waitMs;
+        while (Date.now() < until) {
+          const ok = await client.eval(`(() => {
+            const inp = document.querySelector(${JSON.stringify(sel)});
+            const inInput = inp ? (inp.innerText || "").includes(${JSON.stringify(marker)}) : false;
+            return !inInput && (document.body.innerText || "").includes(${JSON.stringify(marker)});
+          })()`).catch(() => false);
+          if (ok) return true;
+          await sleep(700);
+        }
+        return false;
+      };
+      let sent = false;
+      for (let attempt = 0; attempt < 3 && !sent; attempt++) {
+        if (attempt > 0) {
+          // 이미 대화에 보였다면(느리게 그려진 경우) 또 보내지 않는다. 입력창이 비어 있을 때만 다시 넣는다
+          if (await confirmed(1500)) { sent = true; break; }
+          const left = (await client.eval(`((document.querySelector(${JSON.stringify(sel)}) || {}).innerText || "").trim().length`).catch(() => 0)) || 0;
+          if (left > 20) {
+            await pressSend(client, site, sel);
+          } else {
+            s.note = `요청이 전달되지 않아 다시 보내요 (${attempt + 1}/3)`;
+            await putPrompt(client, sel, full);
+            await pressSend(client, site, sel);
+          }
+        } else {
+          if (process.env.NBH_TEST_SKIP_FIRST_PUT !== "1") await putPrompt(client, sel, full); // (시험용: 첫 입력을 일부러 빼먹어 보기)
+          await pressSend(client, site, sel);
+        }
+        sent = await confirmed(9000);
+      }
       s.status = "chatting";
-      if (!sent) s.note = "요청문을 입력창에 넣었어요. 탭에서 [보내기]를 눌러주세요.";
+      if (!sent) s.note = "요청문이 AI 화면에 보이지 않아요. 탭에서 요청문을 붙여넣고 [보내기]를 눌러주세요 (아래 [요청문 복사] 버튼으로 복사할 수 있어요).";
+      else if (s.note && /다시 보내요/.test(s.note)) s.note = "";
 
       // 사용자가 대화를 마치고 "완성"이라고 하면 나오는 JSON을 기다린다 (스트리밍 중엔 JSON이 깨져 있어 통과 못 함,
       // 그래도 혹시 모르니 같은 결과가 두 번 연속 보일 때 확정)
