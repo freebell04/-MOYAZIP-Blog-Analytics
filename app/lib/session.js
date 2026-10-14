@@ -214,6 +214,7 @@ async function ensureWindow() {
   const dir = runningProfileDir() || CHROME_PROFILE_DIR;
   // 빈 화면(about:blank)이 아니라 네이버를 열어 둔다 — 어차피 이 크롬은 네이버에 로그인해서 쓰는 창이다
   ensuredAt = Date.now();
+  try { require("./windowLayout").splitSoon([1500, 4500]); } catch {}
   spawn(chromePath, [`--user-data-dir=${dir}`, "--window-name=블로그 도우미 전용 크롬", "https://www.naver.com/"], { detached: true, stdio: "ignore" }).unref();
   for (let i = 0; i < 12; i++) {
     await sleep(500);
@@ -324,6 +325,8 @@ async function ensureDebugChromeOnce(opts = {}) {
     });
     child.unref();
     launchedAt = Date.now();
+    // 전용 크롬은 전체화면이 아니라 화면 오른쪽 반에 놓는다 (왼쪽은 이 프로그램 화면)
+    try { require("./windowLayout").splitSoon([1500, 4500, 9000]); } catch {}
     notifyChrome("크롬이 새로 열렸어요");
     // 포트가 뜰 때까지 최대 8초 대기
     for (let i = 0; i < 16; i++) {
