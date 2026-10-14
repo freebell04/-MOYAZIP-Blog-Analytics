@@ -202,6 +202,12 @@ async function hasOpenPage() {
 let ensuredAt = 0; // 창이 없어서 방금 우리가 연 시각
 async function ensureWindow() {
   if (await hasOpenPage()) return;
+  // 크롬이 막 켜지는 중이면 첫 창이 뜰 때까지 기다린다 (그 사이에 또 열면 창이 두 개가 된다)
+  const justLaunched = Date.now() - launchedAt < 60000;
+  for (let i = 0; i < (justLaunched ? 16 : 3); i++) {
+    await sleep(500);
+    if (await hasOpenPage()) return;
+  }
   const chromePath = findChromePath();
   if (!chromePath) return;
   // 9222 포트를 실제로 쥐고 있는 크롬이 쓰는 프로필 폴더로 연다 (다른 폴더에 설치한 프로그램의 크롬일 수도 있어서)
@@ -239,7 +245,7 @@ async function createTab(url = "about:blank") {
       // 방금 창을 열면서 생긴 빈 탭이 있으면 새 탭을 또 만들지 않고 그걸 쓴다 (빈 창이 하나 더 남는 걸 막는다)
       try {
         const pages = (await (await fetch(`${CDP_URL}/json/list`, { signal: AbortSignal.timeout(3000) })).json()).filter((t) => t.type === "page");
-        const justOpened = Date.now() - ensuredAt < 60000 && /^https:\/\/www\.naver\.com\/?(\?.*)?$/.test((pages[0] || {}).url || "");
+        const justOpened = Date.now() - Math.max(ensuredAt, launchedAt) < 60000 && /^https:\/\/www\.naver\.com\/?(\?.*)?$/.test((pages[0] || {}).url || "");
         const blank = pages.length === 1 && (justOpened || /^(about:blank|chrome:\/\/newtab\/?|chrome:\/\/new-tab-page\/?)$/.test(pages[0].url)) ? pages[0] : null;
         if (blank) {
           if (url && url !== "about:blank") {
@@ -280,7 +286,16 @@ function restartChrome() {
   return restarting;
 }
 
-async function ensureDebugChrome(opts = {}) {
+// 여러 곳(이웃 소통·통계·AI 버튼…)이 동시에 "크롬 준비"를 부르면, 각자 크롬을 또 띄워서 창이 여러 개 뜬다.
+// 진행 중인 준비가 있으면 그 결과를 같이 기다린다 (창은 하나만 뜬다)
+let ensuring = null;
+function ensureDebugChrome(opts = {}) {
+  if (ensuring) return ensuring;
+  ensuring = ensureDebugChromeOnce(opts).finally(() => { ensuring = null; });
+  return ensuring;
+}
+let launchedAt = 0; // 우리가 크롬을 막 띄운 시각
+async function ensureDebugChromeOnce(opts = {}) {
   if (await isCdpUp()) {
     await ensureWindow();
     if (await isCdpUp()) {
@@ -301,12 +316,14 @@ async function ensureDebugChrome(opts = {}) {
     // 이 전용 크롬을 처음 켜는 거면 무엇을 하는 창인지(로그인 안내) 첫 탭으로 보여준다
     const firstRun = !fs.existsSync(path.join(CHROME_PROFILE_DIR, "Default"));
     const args = [`--remote-debugging-port=${CDP_PORT}`, `--user-data-dir=${CHROME_PROFILE_DIR}`, "--window-name=블로그 도우미 전용 크롬", "--no-first-run", "--no-default-browser-check"];
-    if (firstRun) args.push(`http://localhost:${process.env.PORT || 3300}/chrome-welcome.html`);
+    // 처음엔 로그인 안내 화면, 그다음부터는 네이버 첫 화면 한 개 (로그인이 저장돼 있어서 로그인된 상태로 바로 보인다)
+    args.push(firstRun ? `http://localhost:${process.env.PORT || 3300}/chrome-welcome.html` : "https://www.naver.com/");
     const child = spawn(chromePath, args, {
       detached: true,
       stdio: "ignore",
     });
     child.unref();
+    launchedAt = Date.now();
     notifyChrome("크롬이 새로 열렸어요");
     // 포트가 뜰 때까지 최대 8초 대기
     for (let i = 0; i < 16; i++) {
