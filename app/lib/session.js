@@ -174,11 +174,14 @@ function runningProfileDir() {
   try {
     const out = require("child_process").execFileSync(
       "powershell.exe",
-      ["-NoProfile", "-Command", `Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" | Where-Object { $_.CommandLine -match '--remote-debugging-port=${CDP_PORT}' -and $_.CommandLine -notmatch '--type=' } | Select-Object -First 1 -ExpandProperty CommandLine`],
+      ["-NoProfile", "-Command", `[Console]::OutputEncoding=[Text.Encoding]::UTF8; Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" | Where-Object { $_.CommandLine -match '--remote-debugging-port=${CDP_PORT}' -and $_.CommandLine -notmatch '--type=' } | Select-Object -First 1 -ExpandProperty CommandLine`],
       { timeout: 10000, windowsHide: true }
     ).toString();
-    const m = out.match(/--user-data-dir=(?:"([^"]+)"|(\S+))/);
-    return m ? (m[1] || m[2]) : "";
+    // 경로에 공백이 있으면 크롬 명령줄이 "--user-data-dir=C:\내 폴더\data" 처럼 통째로 따옴표로 묶여 나온다.
+    // (\S+로 읽으면 공백 앞에서 잘려, 엉뚱한 폴더로 크롬을 열어 로그인 안 된 창이 하나 더 뜬다)
+    const m = out.match(/--user-data-dir=(?:"([^"]+)"|(.+?))(?:"|\s+--|\s*$)/);
+    const dir = m ? String(m[1] || m[2]).trim() : "";
+    return dir && fs.existsSync(dir) ? dir : ""; // 한글이 깨진 경로 등 없는 폴더면 쓰지 않는다 (엉뚱한 새 프로필 창이 뜨는 걸 막는다)
   } catch {
     return "";
   }
@@ -186,12 +189,15 @@ function runningProfileDir() {
 
 /** 열려 있는 크롬 창(탭)이 하나라도 있는지 */
 async function hasOpenPage() {
-  try {
-    const list = await (await fetch(`${CDP_URL}/json/list`, { signal: AbortSignal.timeout(2000) })).json();
-    return list.some((t) => t.type === "page");
-  } catch {
-    return false;
+  for (let i = 0; i < 3; i++) {
+    try {
+      const list = await (await fetch(`${CDP_URL}/json/list`, { signal: AbortSignal.timeout(2500) })).json();
+      return list.some((t) => t.type === "page");
+    } catch {
+      if (!(await isCdpUp())) return false; // 크롬이 꺼진 거면 바로 "없음"
+    }
   }
+  return true; // 포트는 열려 있는데 목록만 못 받는 중(막 켜지는 중) → 창이 있다고 보고 새로 열지 않는다
 }
 
 /**
@@ -210,9 +216,10 @@ async function ensureWindow() {
   }
   const chromePath = findChromePath();
   if (!chromePath) return;
-  // 9222 포트를 실제로 쥐고 있는 크롬이 쓰는 프로필 폴더로 연다 (다른 폴더에 설치한 프로그램의 크롬일 수도 있어서)
-  const dir = runningProfileDir() || CHROME_PROFILE_DIR;
-  // 빈 화면(about:blank)이 아니라 네이버를 열어 둔다 — 어차피 이 크롬은 네이버에 로그인해서 쓰는 창이다
+  // 9222 포트를 실제로 쥐고 있는 크롬이 쓰는 프로필 폴더로만 연다.
+  // 그 폴더를 확인하지 못하면 아무것도 열지 않는다 (다른 폴더로 열면 로그인 안 된 새 크롬 창이 하나 더 뜬다)
+  const dir = runningProfileDir();
+  if (!dir) return;
   ensuredAt = Date.now();
   try { require("./windowLayout").splitSoon([1500, 4500]); } catch {}
   spawn(chromePath, [`--user-data-dir=${dir}`, "--window-name=블로그 도우미 전용 크롬", "https://www.naver.com/"], { detached: true, stdio: "ignore" }).unref();
@@ -220,7 +227,7 @@ async function ensureWindow() {
     await sleep(500);
     if (await hasOpenPage()) return;
   }
-  // 그래도 창이 안 생기면 크롬이 제대로 응답하지 않는 상태 → 이 프로필의 크롬을 정리하고 처음부터 다시 띄운다
+  // 그래도 창이 안 생기면 크롬이 제대로 응답하지 않는 상태 → 이 프로필의 크롬을 정리한다 (다음 호출에서 하나만 새로 띄운다)
   killStaleProfileChrome();
   await sleep(1500);
 }
@@ -315,6 +322,7 @@ async function ensureDebugChromeOnce(opts = {}) {
     }
     // 평소 쓰는 크롬과 헷갈리지 않게 창 제목을 "블로그 도우미 전용 크롬"으로 붙이고,
     // 이 전용 크롬을 처음 켜는 거면 무엇을 하는 창인지(로그인 안내) 첫 탭으로 보여준다
+    if (await isCdpUp()) return { alreadyRunning: true }; // 그 사이 이미 켜졌다 — 창을 또 열지 않는다
     const firstRun = !fs.existsSync(path.join(CHROME_PROFILE_DIR, "Default"));
     const args = [`--remote-debugging-port=${CDP_PORT}`, `--user-data-dir=${CHROME_PROFILE_DIR}`, "--window-name=블로그 도우미 전용 크롬", "--no-first-run", "--no-default-browser-check"];
     // 처음엔 로그인 안내 화면, 그다음부터는 네이버 첫 화면 한 개 (로그인이 저장돼 있어서 로그인된 상태로 바로 보인다)
