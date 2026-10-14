@@ -791,7 +791,7 @@ async function startPickFor(i, engine) {
     .catch((e) => ({ error: e.message }));
   if (r.error) return pickState(i, `<span class="error">⚠ ${esc(netMsg(r.error))}</span>`);
   clearInterval(pickPoll);
-  pickPoll = setInterval(pollPick, 1000);
+  pickPoll = setInterval(pollPick, 500);
   pollPick();
 }
 
@@ -810,7 +810,7 @@ async function pollPick() {
   if (!it || !pickRow(i)) return clearInterval(pickPoll);
   // 지금 고르는 챕터가 아닌 칸은 "고른 이미지가 있으면 안내", 없으면 비움
   pickItems.forEach((x, k) => { if (k !== i && !x.file) pickState(k, ""); else if (k !== i) pickState(k, "✅ 복사했던 이미지예요 · 누르면 다시 복사돼요"); });
-  if (st.file && pickSeen[i] !== st.seq) { // 새로 복사된 이미지
+  if (st.file && (pickSeen[i] !== st.seq || it.file !== st.file)) { // 새로 복사된 이미지 → 썸네일을 바로 바꾼다
     pickSeen[i] = st.seq;
     Object.assign(it, { file: st.file, previewUrl: st.previewUrl, quality: st.quality });
     paintThumb(i);
@@ -830,7 +830,11 @@ async function pollPick() {
       pickState(i, slow ? `⚠ 크롬 탭에서 클릭 감지가 아직 안 켜졌어요 (크롬 위쪽에 초록 안내줄이 없으면 이 상태예요). 크롬의 그 탭을 새로고침(F5)하거나, 검색 버튼을 다시 눌러주세요.${st.pageUrl ? `<br><small class="muted">현재 탭 주소: ${esc(st.pageUrl)}</small>` : ""}${err}` : `⏳ 크롬 이미지 검색을 준비하는 중이에요...${err}`);
     }
   }
-  else if (st.status === "working") pickState(i, "⏳ 이미지를 복사하는 중이에요...");
+  else if (st.status === "working") {
+    pickState(i, "⏳ 이미지를 복사하는 중이에요...");
+    const th = pickRow(i) && pickRow(i).querySelector(".si-thumb");
+    if (th && !it.file) th.innerHTML = `<div class="si-empty">⏳ 이미지 가져오는 중...</div>`; // 고르는 순간 칸이 바로 반응하게
+  }
   else if (st.status === "copied" && (genWaitingChapter = null, st.pasted)) pickState(i, `✅ 글쓰기 창의 이 블록 아래에 이미지를 넣었어요 (${esc(st.quality)}) · 마음에 안 들면 다른 이미지를 다시 고르거나 [AI로 이미지 만들기]를 다시 누르면 그 자리의 이미지가 바뀌어요`);
   else if (st.status === "copied" && st.pasteNote) pickState(i, `✅ 이미지를 복사했어요 (${esc(st.quality)}) · ${how}<br><small class="muted">자동 붙여넣기는 못 했어요: ${esc(st.pasteNote)}</small>`);
   else if (st.status === "copied") pickState(i, `✅ 복사됐어요 (${esc(st.quality)}) · ${how} · 다른 이미지로 바꾸려면 마음에 드는 이미지를 다시 클릭하세요`);

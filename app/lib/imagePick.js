@@ -109,12 +109,12 @@ async function toPngSized(buf, mime, W, H) {
 
 /** AI 이미지 만들기 같은 다른 흐름이 진행 상태를 알릴 때 쓴다 (챕터 카드가 이미지 고르기와 같은 상태로 보여준다) */
 function setGenState(o) {
-  state = { count: 0, seq: (state && state.seq) || 0, ...o };
+  state = { count: 0, seq: seqCounter, ...o };
 }
 /** 다른 흐름에서 만든 이미지를 "복사됨" 상태로 알린다 */
 function adoptCopied({ chapter, file, quality, width, height, pasted, pasteNote }) {
   try { require("./usage").track("image"); } catch {}
-  state = { status: "copied", chapter, file, previewUrl: `/images/${file}`, quality, width, height, seq: ((state && state.seq) || 0) + 1, count: ((state && state.count) || 0) + 1, pasted: !!pasted, pasteNote: pasteNote || "" };
+  state = { status: "copied", chapter, file, previewUrl: `/images/${file}`, quality, width, height, seq: ++seqCounter, count: ((state && state.count) || 0) + 1, pasted: !!pasted, pasteNote: pasteNote || "" };
   if (!pasted) bringEditorToFront(); // 이미 붙여넣었으면 그 창이 이미 앞에 있다
 }
 
@@ -149,6 +149,7 @@ function copyImageToClipboard(file) {
 // ---------------------------------------------------------------------------
 let state = { status: "idle" };
 let current = null; // {client, targetId}
+let seqCounter = 0; // 복사할 때마다 늘어나는 번호 (같은 챕터를 다시 골라도 화면이 "새 이미지"로 알아본다)
 let lastTarget = null; // 가장 최근에 연 이미지 검색 탭 (다시 고를 때 재사용)
 const openedTabs = new Set(); // 이미지 검색으로 열었던 크롬 탭들 (모두 끝나면 닫는다)
 
@@ -201,7 +202,7 @@ async function handlePick(s, click) {
   const file = savePng(png);
   await copyImageToClipboard(file);
   try { require("./usage").track("image"); } catch {}
-  Object.assign(s, { status: "copied", file, previewUrl: `/images/${file}`, quality: got.quality, width: w, height: h, seq: (s.seq || 0) + 1, count: (s.count || 0) + 1 });
+  Object.assign(s, { status: "copied", file, previewUrl: `/images/${file}`, quality: got.quality, width: w, height: h, seq: ++seqCounter, count: (s.count || 0) + 1 });
 }
 
 /** 이미지를 복사할 때마다 붙여넣을 블로그 글쓰기 창을 앞으로 가져온다. 글을 자동으로 입력하는 중에는 건드리지 않는다. */
@@ -226,7 +227,7 @@ async function startPick({ chapter, query, engine = "naver", openUrl }) {
   if (!q) throw new Error("검색어가 비어 있어요.");
   const url = openUrl || (ENGINES[engine] || ENGINES.naver)(q);
   if (current && current.client) current.client.close(); // 이전 고르기는 그만둔다 (탭은 그대로 둠)
-  const s = (state = { status: "opening", chapter, query: q, engine, count: 0, seq: 0, armed: false });
+  const s = (state = { status: "opening", chapter, query: q, engine, count: 0, seq: seqCounter, armed: false });
   current = {};
 
   (async () => {
