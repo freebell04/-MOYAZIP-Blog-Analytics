@@ -262,9 +262,16 @@ async function startPick({ chapter, query, engine = "naver", openUrl }) {
         if (clicks && clicks.length) {
           const last = clicks[clicks.length - 1]; // 여러 번 눌렀으면 마지막 것
           try {
+            await client.eval(`window.__nbhCooldown = Date.now() + 60000`).catch(() => {}); // 붙여넣는 동안 또 눌러지지 않게
             await handlePick(s, last);
-            await client.eval(`window.__nbhCooldown = Date.now() + 2000; window.__nbhToast(${JSON.stringify("✅ 복사했어요 (" + s.quality + ") → 블로그 글쓰기 창에서 넣을 자리를 누르고 Ctrl+V · 다른 이미지로 바꾸려면 마음에 드는 이미지를 다시 클릭하세요")})`).catch(() => {});
-            bringEditorToFront(); // 붙여넣을 블로그 글쓰기 창을 바로 앞으로 (자동 입력 중이면 건드리지 않음)
+            // 글쓰기 창의 이 섹션 아래에 바로 넣는다. 이미 넣은 이미지가 있으면 지우고 바꾼다 (다시 고르면 교체)
+            await client.eval(`window.__nbhToast("⏳ 글쓰기 창에 이미지를 넣는 중이에요...", true)`).catch(() => {});
+            let pr = { ok: false, reason: "" };
+            try { pr = await require("./editorPaste").pasteImageAtChapter(s.chapter); } catch (e) { pr = { ok: false, reason: String(e.message || e).split("\n")[0] }; }
+            s.pasted = !!pr.ok;
+            s.pasteNote = pr.ok ? "" : pr.reason || "";
+            await client.eval(`window.__nbhCooldown = Date.now() + 2000; window.__nbhToast(${JSON.stringify(pr.ok ? "✅ 글쓰기 창에 넣었어요 (" + s.quality + ") · 다른 이미지로 바꾸려면 마음에 드는 이미지를 다시 클릭하세요" : "✅ 복사했어요 (" + s.quality + ") → 글쓰기 창에서 넣을 자리를 누르고 Ctrl+V")})`).catch(() => {});
+            if (!pr.ok) bringEditorToFront(); // 자동으로 못 넣었으면 붙여넣을 글쓰기 창을 앞으로 (자동 입력 중이면 건드리지 않음)
           } catch (e) {
             s.status = "waiting";
             s.error = e.message;

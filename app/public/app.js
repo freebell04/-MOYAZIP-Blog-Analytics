@@ -847,7 +847,7 @@ async function pollPick() {
     }
   }
   else if (st.status === "working") pickState(i, "⏳ 이미지를 복사하는 중이에요...");
-  else if (st.status === "copied" && (genWaitingChapter = null, st.pasted)) pickState(i, `✅ 글쓰기 창의 이 블록 아래에 이미지를 붙여넣었어요 (${esc(st.quality)}) · 마음에 안 들면 다시 눌러 만들 수 있어요`);
+  else if (st.status === "copied" && (genWaitingChapter = null, st.pasted)) pickState(i, `✅ 글쓰기 창의 이 블록 아래에 이미지를 넣었어요 (${esc(st.quality)}) · 마음에 안 들면 다른 이미지를 다시 고르거나 [AI로 이미지 만들기]를 다시 누르면 그 자리의 이미지가 바뀌어요`);
   else if (st.status === "copied" && st.pasteNote) pickState(i, `✅ 이미지를 복사했어요 (${esc(st.quality)}) · ${how}<br><small class="muted">자동 붙여넣기는 못 했어요: ${esc(st.pasteNote)}</small>`);
   else if (st.status === "copied") pickState(i, `✅ 복사됐어요 (${esc(st.quality)}) · ${how} · 다른 이미지로 바꾸려면 마음에 드는 이미지를 다시 클릭하세요`);
   else if (st.status === "closed" || st.status === "error") {
