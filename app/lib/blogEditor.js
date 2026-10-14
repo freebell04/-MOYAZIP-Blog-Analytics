@@ -896,8 +896,7 @@ async function saveDraftToNaver(post) {
               return { title: t(".se-documentTitle .se-text-paragraph").join(" ").slice(0, 120), body: t(".se-component:not(.se-documentTitle) .se-text-paragraph").join(" / ").slice(0, 600), quotes: document.querySelectorAll(".se-quotation").length, tables: document.querySelectorAll(".se-table").length };
             }).catch(() => ({}));
             const want = (styledBlocks ? styledBlocks.map((b) => b.text || (b.lines || []).join(" ") || b.type).join(" / ") : bodyText).slice(0, 600);
-            require("fs").appendFileSync(require("path").join(__dirname, "..", "data", "write-fail.log"), JSON.stringify({ at: new Date().toISOString(), attempt: attempt + 1, reason: check.reason, want, editor: snap }) + "
-");
+            require("fs").appendFileSync(require("path").join(__dirname, "..", "data", "write-fail.log"), JSON.stringify({ at: new Date().toISOString(), attempt: attempt + 1, reason: check.reason, want, editor: snap }) + "\n");
           } catch {}
         }
       }
