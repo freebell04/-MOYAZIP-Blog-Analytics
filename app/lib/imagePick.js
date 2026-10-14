@@ -149,6 +149,7 @@ function copyImageToClipboard(file) {
 // ---------------------------------------------------------------------------
 let state = { status: "idle" };
 let current = null; // {client, targetId}
+let lastTarget = null; // 가장 최근에 연 이미지 검색 탭 (다시 고를 때 재사용)
 const openedTabs = new Set(); // 이미지 검색으로 열었던 크롬 탭들 (모두 끝나면 닫는다)
 
 /** 이미지 검색으로 열었던 탭을 모두 닫는다 */
@@ -231,7 +232,10 @@ async function startPick({ chapter, query, engine = "naver", openUrl }) {
   (async () => {
     try {
       await session.ensureDebugChrome();
-      const targetId = await session.createTab("about:blank");
+      // 같은 검색 탭이 아직 열려 있으면 새 탭을 또 만들지 않고 그 탭을 다시 쓴다 (버튼을 누를 때마다 탭이 쌓이지 않게)
+      const reuse = lastTarget && (await targetAlive(lastTarget).catch(() => false));
+      const targetId = reuse ? lastTarget : await session.createTab("about:blank");
+      lastTarget = targetId;
       s.targetId = targetId;
       session.notifyChrome("이미지 검색 창 — 마음에 드는 이미지를 클릭하세요");
       const port = new URL(session.CDP_URL).port || "9222";
@@ -239,6 +243,8 @@ async function startPick({ chapter, query, engine = "naver", openUrl }) {
       current.client = client;
       await client.send("Page.enable").catch(() => {});
       await client.send("Page.addScriptToEvaluateOnNewDocument", { source: PICK_SCRIPT }).catch(() => {}); // 페이지가 바뀌어도 다시 심어진다
+      // 새로 고를 때마다 잠금·쿨다운을 풀고, 검색 화면을 다시 불러와서 처음부터 새로 고를 수 있게 한다
+      await client.eval(`window.__nbhCooldown = 0`).catch(() => {});
       await Promise.race([client.send("Page.navigate", { url }).catch(() => {}), sleep(4000)]);
       client.send("Page.bringToFront").catch(() => {});
       s.status = "waiting";
@@ -272,6 +278,7 @@ async function startPick({ chapter, query, engine = "naver", openUrl }) {
           } catch (e) {
             s.status = "waiting";
             s.error = e.message;
+            await client.eval(`window.__nbhCooldown = Date.now() + 1500`).catch(() => {}); // 실패해도 곧바로 다른 이미지를 고를 수 있게 (예전엔 60초 동안 클릭이 무시됐다)
             await client.eval(`window.__nbhToast(${JSON.stringify("⚠ " + e.message)}, false)`).catch(() => {});
           }
         }

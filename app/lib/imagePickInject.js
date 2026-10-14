@@ -45,22 +45,11 @@
     }
     return null;
   };
-  // 40초 동안 아무것도 안 고르면 앱이 부른다: 화면 위쪽(검색 결과 맨 앞)의 큰 이미지를 하나 골라 기록한다
-  window.__nbhAutoPick = () => {
-    const ok = [...document.images].filter((i) => {
-      const r = i.getBoundingClientRect();
-      const u = i.currentSrc || i.src || "";
-      return r.width >= 120 && r.height >= 120 && r.bottom > 0 && u && !/logo|icon|sprite|blank|loading|profile/i.test(u);
-    });
-    ok.sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top || a.getBoundingClientRect().left - b.getBoundingClientRect().left);
-    const i = ok[0];
-    if (!i) return false;
-    const u = i.currentSrc || i.src;
-    window.__nbhPicks.push({ src: u, original: original(u), page: location.href, w: i.naturalWidth, h: i.naturalHeight });
-    window.__nbhToast("⏳ 이미지를 자동으로 골라 복사하는 중...");
-    return true;
-  };
   const handler = (e) => {
+    // 사용자가 직접 누른 클릭만 받는다: 페이지 스크립트가 만든 가짜 클릭(isTrusted=false)·키보드로 생긴 클릭(detail=0)은 무시
+    if (e.isTrusted === false || e.detail === 0) return;
+    // 탭이 막 열렸거나 다시 앞으로 나온 직후 1.2초 동안의 클릭은 무시 (창을 누르려다 이미지가 눌리는 것 방지)
+    if (Date.now() < (window.__nbhReadyAt || 0)) return;
     if (window.__nbhCooldown && Date.now() < window.__nbhCooldown) return; // 복사 직후 2초 동안의 클릭은 무시 (네이버가 클릭으로 다음 이미지로 넘기는 것 방지). 그 뒤엔 언제든 다시 골라 복사할 수 있다
     try {
       const f = findImage(e);
@@ -106,6 +95,13 @@
     window.__nbhHandler = handler;
     document.addEventListener("click", handler, true);
   };
+  if (!window.__nbhVis) {
+    window.__nbhVis = true;
+    window.__nbhReadyAt = Date.now() + 1200;
+    const arm = () => { window.__nbhReadyAt = Date.now() + 1200; };
+    document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") arm(); });
+    window.addEventListener("focus", arm);
+  }
   ensure();
   if (!window.__nbhTimer) window.__nbhTimer = setInterval(ensure, 800);
 })()
