@@ -569,7 +569,43 @@ async function openVisibleContext() {
   return { browser, context };
 }
 
+/**
+ * 남아 있는 빈 탭(about:blank) 청소: 15초 넘게 빈 채로 있는 탭은 닫는다.
+ * (탭을 만들고 이동하는 사이에 실패하거나, 다른 기능이 만들다 만 빈 탭이 크롬에 쌓이는 걸 막는다)
+ * 마지막 한 탭이면 닫지 않고(창이 사라지므로) 네이버 첫 화면으로 바꾼다.
+ */
+const blankSeen = new Map();
+async function sweepBlankTabs() {
+  let list;
+  try { list = (await (await fetch(`${CDP_URL}/json/list`, { signal: AbortSignal.timeout(2500) })).json()).filter((t) => t.type === "page"); } catch { return; }
+  const now = Date.now();
+  const blanks = list.filter((t) => t.url === "about:blank");
+  for (const id of [...blankSeen.keys()]) if (!blanks.some((t) => t.id === id)) blankSeen.delete(id);
+  let remaining = list.length;
+  for (const t of blanks) {
+    if (!blankSeen.has(t.id)) { blankSeen.set(t.id, now); continue; }
+    if (now - blankSeen.get(t.id) < 15000) continue;
+    if (remaining > 1) {
+      await fetch(`${CDP_URL}/json/close/${t.id}`, { signal: AbortSignal.timeout(2500) }).catch(() => {});
+      blankSeen.delete(t.id);
+      remaining--;
+    } else {
+      let c;
+      try { c = await require("./like").connectPage(t.webSocketDebuggerUrl); await c.send("Page.navigate", { url: "https://www.naver.com/" }); } catch {} finally { try { c && c.close(); } catch {} }
+      blankSeen.delete(t.id);
+    }
+  }
+}
+let janitor = null;
+function startBlankJanitor() {
+  if (janitor || process.env.NBH_NO_JANITOR) return;
+  janitor = setInterval(() => { sweepBlankTabs().catch(() => {}); }, 8000);
+  if (janitor.unref) janitor.unref();
+}
+
 module.exports = {
+  startBlankJanitor,
+  sweepBlankTabs,
   hasSession,
   liveLoggedIn,
   loggedInUser,

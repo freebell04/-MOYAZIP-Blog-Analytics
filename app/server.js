@@ -804,5 +804,6 @@ app.get("/api/stats/excel", async (req, res) => {
 const PORT = process.env.PORT || 3300;
 usage.start();
 app.listen(PORT, () => {
+  try { session.startBlankJanitor(); } catch {} // 남은 빈 탭(about:blank) 청소
   console.log(`네이버 블로그 자동화 대시보드: http://localhost:${PORT}`);
 });
