@@ -158,25 +158,21 @@ const getChromeNotice = () => chromeNotice;
  * (창을 닫아도 크롬이 백그라운드에 남아 있으면, 새로 띄운 크롬이 그 크롬에 합쳐지면서 포트가 열리지 않아
  *  "됐다 안 됐다" 하고 로그인 창도 안 뜨는 증상이 생긴다.) 사용자의 평소 크롬(다른 프로필)은 건드리지 않는다.
  */
-function killStaleProfileChrome() {
+const runPs = (script, timeout) => new Promise((resolve) => {
   try {
-    const marker = CHROME_PROFILE_DIR.replace(/'/g, "''");
-    require("child_process").execFileSync(
-      "powershell.exe",
-      ["-NoProfile", "-Command", `Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" | Where-Object { $_.CommandLine -and $_.CommandLine.Contains('${marker}') } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }`],
-      { timeout: 15000, windowsHide: true, stdio: "ignore" }
-    );
-  } catch {}
+    require("child_process").execFile("powershell.exe", ["-NoProfile", "-Command", script], { timeout, windowsHide: true, encoding: "utf8" }, (err, stdout) => resolve(err ? "" : String(stdout || "")));
+  } catch { resolve(""); }
+});
+
+async function killStaleProfileChrome() {
+  const marker = CHROME_PROFILE_DIR.replace(/'/g, "''");
+  await runPs(`Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" | Where-Object { $_.CommandLine -and $_.CommandLine.Contains('${marker}') } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }`, 15000);
 }
 
 /** 디버그 포트로 떠 있는 크롬의 --user-data-dir 값 (없으면 "") */
-function runningProfileDir() {
+async function runningProfileDir() {
   try {
-    const out = require("child_process").execFileSync(
-      "powershell.exe",
-      ["-NoProfile", "-Command", `[Console]::OutputEncoding=[Text.Encoding]::UTF8; Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" | Where-Object { $_.CommandLine -match '--remote-debugging-port=${CDP_PORT}' -and $_.CommandLine -notmatch '--type=' } | Select-Object -First 1 -ExpandProperty CommandLine`],
-      { timeout: 10000, windowsHide: true }
-    ).toString();
+    const out = await runPs(`[Console]::OutputEncoding=[Text.Encoding]::UTF8; Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" | Where-Object { $_.CommandLine -match '--remote-debugging-port=${CDP_PORT}' -and $_.CommandLine -notmatch '--type=' } | Select-Object -First 1 -ExpandProperty CommandLine`, 10000);
     // 경로에 공백이 있으면 크롬 명령줄이 "--user-data-dir=C:\내 폴더\data" 처럼 통째로 따옴표로 묶여 나온다.
     // (\S+로 읽으면 공백 앞에서 잘려, 엉뚱한 폴더로 크롬을 열어 로그인 안 된 창이 하나 더 뜬다)
     const m = out.match(/--user-data-dir=(?:"([^"]+)"|(.+?))(?:"|\s+--|\s*$)/);
@@ -218,7 +214,7 @@ async function ensureWindow() {
   if (!chromePath) return;
   // 9222 포트를 실제로 쥐고 있는 크롬이 쓰는 프로필 폴더로만 연다.
   // 그 폴더를 확인하지 못하면 아무것도 열지 않는다 (다른 폴더로 열면 로그인 안 된 새 크롬 창이 하나 더 뜬다)
-  const dir = runningProfileDir();
+  const dir = await runningProfileDir();
   if (!dir) return;
   ensuredAt = Date.now();
   try { require("./windowLayout").splitSoon([1500, 4500]); } catch {}
@@ -228,7 +224,7 @@ async function ensureWindow() {
     if (await hasOpenPage()) return;
   }
   // 그래도 창이 안 생기면 크롬이 제대로 응답하지 않는 상태 → 이 프로필의 크롬을 정리한다 (다음 호출에서 하나만 새로 띄운다)
-  killStaleProfileChrome();
+  await killStaleProfileChrome();
   await sleep(1500);
 }
 
@@ -279,13 +275,11 @@ let restarting = null;
 function restartChrome() {
   if (restarting) return restarting;
   restarting = (async () => {
-    killStaleProfileChrome();
-    const dir = runningProfileDir();
+    await killStaleProfileChrome();
+    const dir = await runningProfileDir();
     if (dir && dir.toLowerCase() !== CHROME_PROFILE_DIR.toLowerCase()) {
       // 9222 포트를 다른 폴더의 크롬이 쥐고 있으면 그 프로세스도 함께 정리한다 (다른 폴더에 설치한 이 프로그램의 크롬)
-      try {
-        require("child_process").execFileSync("powershell.exe", ["-NoProfile", "-Command", `Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" | Where-Object { $_.CommandLine -and $_.CommandLine.Contains('--remote-debugging-port=${CDP_PORT}') } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }`], { timeout: 15000, windowsHide: true, stdio: "ignore" });
-      } catch {}
+      await runPs(`Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" | Where-Object { $_.CommandLine -and $_.CommandLine.Contains('--remote-debugging-port=${CDP_PORT}') } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }`, 15000);
     }
     for (let i = 0; i < 10 && (await isCdpUp()); i++) await sleep(500);
     await sleep(1200);
@@ -317,7 +311,7 @@ async function ensureDebugChromeOnce(opts = {}) {
 
   for (let attempt = 0; attempt < 2; attempt++) {
     if (attempt === 1) {
-      killStaleProfileChrome(); // 첫 시도에 포트가 안 열렸으면, 백그라운드에 남은 크롬을 정리하고 한 번 더
+      await killStaleProfileChrome(); // 첫 시도에 포트가 안 열렸으면, 백그라운드에 남은 크롬을 정리하고 한 번 더
       await sleep(1200);
     }
     // 평소 쓰는 크롬과 헷갈리지 않게 창 제목을 "블로그 도우미 전용 크롬"으로 붙이고,
