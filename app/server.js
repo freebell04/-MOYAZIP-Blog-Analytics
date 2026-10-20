@@ -166,9 +166,12 @@ app.post("/api/survey", (req, res) => {
   res.json({ ok: true });
 });
 // 키가 없거나 기간이 끝났으면 모든 화면을 키 입력 화면으로 보낸다
-app.use((req, res, next) => {
+app.use(async (req, res, next) => {
   if (req.path === "/license.html" || req.path.startsWith("/api/license") || /\.(css|js|png|ico|svg)$/.test(req.path)) return next();
-  const st = license.status();
+  let st = license.status();
+  if (st.ok) return next();
+  // 기간이 끝났어도, 운영자가 연장해 뒀으면 새 키를 받아서 이어서 쓰게 한다 (키 입력 화면을 보여주기 전에 한 번 확인)
+  if (license.saved()) { const r = await license.refresh().catch(() => ({})); if (r.changed) st = license.status(); }
   if (st.ok) return next();
   if (req.path.startsWith("/api/")) return res.status(402).json({ error: st.reason, license: st });
   res.redirect("/license.html");
@@ -803,6 +806,9 @@ app.get("/api/stats/excel", async (req, res) => {
 
 const PORT = process.env.PORT || 3300;
 usage.start();
+// 연장된 기간을 자동으로 받아온다: 켤 때 한 번, 그 뒤 30분마다 (사용자가 키를 다시 넣지 않아도 되게)
+setTimeout(() => license.refresh({ force: true }).catch(() => {}), 5000);
+setInterval(() => license.refresh({ force: true }).catch(() => {}), 30 * 60000).unref();
 app.listen(PORT, () => {
   try { session.startBlankJanitor(); } catch {} // 남은 빈 탭(about:blank) 청소
   console.log(`네이버 블로그 자동화 대시보드: http://localhost:${PORT}`);

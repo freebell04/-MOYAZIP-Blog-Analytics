@@ -103,6 +103,43 @@ async function startTrial({ name, blog }) {
   return r.ok ? { ...r, existing: !!j.existing } : r;
 }
 
+/**
+ * 운영자가 기간을 연장하면 노션의 사용 키가 새 키로 바뀐다. 사용자가 새 키를 다시 입력하지 않아도,
+ * 프로그램이 서버(/renew)에 지금 키를 보내 더 늦게 끝나는 새 키가 있으면 알아서 바꿔 저장한다.
+ * 서버에 연결이 안 되거나 새 키가 없으면 아무 일도 하지 않는다 (지금 키는 그대로 쓴다).
+ */
+let renewing = null;
+let lastRenewAt = 0;
+function refresh({ force = false } = {}) {
+  if (!TRIAL_URL) return Promise.resolve({ changed: false });
+  if (renewing) return renewing;
+  const key = saved();
+  if (!key) return Promise.resolve({ changed: false });
+  if (!force && Date.now() - lastRenewAt < 60000) return Promise.resolve({ changed: false }); // 1분 안에 또 묻지 않는다
+  lastRenewAt = Date.now();
+  renewing = (async () => {
+    try {
+      const res = await fetch(TRIAL_URL.replace(/\/$/, "") + "/renew", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key }),
+        signal: AbortSignal.timeout(6000),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (j.ok && j.key && j.key !== key) {
+        const r = check(j.key); // 서명과 기간을 이 컴퓨터에서 다시 확인한 뒤에만 바꾼다
+        if (r.ok) {
+          fs.writeFileSync(LICENSE_PATH, JSON.stringify({ key: String(j.key).trim(), activatedAt: new Date().toISOString(), renewedAt: new Date().toISOString() }, null, 2));
+          cached = { at: 0, result: null };
+          return { changed: true, ...r };
+        }
+      }
+    } catch {}
+    return { changed: false };
+  })().finally(() => { renewing = null; });
+  return renewing;
+}
+
 const trialAvailable = () => !!TRIAL_URL;
 
-module.exports = { check, status, activate, today, startTrial, trialAvailable, signedUp, deviceId, TRIAL_URL };
+module.exports = { check, status, activate, refresh, saved, today, startTrial, trialAvailable, signedUp, deviceId, TRIAL_URL };
