@@ -14,6 +14,14 @@ MCowBQYDK2VwAyEALvlPAnQtHYYI2koy0xcoLXIAaFMomunj64Ji/og2sew=
 const DATA = path.join(__dirname, "..", "data");
 const LICENSE_PATH = path.join(DATA, "license.json");
 const SIGNED_PATH = path.join(DATA, "signed-up.json");
+// 사용 키는 프로그램 폴더 밖(내 계정의 AppData)에도 한 부 더 둔다: ZIP을 새로 받거나 폴더를 옮겨도 같은 컴퓨터에서는 키를 다시 넣지 않아도 되게
+const BACKUP_PATH = path.join(process.env.APPDATA || path.join(require("os").homedir(), "AppData", "Roaming"), "NaverBlogHelper", "license.json");
+function writeKeyFiles(obj) {
+  const text = JSON.stringify(obj, null, 2);
+  fs.mkdirSync(DATA, { recursive: true });
+  fs.writeFileSync(LICENSE_PATH, text);
+  try { fs.mkdirSync(path.dirname(BACKUP_PATH), { recursive: true }); fs.writeFileSync(BACKUP_PATH, text); } catch {}
+}
 /** 이 컴퓨터에서 이미 가입(체험 시작)했거나 키를 한 번이라도 넣었는지 */
 const signedUp = () => fs.existsSync(SIGNED_PATH) || !!saved();
 
@@ -43,10 +51,18 @@ function check(key) {
 
 function saved() {
   try {
-    return JSON.parse(fs.readFileSync(LICENSE_PATH, "utf-8")).key || "";
-  } catch {
-    return "";
-  }
+    const k = JSON.parse(fs.readFileSync(LICENSE_PATH, "utf-8")).key;
+    if (k) return k;
+  } catch {}
+  // 이 폴더에 키가 없으면(새로 받은 폴더 등) AppData에 둔 사본을 가져와 쓴다
+  try {
+    const k = JSON.parse(fs.readFileSync(BACKUP_PATH, "utf-8")).key;
+    if (k) {
+      try { fs.mkdirSync(DATA, { recursive: true }); fs.copyFileSync(BACKUP_PATH, LICENSE_PATH); } catch {}
+      return k;
+    }
+  } catch {}
+  return "";
 }
 
 /** 지금 이 컴퓨터에서 프로그램을 쓸 수 있는지 */
@@ -63,8 +79,7 @@ function status() {
 function activate(key) {
   const r = check(key);
   if (!r.ok) return r;
-  fs.mkdirSync(DATA, { recursive: true });
-  fs.writeFileSync(LICENSE_PATH, JSON.stringify({ key: String(key).trim(), activatedAt: new Date().toISOString() }, null, 2));
+  writeKeyFiles({ key: String(key).trim(), activatedAt: new Date().toISOString() });
   fs.writeFileSync(SIGNED_PATH, JSON.stringify({ at: new Date().toISOString(), name: r.name })); // 한 번이라도 가입·키 입력을 했다는 표시 (지워도 다시 가입 안내를 띄우지 않는다)
   cached = { at: 0, result: null }; // 방금 넣은 키가 바로 적용되게
   return r;
@@ -129,7 +144,7 @@ function refresh({ force = false } = {}) {
       if (j.ok && j.key && j.key !== key) {
         const r = check(j.key); // 서명과 기간을 이 컴퓨터에서 다시 확인한 뒤에만 바꾼다
         if (r.ok) {
-          fs.writeFileSync(LICENSE_PATH, JSON.stringify({ key: String(j.key).trim(), activatedAt: new Date().toISOString(), renewedAt: new Date().toISOString() }, null, 2));
+          writeKeyFiles({ key: String(j.key).trim(), activatedAt: new Date().toISOString(), renewedAt: new Date().toISOString() });
           cached = { at: 0, result: null };
           return { changed: true, ...r };
         }
