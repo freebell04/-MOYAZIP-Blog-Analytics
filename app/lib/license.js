@@ -52,7 +52,11 @@ function check(key) {
 function saved() {
   try {
     const k = JSON.parse(fs.readFileSync(LICENSE_PATH, "utf-8")).key;
-    if (k) return k;
+    if (k) {
+      // 예전에 입력한 키도 사본이 없으면 지금 한 부 만들어 둔다 (업데이트한 사람도 폴더를 새로 받을 때 보호되게)
+      try { if (!fs.existsSync(BACKUP_PATH)) { fs.mkdirSync(path.dirname(BACKUP_PATH), { recursive: true }); fs.copyFileSync(LICENSE_PATH, BACKUP_PATH); } } catch {}
+      return k;
+    }
   } catch {}
   // 이 폴더에 키가 없으면(새로 받은 폴더 등) AppData에 둔 사본을 가져와 쓴다
   try {
