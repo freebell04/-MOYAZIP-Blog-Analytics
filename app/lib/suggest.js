@@ -32,6 +32,15 @@ function pick(json, it) {
 function remap(json, batch) {
   const out = {};
   for (const it of batch) { const v = pick(json, it); if (v) out[it.key] = v; }
+  // AI가 키 이름을 아예 바꿔 버린 경우(예: "1", "comment1")는, 남은 목록 수가 딱 맞을 때만 순서대로 맞춘다
+  const missing = batch.filter((it) => !out[it.key]);
+  if (missing.length && json && typeof json === "object") {
+    const used = new Set(Object.values(out));
+    const arrays = Object.values(json)
+      .map((v) => (Array.isArray(v) ? v : v && typeof v === "object" ? Object.values(v).find(Array.isArray) : null))
+      .filter((v) => Array.isArray(v) && !used.has(v));
+    if (arrays.length === missing.length) missing.forEach((it, i) => (out[it.key] = arrays[i]));
+  }
   return out;
 }
 

@@ -26,6 +26,7 @@ const notion = require("./lib/notion");
 const config = require("./lib/config");
 const aiChat = require("./lib/aiChat");
 const blogFormat = require("./lib/blogFormat");
+const hashtags = require("./lib/hashtags");
 // 이웃들이 요즘 쓰는 글로 주제 추천 (이웃 소통 화면의 '주제 추천' 탭)
 const trendsLib = require("./lib/trends");
 // 성과 통계 + 이웃 트렌드 추천을 합친 데이터 (통계 화면·엑셀·노션 리포트에 쓴다)
@@ -72,6 +73,18 @@ app.use(express.json({ limit: "10mb" }));
 // --- 사용 키 (체험단·구매자용). 키는 별도의 체험단 관리자 프로그램이 만든다 ---
 const license = require("./lib/license");
 app.get("/api/license", (req, res) => res.json({ ...license.status(), trial: license.trialAvailable() && !license.signedUp(), signedUp: license.signedUp(), trialUrl: license.TRIAL_URL }));
+// 결제 안내: 무료 체험 키(15일 이하)에만, 3일 남았을 때부터·끝났을 때 보여준다. 구매(평생) 키에는 절대 안 보인다
+const BUY_URL = process.env.NBH_BUY_URL || "https://www.latpeed.com/products/BzlNG";
+const isTrialKey = (st) => !!(st && st.start && st.end) && Math.round((new Date(st.end + "T00:00:00Z") - new Date(st.start + "T00:00:00Z")) / 86400000) + 1 <= 15;
+app.get("/api/license/buy", (req, res) => {
+  const st = license.status();
+  res.json({ show: isTrialKey(st) && (!st.ok || st.daysLeft <= 3), expired: !!st.expired, daysLeft: st.daysLeft, url: BUY_URL, price: "8,000원" });
+});
+// 결제하고 기다리는 화면에서: 운영자가 연장했는지 확인해서 됐으면 새 키로 바꾼다 (1분에 한 번만 서버에 묻는다)
+app.post("/api/license/refresh", async (req, res) => {
+  const r = await license.refresh().catch(() => ({}));
+  res.json({ changed: !!r.changed, ...license.status() });
+});
 // 무료 체험 키에는 신청할 때 적은 블로그 아이디와 이름이 들어 있다 → 처음 설정 화면(블로그 아이디·이름 입력)을 건너뛰고 그대로 설정한다.
 // (관리자가 직접 만든 키처럼 블로그 아이디가 없으면 지금처럼 설정 화면이 나온다)
 function setupFromKey(r) {
@@ -316,7 +329,8 @@ const HANDOFF_GUIDE = [
   "   형식: title, introLines(3줄, 각 5~15자), sectionHeadingLines(섹션별 줄 수 3/4/1/3/1, 각 5~15자),",
   "   sections(5개: 1 개요/스펙, 2 어떤 사람·상황에 유용한지, 3 Before→After, 4 사용법·활용법, 5 총평·앞으로 계획, 각 2~5문장).",
   "3) 초안을 대화창에 먼저 보여주고, 사용자가 OK하면 POST http://localhost:<port>/api/save-draft 에",
-  "   {title, introLines, sectionHeadingLines, sections} JSON을 보내 네이버 에디터를 열고 임시저장한다 (같은 글을 고쳐 다시 저장할 땐 continueDraft:true).",
+  "   {title, introLines, sectionHeadingLines, sections, tags} JSON을 보내 네이버 에디터를 열고 임시저장한다 (같은 글을 고쳐 다시 저장할 땐 continueDraft:true).",
+  "   tags: 글 맨 끝에 #태그로 들어갈 해시태그 배열 (# 없이, 최대 30개). GET /api/hashtags 의 fixed(항상 넣을 태그)를 앞에 넣고, count개에 맞춰 채운다.",
 ].join("\n");
 
 // 체크한 글감의 본문을 모아 handoff.json으로 저장하고 그 내용을 돌려준다
@@ -476,6 +490,16 @@ async function followLoggedInBlog() {
   config.save({ blogId: who.userId, blogName: who.nickname || who.userId });
   return { from: cur, to: who.userId };
 }
+// 해시태그 설정 (AI에게 받을 개수, 항상 넣을 태그)
+app.get("/api/hashtags", (req, res) => res.json({ ...hashtags.get(), max: hashtags.MAX }));
+app.post("/api/hashtags", (req, res) => {
+  try {
+    res.json({ ok: true, ...hashtags.save(req.body || {}) });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 let lastDraft = { sig: "", at: 0 };
 app.post("/api/save-draft", async (req, res) => {
   const { title, body, introLines, sectionHeadingLines, sections, imagePaths, useTemplate, continueDraft } = req.body;
@@ -502,6 +526,7 @@ app.post("/api/save-draft", async (req, res) => {
       imagePaths: imagePaths || [],
       useTemplate: useTemplate !== false,
       continueDraft: continueDraft === true,
+      tags: hashtags.clean(req.body.tags),
     });
     usage.track("draft");
     res.json(switched ? { ...result, switchedBlog: switched } : result);

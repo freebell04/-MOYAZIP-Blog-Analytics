@@ -28,6 +28,14 @@
   <p id="msg" class="status-line"></p>
 </section>
 
+<section class="card" id="buy-box" hidden style="border:2px solid #03c75a">
+  <div class="card-head">
+    <h2>💳 계속 쓰기</h2>
+    <p class="hint"><b id="buy-price">8,000원</b> 한 번 결제하면 계속 쓸 수 있어요. <b>다시 설치하거나 키를 넣을 필요 없어요.</b><br />결제 후 이 창을 켜 두면, 결제 확인 뒤 자동으로 다시 열려요.</p>
+  </div>
+  <a id="buy-link" class="btn btn-primary" href="#" target="_blank" rel="noopener" style="display:inline-block;text-decoration:none">결제하러 가기</a>
+  <p class="hint" id="buy-wait" style="margin-top:8px"></p>
+</section>
 <section class="card" id="trial-box" hidden>
   <div class="card-head">
     <h2>🎁 아직 키가 없다면</h2>
@@ -45,6 +53,20 @@ fetch("/api/license").then((r) => r.json()).then((st) => {
   if (st.ok) location.href = "/";
   else if (st.expired) $("#why").textContent = `사용 기간이 끝났어요 (${st.start} ~ ${st.end}). 계속 쓰시려면 운영자에게 문의해서 받은 새 키를 입력해주세요.`;
 });
+// 무료 체험이 끝난 경우에만 결제 안내 (구매한 키에는 안 나온다). 결제 후 운영자가 연장하면 저절로 메인 화면으로 넘어간다
+fetch("/api/license/buy").then((r) => r.json()).then((b) => {
+  if (!b.show || !b.expired) return;
+  $("#why").textContent = "무료 체험 기간이 끝났어요. 써 보시니 어떠셨어요? 🙌";
+  $("#buy-box").hidden = false;
+  $("#buy-link").href = b.url;
+  $("#buy-price").textContent = b.price;
+  const wait = async () => {
+    const s = await fetch("/api/license/refresh", { method: "POST" }).then((x) => x.json()).catch(() => ({}));
+    if (s.ok) { $("#buy-wait").textContent = "✅ 결제가 확인됐어요! 바로 열게요."; setTimeout(() => (location.href = "/"), 800); return true; }
+  };
+  $("#buy-link").addEventListener("click", () => ($("#buy-wait").textContent = "결제가 확인되면 자동으로 열려요. 이 창을 그대로 켜 두세요 ⏳"));
+  setInterval(wait, 30000);
+}).catch(() => {});
 // 설정을 저장하면 프로그램이 스스로 다시 켜진다 → 다시 응답할 때까지 기다렸다가 메인 화면으로
 function waitRestart() {
   const wait = setInterval(async () => {

@@ -335,6 +335,7 @@ $("#save-draft-btn").addEventListener("click", async () => {
       useTemplate: $("#use-template-checkbox").checked,
       continueDraft: savedDraftOnce,
       tpl: currentPost.tpl,
+      tags: parseTags($("#post-tags").value),
     }),
   }).then((r) => r.json()).catch((e) => ({ error: e.message }));
 
@@ -345,6 +346,7 @@ $("#save-draft-btn").addEventListener("click", async () => {
   $("#save-status").textContent = r.error
     ? "오류: " + r.error
     : "본문 임시저장 완료! 네이버 에디터에서 검토·수정한 뒤 발행해 주세요." +
+      (r.tags && r.tags.ok === false ? " (해시태그가 글 맨 끝에 다 들어갔는지 한 번 확인해 주세요)" : "") +
       (r.switchedBlog ? ` (네이버에 로그인된 계정이 '${r.switchedBlog.to}'라서, 프로그램의 블로그 설정도 '${r.switchedBlog.from}' → '${r.switchedBlog.to}'로 바꿨어요)` : "");
   if (r.switchedBlog) checkAccount();
 });
@@ -882,8 +884,11 @@ const unescapeText = (t) =>
     .replace(/\\"/g, '"')
     .replace(/\\\//g, "/");
 /** 글(JSON) 안의 모든 글자에서 글자 그대로 들어온 \\n 같은 표시를 정리한다 */
+// AI가 글 끝에 붙이는 "※ 이 글은 ~ 안내하기 위한 초안이에요 / 사실처럼 만들지 않았어요 / 발행 전 ~하면" 같은 메모 줄은 빼고 넣는다
+const META_LINE = /(이\s*글은.{0,40}초안|초안(이에요|입니다)|사실처럼\s*만들|발행\s*전.{0,30}(추가|확인|수정|테스트)하면|AI가\s*(작성|생성)한\s*(글|초안))/;
+const dropMetaLines = (s) => s.split("\n").filter((l) => !META_LINE.test(l)).join("\n").replace(/\n+$/, "");
 function cleanPostText(v) {
-  if (typeof v === "string") return unescapeText(v);
+  if (typeof v === "string") return dropMetaLines(unescapeText(v));
   if (Array.isArray(v)) return v.map(cleanPostText);
   if (v && typeof v === "object") return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, cleanPostText(x)]));
   return v;
@@ -974,6 +979,38 @@ function dedupePost(post) {
   return post;
 }
 
+// --- 해시태그: 설정(개수·항상 넣을 태그)과 미리보기 칸. 임시저장할 때 글 맨 끝에 한 줄로 들어간다 ---
+let hashtagSettings = { count: 15, fixed: [] };
+const parseTags = (v) => {
+  const seen = new Set();
+  return String(v || "").split(/[\s,#]+/).map((t) => t.replace(/[^\p{L}\p{N}_]/gu, "")).filter((t) => t && !seen.has(t.toLowerCase()) && seen.add(t.toLowerCase())).slice(0, 30);
+};
+const showTagCount = () => { const n = parseTags($("#post-tags").value).length; $("#post-tags-count").textContent = n ? `${n}/30개 · 글 맨 끝에 들어가요` : "안 넣어요"; };
+function setPostTags(aiTags) {
+  const n = hashtagSettings.count;
+  const list = n ? parseTags([...hashtagSettings.fixed, ...(Array.isArray(aiTags) ? aiTags : [])].map((t) => String(t || "").replace(/\s+/g, "")).join(" ")).slice(0, n) : []; // AI 태그 "강남 브런치" → #강남브런치 (둘로 쪼개지지 않게)
+  $("#post-tags").value = list.map((t) => "#" + t).join(" ");
+  showTagCount();
+  if (n && !(Array.isArray(aiTags) && aiTags.length)) $("#post-tags-count").textContent += ` · AI가 해시태그를 안 줬어요. AI에게 "해시태그 ${n}개도 추천해줘"라고 하거나 여기에 직접 적어 주세요`;
+}
+$("#post-tags").addEventListener("input", showTagCount);
+fetch("/api/hashtags").then((r) => r.json()).then((h) => {
+  hashtagSettings = { count: h.count, fixed: h.fixed || [] };
+  $("#hashtag-count").value = String(h.count);
+  if (!$("#hashtag-count").value) $("#hashtag-count").value = "15";
+  $("#hashtag-fixed").value = hashtagSettings.fixed.join(" ");
+}).catch(() => {});
+const saveHashtagSettings = async () => {
+  const r = await fetch("/api/hashtags", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ count: $("#hashtag-count").value, fixed: parseTags($("#hashtag-fixed").value) }) }).then((x) => x.json()).catch((e) => ({ error: e.message }));
+  if (r.error || typeof r.count !== "number") return ($("#hashtag-status").textContent = "⚠️ 설정이 저장되지 않았어요. 프로그램을 [종료하기]로 끈 뒤 다시 켜고 한 번 더 골라 주세요.");
+  hashtagSettings = { count: r.count, fixed: r.fixed };
+  $("#hashtag-fixed").value = r.fixed.join(" ");
+  if (currentPost) setPostTags(currentPost.tags); // 이미 불러온 글에도 바로 개수를 맞춘다
+  $("#hashtag-status").textContent = r.count ? `✅ 해시태그 ${r.count}개로 저장했어요${r.fixed.length ? ` (항상 넣을 태그 ${r.fixed.length}개 포함)` : ""} — AI에게도 ${r.count}개를 요청하고, 글 맨 끝에 ${r.count}개까지 넣어요` : "✅ 저장했어요 — 해시태그를 안 넣어요";
+};
+$("#hashtag-count").addEventListener("change", saveHashtagSettings);
+$("#hashtag-fixed").addEventListener("change", saveHashtagSettings);
+
 function loadPost(post, opts = {}) {
   post = dedupePost(cleanPostText(post)); // AI가 \n 을 글자 그대로 준 경우를 정리
   // 내 블로그 글 형식 칸(내 템플릿)에서 시작했는데 예전 구조의 글이 오면 템플릿 구조로 바꿔서 쓴다
@@ -998,6 +1035,7 @@ function loadPost(post, opts = {}) {
   currentPost = post;
   selectedImagePaths = {};
   $("#post-title").value = post.title;
+  setPostTags(post.tags);
   renderPostPreview(post);
   renderSectionImages(post);
   $("#step-preview").hidden = false;

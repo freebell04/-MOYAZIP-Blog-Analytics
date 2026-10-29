@@ -98,7 +98,9 @@ async function targetAlive(targetId) {
 // 이웃 글은 탭 하나에서 돌려 본다: 누를 때마다 새 탭을 열면 탭이 수십 개 쌓여 컴퓨터가 버벅인다.
 // (이미 열어 둔 "이웃 글 탭"이 있으면 그 탭에서 주소만 바꾼다. 글쓰기 탭은 절대 쓰지 않는다)
 const visitTab = { id: null, tag: "" };
+let lastUserOpenAt = 0; // 사용자가 마지막으로 이웃 블로그·댓글 창을 연 시각 (추천 댓글을 만드는 AI 탭이 그 위로 끼어들지 않게)
 async function openInVisitTab(url, tag = "") {
+  lastUserOpenAt = Date.now();
   const port = new URL(session.CDP_URL).port || "9222";
   if (visitTab.id) {
     try {
@@ -282,4 +284,4 @@ async function openBuddyForm(blogId, message) {
   }
 }
 
-module.exports = { openBuddyForm, openAndWatch, getWatches, getLiked, connectPage, closeFor, openUrl, closeTag };
+module.exports = { openBuddyForm, openAndWatch, getWatches, getLiked, connectPage, closeFor, openUrl, closeTag, lastUserOpenAt: () => lastUserOpenAt };

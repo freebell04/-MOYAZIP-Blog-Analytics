@@ -286,12 +286,15 @@ function composePlainBody(post) {
  * insertText는 이모지가 섞인 문자열을 통째로 넣으면 이모지만 남기고 나머지를 날려버린다.
  * 그래서 insertText를 쓰되 이모지와 일반 글자를 조각으로 나눠서 넣는다.
  */
+// 숫자 키캡 이모지(1️⃣ 2️⃣ #️⃣ = 숫자+FE0F+20E3)와 국기(지역 표시 문자 2개)는 Extended_Pictographic이 아니라서 따로 잡는다.
+// (안 잡으면 "1️⃣ 산책과 놀이"가 통째로 들어가 에디터가 1️⃣만 남기고 소제목 글자를 날려버렸다)
+const EMOJI_PART = /([0-9#*]\uFE0F?\u20E3|\p{Regional_Indicator}{2}|\p{Extended_Pictographic}\uFE0F?)/u;
 async function typeText(page, text) {
-  const parts = text.split(/(\p{Extended_Pictographic}\uFE0F?)/u).filter(Boolean);
+  const parts = text.split(new RegExp(EMOJI_PART.source, "gu")).filter(Boolean);
   for (const part of parts) {
     await page.keyboard.insertText(part);
     // 에디터가 이모지를 따로 처리하는 동안 바로 다음 입력을 넣으면 앞뒤 입력이 씹혀서 사라진다.
-    const isEmoji = /\p{Extended_Pictographic}/u.test(part);
+    const isEmoji = EMOJI_PART.test(part);
     await page.waitForTimeout(isEmoji ? 150 : 20);
   }
 }
@@ -380,7 +383,12 @@ function composeStyledBlocks(post) {
     const src = String(body || "").split("\n");
     for (let li = 0; li < src.length; li++) {
       const line = src[li].trim();
-      if (!line) continue;
+      if (!line) {
+        // AI가 문단 사이에 둔 빈 줄은 에디터에도 빈 줄 하나로 남긴다 (예전엔 버려서 모든 줄이 한 덩어리로 붙어 읽기 어려웠다)
+        const prev = blocks[blocks.length - 1];
+        if (prev && prev.type === "para" && prev.text) blocks.push({ type: "para", text: "" });
+        continue;
+      }
       if (line.startsWith("|")) {
         // 마크다운 표(| a | b | 줄들, 둘째 줄 |---|---|) → 에디터에 진짜 표로 넣는다
         const rows = [];
@@ -393,8 +401,11 @@ function composeStyledBlocks(post) {
         if (rows.length) blocks.push({ type: "table", rows });
         continue;
       }
+      // 번호 이모지로 시작하는 짧은 소제목 줄(예: 1️⃣ 산책과 놀이)은 굵게 (본문 줄과 구분이 안 돼 읽기 어려웠다)
+      if (/^[0-9]\uFE0F?\u20E3/u.test(line) && !line.includes("**") && line.length <= 40) { blocks.push({ type: "para", text: `**${line}**` }); continue; }
       blocks.push({ type: "para", text: /^[-*•]\s+/.test(line) ? "• " + line.replace(/^[-*•]\s+/, "") : line });
     }
+    while (blocks.length && blocks[blocks.length - 1].type === "para" && !blocks[blocks.length - 1].text) blocks.pop();
   });
   return blocks;
 }
@@ -722,6 +733,48 @@ async function insertTableAtPlaceholder(frame, page, tableIndex, rows, docIndex 
 /**
  * @param {{title: string, bodyHtml: string, imagePaths: string[]}} post
  */
+/**
+ * 글 맨 끝에 "#태그 #태그 …" 한 줄을 넣는다 (네이버는 본문 속 #태그를 글 태그로 같이 등록한다, 최대 30개).
+ * 같은 글을 이어서 다시 저장할 때(replaceOld)는 이미 있는 해시태그 줄을 지우고 새로 쓴다 (템플릿에 원래 있던 #태그 줄은 새 글에선 그대로 둔다).
+ * 표·인용구 안이 아닌 마지막 일반 글 문단 뒤에 넣는다.
+ */
+async function appendHashtags(page, tags, { replaceOld = false } = {}) {
+  const list = require("./hashtags").clean(tags);
+  if (!list.length) return { ok: true, count: 0 };
+  const f = page.frames().find((x) => x.url().includes("PostWriteForm"));
+  if (!f) return { ok: false, reason: "글쓰기 화면을 못 찾음" };
+  // 이미 있는 해시태그 줄(#태그만 있는 문단)을 찾고, 없으면 마지막 일반 글 문단을 고른다
+  const h = await f.evaluateHandle((replaceOld) => {
+    const text = (p) => { const k = p.cloneNode(true); k.querySelectorAll(".se-placeholder, [class*='placeholder']").forEach((x) => x.remove()); return (k.textContent || "").replace(/​/g, "").trim(); };
+    const ps = [...document.querySelectorAll(".se-component.se-text .se-text-paragraph")].filter((p) => !p.closest(".se-documentTitle, .se-table, .se-quotation"));
+    const old = replaceOld ? [...ps].reverse().find((p) => /^(#[\p{L}\p{N}_]+\s*)+$/u.test(text(p))) : null;
+    const el = old || ps[ps.length - 1] || null;
+    return { el, oldText: old ? text(old) : "", empty: el ? !text(el) : false };
+  }, replaceOld);
+  const el = await h.getProperty("el").then((x) => x.asElement());
+  const info = await h.evaluate((o) => ({ oldText: o.oldText, empty: o.empty }));
+  if (!el) return { ok: false, reason: "본문 문단을 못 찾음" };
+  await el.scrollIntoViewIfNeeded().catch(() => {});
+  await el.click({ timeout: 8000 }).catch(() => el.click({ force: true }));
+  await page.waitForTimeout(200);
+  await page.keyboard.press("End");
+  if (info.oldText) {
+    // 줄바꿈돼 여러 줄로 보여도 Backspace는 글자 단위로 지우므로 안전하다 (replaceWrappedText와 같은 방식)
+    for (let i = 0; i < Array.from(info.oldText).length; i++) await page.keyboard.press("Backspace");
+  } else {
+    // 본문과 한 줄 띄운다 (마지막 줄이 이미 빈 줄이면 한 번만)
+    await page.keyboard.press("Enter");
+    if (!info.empty) await page.keyboard.press("Enter");
+  }
+  await typeText(page, list.map((t) => "#" + t).join(" "));
+  await page.waitForTimeout(400);
+  await page.keyboard.press("Escape").catch(() => {});
+  // 실제로 들어갔는지 확인
+  const got = await f.evaluate(() => [...document.querySelectorAll(".se-component.se-text .se-text-paragraph")].map((p) => p.textContent || "").join(" ")).catch(() => "");
+  const found = list.filter((t) => got.includes("#" + t)).length;
+  return found >= Math.ceil(list.length * 0.8) ? { ok: true, count: list.length } : { ok: false, count: list.length, found, reason: `해시태그 ${list.length}개 중 ${found}개만 들어감` };
+}
+
 async function saveDraftToNaver(post) {
   if (!blogIdNow()) throw new Error("환경변수 NAVER_BLOG_ID가 설정되어 있지 않습니다.");
 
@@ -926,6 +979,10 @@ async function saveDraftToNaver(post) {
       }
     }
 
+    // 글 맨 끝에 해시태그 한 줄 (실패해도 저장은 그대로 하고, 화면에 직접 확인하라고 알려준다)
+    const tagResult = await appendHashtags(page, post.tags, { replaceOld: post.continueDraft === true }).catch((e) => ({ ok: false, reason: e.message }));
+    if (!tagResult.ok) console.warn(`[글쓰기] 해시태그 입력 확인 실패: ${tagResult.reason}`);
+
     // 처음 에디터를 쓰면 뜨는 '도움말' 툴팁이 저장 버튼을 가리는 경우가 있어 먼저 닫아본다
     await page.keyboard.press("Escape").catch(() => {});
     const helpCloseBtn = frame.locator("button[class*='close'], .se-help-panel button").first();
@@ -938,7 +995,7 @@ async function saveDraftToNaver(post) {
     await saveBtn.click({ timeout: 15000, force: true });
     await page.waitForTimeout(2000);
 
-    return { success: true };
+    return { success: true, tags: tagResult };
   } finally {
     await browser.close();
   }
@@ -1122,4 +1179,4 @@ const guarded = (fn) => async (...a) => {
 };
 const isBusy = () => busyDepth > 0;
 
-module.exports = { insertTableAtPlaceholder, saveDraftToNaver: guarded(saveDraftToNaver), finalizeTocAndSummary: guarded(finalizeTocAndSummary), openTemplateEditor: guarded(openTemplateEditor), isBusy, _test: { composeStyledBlocks, writeStyledBody, verifyStyledBody, replaceShortText, replaceWrappedText } };
+module.exports = { insertTableAtPlaceholder, saveDraftToNaver: guarded(saveDraftToNaver), finalizeTocAndSummary: guarded(finalizeTocAndSummary), openTemplateEditor: guarded(openTemplateEditor), isBusy, _test: { appendHashtags, composeStyledBlocks, writeStyledBody, verifyStyledBody, replaceShortText, replaceWrappedText } };

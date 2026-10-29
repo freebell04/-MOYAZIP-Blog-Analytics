@@ -696,18 +696,23 @@ async function askWebInner(ai, prompt, accept, timeoutMs, background) {
     if (!sentOk && prevTab) try { await fetch(`${session.CDP_URL}/json/activate/${prevTab}`, { signal: AbortSignal.timeout(3000) }); } catch {}
     if (!sentOk) throw new Error(`${site.name}에 요청을 보내지 못했어요.`);
     // 요청 번호 뒤에 나온 글자에서, 중괄호가 맞게 닫힌 마지막 JSON을 찾는다. 답이 다 끝나고(중지 버튼 없음) 두 번 연속 같으면 확정
+    // 요청 번호를 못 찾으면(긴 요청이 접혀 보이는 경우 등) 마지막 AI 답 칸의 글자를 대신 읽는다.
+    // "쓰는 중" 표시는 답 생성 중지 버튼만 본다 (aria-label에 "중지/Stop"이 들어간 다른 버튼 — 음성 입력 중지 등 — 때문에 끝난 답을 계속 기다리던 문제)
     const READ = `(() => {
       const t = document.body.innerText || "";
       const at = t.lastIndexOf(${JSON.stringify(marker)});
-      const busy = !!document.querySelector('button[data-testid="stop-button"], button[aria-label*="중지"], button[aria-label*="Stop"]');
-      return JSON.stringify({ text: at >= 0 ? t.slice(at + ${marker.length}) : "", busy });
+      const answers = document.querySelectorAll('[data-message-author-role="assistant"], model-response, .font-claude-message, [data-is-streaming]');
+      const lastAnswer = answers.length ? answers[answers.length - 1].innerText || "" : "";
+      const busy = !!document.querySelector('button[data-testid="stop-button"], button[aria-label="응답 중지"], button[aria-label="스트리밍 중지"], button[aria-label="Stop generating"], button[aria-label="Stop streaming"], button[aria-label*="대답 생성 중지"], button[aria-label*="Stop response"]');
+      return JSON.stringify({ text: at >= 0 ? t.slice(at + ${marker.length}) : lastAnswer, busy });
     })()`;
     const deadline = Date.now() + timeoutMs;
     const sentAt = Date.now();
-    // Gemini는 탭이 화면에 보일 때만 답을 그려서, 답이 다 올 때까지는 이 탭을 앞에 둔다 (끝나면 원래 보던 탭으로)
-    let last = "", shown = true;
+    // Gemini는 탭이 화면에 보일 때만 답을 그려서, 답이 안 그려지면 한 번만 이 탭을 앞으로 가져온다.
+    // 단, 그사이 사용자가 이웃 블로그·댓글 창을 열었으면 절대 끼어들지 않는다 (댓글 쓰러 갔는데 AI 창이 튀어나오던 문제)
+    let last = "", same = 0, refocused = false, shown = true;
     const backToPrev = async () => {
-      if (shown && prevTab) try { await fetch(`${session.CDP_URL}/json/activate/${prevTab}`, { signal: AbortSignal.timeout(3000) }); } catch {}
+      if (shown && prevTab && !(require("./like").lastUserOpenAt() > sentAt)) try { await fetch(`${session.CDP_URL}/json/activate/${prevTab}`, { signal: AbortSignal.timeout(3000) }); } catch {}
     };
     while (Date.now() < deadline) {
       await sleep(2500);
@@ -715,10 +720,13 @@ async function askWebInner(ai, prompt, accept, timeoutMs, background) {
       try { r = JSON.parse(await client.eval(READ)); } catch { continue; }
       const j = lastJson(r.text);
       const sig = j ? JSON.stringify(j) : "";
-      if (j && !r.busy && sig === last && accept(j)) { await backToPrev(); return j; }
+      same = sig && sig === last ? same + 1 : 0;
       last = sig;
-      // 그사이 다른 탭으로 바뀌어 답이 안 그려지고 있으면 다시 앞으로
-      if (!j && Date.now() - sentAt > 8000 && (await client.eval("document.visibilityState").catch(() => "")) !== "visible") {
+      // 같은 JSON이 두 번 연속이고 답이 끝났으면 확정. "쓰는 중" 표시가 잘못 남아 있어도 같은 답이 10초 넘게 그대로면 끝난 걸로 본다.
+      // 키 이름이 조금 달라 accept가 못 알아봐도, 그렇게 굳은 답이면 받아서 넘긴다 (끝까지 기다리다 시간 초과로 버리지 않게)
+      if (j && ((!r.busy && same >= 1 && accept(j)) || same >= 4)) { await backToPrev(); return j; }
+      if (!j && ai === "gemini" && !refocused && Date.now() - sentAt > 8000 && !(require("./like").lastUserOpenAt() > sentAt) && (await client.eval("document.visibilityState").catch(() => "")) !== "visible") {
+        refocused = true;
         try { await fetch(`${session.CDP_URL}/json/activate/${id}`, { signal: AbortSignal.timeout(3000) }); } catch {}
       }
     }

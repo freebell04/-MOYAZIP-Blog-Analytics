@@ -11,6 +11,7 @@
 <link rel="stylesheet" href="style.css" />
 <script src="file-open-guard.js"></script>
 <script src="survey-popup.js" defer></script>
+<script src="buy-banner.js" defer></script>
 <script src="chrome-notice.js" defer></script>
 </head>
 <body>
@@ -118,6 +119,17 @@
       </details>
     </div>
 
+    <div id="hashtag-box" style="border:1px solid var(--line, #e5e7eb); border-radius:12px; padding:12px 14px; margin-bottom:14px;">
+      <p class="hint" style="margin:0 0 8px"><b>#️⃣ 해시태그</b> — 임시저장할 때 글 맨 끝에 <b>#태그 #태그</b> 한 줄로 넣어요 (네이버는 최대 30개). AI가 글 내용에 맞춰 만들어 줘요.</p>
+      <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; font-size:13px;">
+        <label>개수 <select id="hashtag-count" style="padding:4px 8px;border:1px solid var(--line,#e5e7eb);border-radius:8px;font:inherit;font-size:13px">
+          <option value="0">안 넣기</option><option value="5">5개</option><option value="10">10개</option><option value="15">15개</option><option value="20">20개</option><option value="25">25개</option><option value="30">30개</option>
+        </select></label>
+        <label style="flex:1; min-width:220px; display:flex; gap:6px; align-items:center;">항상 넣을 태그 <input id="hashtag-fixed" placeholder="예: 모야ZIP 일상기록 (띄어쓰기로 구분)" style="flex:1" /></label>
+      </div>
+      <div id="hashtag-status" class="status-line"></div>
+    </div>
+
     <hr class="divider" />
     <p class="hint">AI 글 생성 없이, 템플릿만 적용된 빈 에디터를 바로 열어서 직접 타이핑하고 싶다면:</p>
     <button id="open-editor-btn" class="btn btn-outline">바로 블로그 에디터 열기 (템플릿 적용)</button>
@@ -131,6 +143,9 @@
     </div>
     <label class="field-label">제목</label>
     <input id="post-title" />
+
+    <label class="field-label">해시태그 <small id="post-tags-count" class="muted"></small></label>
+    <textarea id="post-tags" rows="2" placeholder="#맛집 #강남맛집 (띄어쓰기로 구분, 최대 30개 · 비우면 안 넣어요)" style="width:100%; font-size:13px;"></textarea>
 
     <label class="field-label">본문 미리보기</label>
     <div id="post-preview" class="post-preview"></div>
